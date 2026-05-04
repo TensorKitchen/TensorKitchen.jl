@@ -1,0 +1,7 @@
+include("manifolds/segre.jl")
+include("manifolds/tucker.jl")
+include("manifolds/join.jl")
+include("manifolds/squaring_metric.jl")
+include("manifolds/softplus_metric.jl")
+include("manifolds/secant.jl")
+include("manifolds/gradients.jl")

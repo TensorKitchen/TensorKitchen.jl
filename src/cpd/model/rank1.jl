@@ -1,0 +1,309 @@
+# cpd/model/rank1.jl — Rank-1 CPD model
+export embed_point
+
+"""
+    Rank1CPDModel{T, N}
+
+Rank-1 CPD: A ≈ λ · u₁ ⊗ u₂ ⊗ ... ⊗ u_d. Fields: A, dims, M, scale_by_lambda, lambda_eps, nonnegative.
+"""
+struct Rank1CPDModel{T<:AbstractFloat,N,A<:AbstractArray{T,N},M<:AbstractManifold} <:
+       AbstractDecompositionModel{T}
+    # Keep the target/manifold concrete so model fields stay fully inferable.
+    A::A
+    dims::NTuple{N,Int}
+    M::M
+    scale_by_lambda::Bool
+    lambda_eps::T
+    nonnegative::Bool
+end
+
+@inline _rank1_uses_softplus_metric(M) = false
+@inline _rank1_uses_softplus_metric(M::SoftplusEuclidean) = true
+@inline _rank1_uses_softplus_metric(M::ProductManifold) =
+    any(mi -> mi isa SoftplusEuclidean, M.manifolds)
+
+function Rank1CPDModel(
+    A::AbstractArray{T,N};
+    scale_by_lambda::Bool = true,
+    lambda_eps::Real = 1e-10,
+    nonnegative::Bool = false,
+    use_pullback_metric::Bool = false,
+    use_softplus_metric::Bool = false,
+    pullback_eps::Real = 1e-8,
+) where {T<:AbstractFloat,N}
+    dims = size(A)
+    M = if nonnegative
+        # Structured nonnegative layout: [[λ̃], ũ₁, …, ũ_d] on a product manifold
+        factors = Vector{AbstractManifold}(undef, N + 1)
+        factors[1] =
+            use_softplus_metric ? SoftplusEuclidean(1; ε = pullback_eps) :
+            (use_pullback_metric ? SqEuclidean(1; ε = pullback_eps) : Euclidean(1))
+        @inbounds for m = 1:N
+            factors[m+1] =
+                use_softplus_metric ? SoftplusEuclidean(dims[m]; ε = pullback_eps) :
+                (
+                    use_pullback_metric ? SqEuclidean(dims[m]; ε = pullback_eps) :
+                    Euclidean(dims[m])
+                )
+        end
+        ProductManifold(factors...)
+    else
+        Manifolds.Segre(dims...)
+    end
+    scale_by_lambda_eff = nonnegative ? false : scale_by_lambda
+    lambda_eps_T = T(lambda_eps)
+    return Rank1CPDModel(A, dims, M, scale_by_lambda_eff, lambda_eps_T, nonnegative)
+end
+
+tensor(model::Rank1CPDModel) = model.A
+manifold(model::Rank1CPDModel) = model.M
+
+function embed_point(model::Rank1CPDModel{T,N}, p) where {T,N}
+    if model.nonnegative
+        if _rank1_uses_softplus_metric(model.M)
+            λ̃, Ũ = unpack_point_rank1(p, model.dims)
+            λ = _softplus_value(λ̃)
+            U = [_softplus_value.(Ũ[m]) for m = 1:length(Ũ)]
+            return reconstruct_cp_rank1(λ, U)
+        end
+        return embed_point_rank1_nn(p, model.dims)
+    end
+    M = manifold(model)
+    M isa Manifolds.Segre || return embed_point_rank1(p, model.dims)
+    return reshape(
+        ManifoldsBase.embed!(M, Vector{eltype(p[1])}(undef, prod(model.dims)), p),
+        model.dims,
+    )
+end
+
+function cost(model::Rank1CPDModel{T,N}, p) where {T,N}
+    return model_cost_function(model)(model.M, p)
+end
+
+function egrad(model::Rank1CPDModel{T,N}, p) where {T,N}
+    return model_egrad_function(model)(model.M, p)
+end
+
+function model_cost_function(model::Rank1CPDModel{T,N}) where {T,N}
+    return model.nonnegative ? cost_segre_nn(model.A, model.dims) :
+           cost_segre(model.A, model.dims)
+end
+
+function model_egrad_function(model::Rank1CPDModel{T,N}) where {T,N}
+    base =
+        model.nonnegative ? egrad_segre_nn(model.A, model.dims) :
+        egrad_segre(model.A, model.dims)
+    model.nonnegative && return base
+
+    if model.scale_by_lambda
+        return function (M, p)
+            grad = base(M, p)
+            λ_abs = max(abs(unpack_point_rank1(p, model.dims)[1]), model.lambda_eps)
+            grad_λ, grad_U = unpack_point_rank1(grad, model.dims)
+            return pack_tangent_rank1_segre(grad_λ, [g / λ_abs for g in grad_U])
+        end
+    end
+
+    return function (M, p)
+        grad = base(M, p)
+        return M isa Manifolds.Segre ?
+               pack_tangent_rank1_segre(unpack_point_rank1(grad, model.dims)...) : grad
+    end
+end
+
+function model_rgrad_function(model::Rank1CPDModel{T,N}; model_egrad = nothing) where {T,N}
+    if model.nonnegative
+        egrad_fn =
+            isnothing(model_egrad) ? egrad_segre_nn(model.A, model.dims) : model_egrad
+        return (M, p) -> egrad_to_rgrad(M, p, egrad_fn(M, p))
+    end
+    return (M, p) -> rgrad(model, p)
+end
+
+supports_rgrad(model::Rank1CPDModel) = true
+cp_als_data(model::Rank1CPDModel) = throw(
+    ArgumentError("ALSSolver/RALSSolver require RankRCPDModel (r>=2), got Rank1CPDModel."),
+)
+
+function rgrad(model::Rank1CPDModel{T,N}, p) where {T,N}
+    if model.nonnegative
+        eg = egrad_segre_nn(model.A, model.dims)(model.M, p)
+        return egrad_to_rgrad(manifold(model), p, eg)
+    end
+
+    parts = point_parts(p)
+    λ = parts[1][1]
+    inner = rank1_inner_parts(model.A, parts)
+    grad_λ = λ - inner
+    grad_U = Vector{Vector{T}}(undef, length(model.dims))
+    for m = 1:length(model.dims)
+        # Reuse the in-place contraction helper so only the final tangent vectors are allocated.
+        g = Vector{T}(undef, model.dims[m])
+        rank1_mode_contract_parts!(g, model.A, parts, m)
+        rmul!(g, -λ)
+        grad_U[m] = g
+    end
+
+    if model.scale_by_lambda
+        λ_abs = max(abs(λ), model.lambda_eps)
+        for m = 1:length(grad_U)
+            grad_U[m] ./= λ_abs
+        end
+    end
+    for m = 1:length(grad_U)
+        um = parts[m+1]
+        grad_U[m] .-= dot(um, grad_U[m]) .* um
+    end
+
+    return pack_tangent_rank1_segre(grad_λ, grad_U)
+end
+
+function initial_point(
+    model::Rank1CPDModel{T,N},
+    init::Union{Symbol,BuiltinInitializer};
+    verbose::Bool = false,
+) where {T,N}
+    init == :alswarm && return initial_point(model, ALSWarmStartInit(); verbose)
+    init_sym = _builtin_initializer_symbol(init)
+    U0 = init_cp_rank1(model.A; init = init_sym)
+    if model.nonnegative
+        λ̃0 = _rank1_uses_softplus_metric(model.M) ? _invsoftplus(one(T)) : one(T)
+        Ũ = if _rank1_uses_softplus_metric(model.M)
+            [_invsoftplus.(max.(abs.(u), eps(T))) for u in U0]
+        else
+            [sqrt.(max.(abs.(u), eps(T))) for u in U0]
+        end
+        return pack_point_rank1(λ̃0, Ũ)
+    end
+    return pack_point_rank1_segre(one(T), U0)
+end
+
+function initial_point(
+    model::Rank1CPDModel{T,N},
+    init::ALSWarmStartInit;
+    verbose::Bool = false,
+) where {T,N}
+    p_base = initial_point(model, init.base_init; verbose)
+    λ0, U0 = _cp_init_factors_from_rank1_point(
+        p_base,
+        model.dims;
+        nonnegative = model.nonnegative,
+        geometry = _rank1_uses_softplus_metric(model.M) ? :softplus_metric :
+                   :squaring_metric,
+    )
+    λw, Uw = fit_cp_als(
+        model.A,
+        1;
+        maxiter = init.nsteps,
+        tol = zero(T),
+        init = RandomInit(),
+        init_factors = (λ0, U0),
+        nonnegative = model.nonnegative,
+        verbose = verbose,
+        return_stats = false,
+        progress_phase = :initialization,
+    )
+    λ1 = λw[1]
+    U1 = [vec(Um[:, 1]) for Um in Uw]
+    if model.nonnegative
+        if _rank1_uses_softplus_metric(model.M)
+            λ̃ = _invsoftplus(max(abs(λ1), eps(T)))
+            Ũ = [_invsoftplus.(max.(u, eps(T))) for u in U1]
+        else
+            λ̃ = sqrt(max(abs(λ1), eps(T)))
+            Ũ = [sqrt.(max.(u, eps(T))) for u in U1]
+        end
+        return pack_point_rank1(λ̃, Ũ)
+    end
+    return pack_point_rank1_segre(λ1, U1)
+end
+
+initial_point(model::Rank1CPDModel, init::PointInit; kwargs...) = init.point
+initial_point(model::Rank1CPDModel, init::FunctionInit; kwargs...) = init.f(model)
+
+supports_normalization_policy(model::Rank1CPDModel, policy::AbstractNormalizationPolicy) =
+    model.nonnegative || policy isa Union{NoNormalization,SeparateLambdaNormalization}
+
+"""
+    cpd_point(model::Rank1CPDModel, p)
+
+Interpret a rank-1 solver point `p` as a canonical [`CPDPoint`](@ref).
+
+This removes layout-specific details such as `Manifolds.Segre` packing or
+nonnegative squared parameterization so backend postprocessing can work with a
+uniform `lambda + factors` representation.
+"""
+function cpd_point(model::Rank1CPDModel{T,N}, p) where {T<:AbstractFloat,N}
+    if model.nonnegative
+        λ̃, Ũ = unpack_point_rank1(p, model.dims)
+        if _rank1_uses_softplus_metric(model.M)
+            return CPDPoint(
+                T[_softplus_value(λ̃)],
+                [reshape(_softplus_value.(Ũ[m]), :, 1) for m = 1:length(Ũ)],
+            )
+        end
+        return CPDPoint(T[λ̃^2], [reshape(Ũ[m] .^ 2, :, 1) for m = 1:length(Ũ)])
+    end
+    λ, U = unpack_point_rank1(p, model.dims)
+    return CPDPoint(T[λ], [reshape(U[m], :, 1) for m = 1:length(U)])
+end
+
+"""
+    pack_cpd_point(model::Rank1CPDModel, point)
+
+Pack a canonical [`CPDPoint`](@ref) back into the rank-1 layout used by
+`model`, restoring either the `Manifolds.Segre` layout or a nonnegative
+internal parameterization as needed.
+"""
+function pack_cpd_point(
+    model::Rank1CPDModel{T,N},
+    point::CPDPoint{T},
+) where {T<:AbstractFloat,N}
+    length(lambda(point)) == 1 || throw(
+        DimensionMismatch(
+            "Rank-1 CPDPoint must have exactly one weight, got $(length(lambda(point)))",
+        ),
+    )
+    λ = lambda(point)[1]
+    U = [vec(F[:, 1]) for F in factors(point)]
+    if model.nonnegative
+        if _rank1_uses_softplus_metric(model.M)
+            return pack_point_rank1(
+                _invsoftplus(max(λ, zero(T))),
+                [_invsoftplus.(max.(u, zero(T))) for u in U],
+            )
+        end
+        return pack_point_rank1(sqrt(max(λ, zero(T))), [sqrt.(max.(u, zero(T))) for u in U])
+    end
+    return pack_point_rank1_segre(λ, U)
+end
+
+"""
+    post_step!(model::Rank1CPDModel, p; normalization=...)
+
+Rank-1 CPD post-step hook.
+
+For supported policies this converts `p` to [`CPDPoint`](@ref), applies
+normalization in canonical CP coordinates, and packs the result back into the
+model-specific layout.
+"""
+function post_step!(
+    model::Rank1CPDModel,
+    p;
+    normalization::Union{AbstractNormalizationPolicy,Symbol,Nothing} = nothing,
+    kwargs...,
+)
+    policy = _normalization_policy(normalization)
+    supports_normalization_policy(model, policy) || throw(
+        ArgumentError(
+            "Normalization policy $(typeof(policy)) is incompatible with Rank1CPDModel nonnegative=$(model.nonnegative).",
+        ),
+    )
+    if policy isa NoNormalization ||
+       (!model.nonnegative && policy isa SeparateLambdaNormalization)
+        return p
+    end
+    q = cpd_point(model, p)
+    normalize_components!(q, policy)
+    return pack_cpd_point(model, q)
+end

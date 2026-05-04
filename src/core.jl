@@ -1,0 +1,12 @@
+# core.jl — Core functionality shared across decompositions
+include("core/abstract.jl")
+include("core/types.jl")
+include("core/progress.jl")
+include("core/tensor_ops.jl")
+include("core/layout.jl")
+include("cpd/core/cp_points.jl")
+include("core/pack_points.jl")
+include("core/unpack_points.jl")
+include("cpd/core/cp_normalization.jl")
+include("core/initialization.jl")
+include("core/model.jl")
