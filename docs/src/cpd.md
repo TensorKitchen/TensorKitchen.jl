@@ -41,6 +41,10 @@ Â = reconstruct(res)
 cpd
 nncpd
 CPDResult
+CPDPoint
+cpd_point
+pack_cpd_point
+post_step!
 RankOneTensor
 weights(::CPDResult)
 comp_weight(::CPDResult)

@@ -1,8 +1,11 @@
 using Documenter, TensorKitchen
 
 makedocs(
-    sitename = "Documentation",
-    warnonly = true,
+    sitename = "TensorKitchen.jl",
+    build = "build",
+    format = Documenter.HTML(
+        sidebar_sitename = false,
+    ),
     pages = [
         "Home" => "index.md",
         "CPD" => "cpd.md",

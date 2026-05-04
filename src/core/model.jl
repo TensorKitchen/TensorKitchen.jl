@@ -1,5 +1,13 @@
-# core/model.jl — Top-level decomposition model interface
-export AbstractDecompositionModel, rgrad, supports_rgrad, tensor, cost, post_step!
+# src/core/model.jl
+export AbstractDecompositionModel,
+       rgrad,
+       supports_rgrad,
+       tensor,
+       cost,
+       cpd_point,
+       pack_cpd_point,
+       post_step!
+
 """
     AbstractDecompositionModel{T}
 
