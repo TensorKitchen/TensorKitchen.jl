@@ -64,7 +64,7 @@ function _btd_block_fit_tucker(
     tol::Real = 1e-6,
     verbose::Bool = false,
     warm::Union{Nothing,Manifolds.TuckerPoint{T}} = nothing,
-    ) where {T<:AbstractFloat,N}
+) where {T<:AbstractFloat,N}
     if method == :hooi
         hooi_init = if isnothing(warm)
             :sthosvd
@@ -88,11 +88,7 @@ function _btd_block_fit_tucker(
     elseif method == :sthosvd
         return sthosvd(A, ranks)
     else
-        throw(
-            ArgumentError(
-                "Unknown block_method=$method. Use :hooi or :sthosvd.",
-            ),
-        )
+        throw(ArgumentError("Unknown block_method=$method. Use :hooi or :sthosvd."))
     end
 end
 

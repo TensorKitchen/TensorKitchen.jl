@@ -109,11 +109,7 @@ btd_block_method(method::AbstractBTDBlockMethod) = method
 function btd_block_method(method::Symbol)
     method === :hooi && return HOOIBlockMethod()
     method === :sthosvd && return STHOSVDBlockMethod()
-    throw(
-        ArgumentError(
-            "Unknown block_method=$method. Use :hooi or :sthosvd.",
-        ),
-    )
+    throw(ArgumentError("Unknown block_method=$method. Use :hooi or :sthosvd."))
 end
 btd_block_method_symbol(::HOOIBlockMethod) = :hooi
 btd_block_method_symbol(::STHOSVDBlockMethod) = :sthosvd

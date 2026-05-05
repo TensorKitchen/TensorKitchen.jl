@@ -71,7 +71,13 @@ end
     td_st = hooi(A, ranks; init = :sthosvd, maxiter = 20, verbose = false)
     @test td_st isa TuckerResult
     @test_throws ErrorException hooi(A, ranks; init = :hosvd, maxiter = 20, verbose = false)
-    @test_throws ErrorException hooi(A, ranks; init = :thosvd, maxiter = 20, verbose = false)
+    @test_throws ErrorException hooi(
+        A,
+        ranks;
+        init = :thosvd,
+        maxiter = 20,
+        verbose = false,
+    )
 end
 
 # =========================================================================

@@ -40,8 +40,7 @@ function _validate_warm_init(model::JoinModel, warm_init)
                         M isa Manifolds.Sphere ? "(:random, :deterministic, :target)" :
                         M isa Manifolds.Segre ? "(:random, :deterministic)" :
                         M isa Manifolds.Tucker ?
-                        "(:random, :tucker, :tucker_diag, :sthosvd)" :
-                        "(:random)"
+                        "(:random, :tucker, :tucker_diag, :sthosvd)" : "(:random)"
                     ),
                 ),
             )

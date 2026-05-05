@@ -84,7 +84,7 @@ function _tucker_init(M::Manifolds.Tucker, target, init::Symbol)
             ),
         )
     end
-    
+
     # fallback to random
     core = randn(T, r...)
     factors = [_rand_orthonormal_tucker(d[m], r[m], T) for m = 1:length(d)]
