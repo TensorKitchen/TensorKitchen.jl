@@ -41,9 +41,6 @@ end
     CPDResult{T}
 
 Result of a Canonical Polyadic Decomposition.
-- `components`: vector of `RankOneTensor`
-- `cost`, `rel_error`, `grad_norm`, `iterations`, `converged`, `solver`: metadata
-- `solver_info`: lightweight solver diagnostics (for example line-search/evaluation counts)
 """
 struct CPDResult{T<:AbstractFloat,C,W,F,S}
     components::C
@@ -226,15 +223,15 @@ Return the Tucker block components of a `BTDResult`. Each block `blk` supports
 blocks(r::BTDResult) = r.components
 
 """
-    weights(r::CPDResult) -> Vector{T}
+    weights(res::CPDResult)
 
-Return the per-component scalar weights `[λ_1, …, λ_r]`.
+If the decomposition in `res` is `λ_1 A_1 + … + λ_r A_r`, `weights(res)` return the per-component scalar weights `[λ_1, …, λ_r]`.
 """
 weights(r::CPDResult) = [λ(c) for c in components(r)]
 weights(r::NamedTuple) = getproperty(r, :weights)
 
 """
-    comp_weight(r::CPDResult)
+    comp_weight(res::CPDResult)
 
 Return component weights from `solver_info(r)` when available, otherwise fall
 back to [`weights`](@ref).
@@ -245,7 +242,7 @@ function comp_weight(r::CPDResult)
 end
 
 """
-    factors(r::CPDResult) -> Vector{Matrix{T}}
+    factors(res::CPDResult)
 
 Return the mode-wise factor matrices `(A, B, C, …)`; column `k` of mode `m` is
 the `m`-th factor vector of the `k`-th rank-one component.

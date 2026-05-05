@@ -2,15 +2,15 @@
 export reconstruct
 
 """
-    reconstruct(r::CPDResult)
+    reconstruct(res::CPDResult)
 
-Reconstruct the tensor: ∑_k λ_k · (U1[:,k] ⊗ U2[:,k] ⊗ …).
+Reconstruct by summing `component.tensor` for all components: If the decomposition in `res` is `A = λ_1 A_1 + … + λ_r A_r`, return `A`.
 """
 reconstruct(r::CPDResult) = reconstruct_cpd_rankr(components(r))
 
 """
-    reconstruct(r::ApproxResult)
-    reconstruct(r::BTDResult)
+    reconstruct(res::ApproxResult)
+    reconstruct(res::BTDResult)
 
 Reconstruct by summing `component.tensor` for all components.
 """
