@@ -380,12 +380,8 @@ function _cpd_impl(
     return _to_cpd_result(model, result, dims, r)
 end
 
-"""
-    cpd(A, r, opts::CPDOpts)
-    cpd(A, r; kwargs...)
+#### MAIN CPD ####
 
-Rank-`r` CP decomposition of `A`; `:als` converges linearly with rate ≈ 0.83 (~200 iters to machine precision on exact low-rank CP).
-"""
 function cpd(A::AbstractArray{T,N}, r::Int, opts::CPDOpts) where {T,N}
     _validate_opts(opts)
 
@@ -422,14 +418,7 @@ function cpd(A::AbstractArray{T,N}, r::Int, opts::CPDOpts) where {T,N}
     )
 end
 
-"""
-    cpd(A, r; kwargs...) -> CPDResult
-
-Keyword API backed by `CPDOpts` validation. Unknown keywords are rejected before
-entering the decomposition pipeline.
-"""
 function cpd(A::AbstractArray{T,N}, r::Int; kwargs...) where {T,N}
-    # 지원하지 않는 kwargs 방어
     valid_keys = fieldnames(CPDOpts)
     for k in keys(kwargs)
         k in valid_keys || throw(ArgumentError("Unknown keyword argument: $k"))
@@ -438,12 +427,6 @@ function cpd(A::AbstractArray{T,N}, r::Int; kwargs...) where {T,N}
     return cpd(A, r, opts)
 end
 
-"""
-    cpd(A; r=nothing, kwargs...) -> CPDResult
-
-Rank-optional CPD frontend. If `r` is omitted, uses the smallest tensor mode as
-a conservative heuristic rank.
-"""
 function cpd(
     A::AbstractArray{T,N};
     r::Union{Int,Nothing} = nothing,
@@ -460,10 +443,46 @@ function cpd(
 end
 
 """
-    cpd(A, r; init=:auto, solver=:rgd, geometry=:canonical, kwargs...) -> CPDResult
+    cpd(A, r; kwargs...)
 
-Main CPD frontend. Routes nonnegative requests to `nncpd`, otherwise delegates
-to the shared CPD implementation.
+Computes a rank-`r` CP approximation of `A` in two steps: (1) the first step finds an initial point; (2) the second step refines the initial point. Returns a [`CPDResult`](@ref). 
+If `r` is omitted, uses the smallest tensor mode as a conservative heuristic rank.
+
+## Main Options 
+* `init = :auto`: Sets the algorithm to find the initial point.
+* `solver = :rgd`: Sets the algorithm for refinement.
+
+## Extended Options
+* `p0 = nothing`: 
+* `warm_steps = 500`: 
+* `warm_init = TuckerInit()`:
+* `maxiter = 500`:
+* `stepsize = 1.0`:
+* `tol = 1e-6`:
+* `gradient_mode = :riemannian`:
+* `normalization = :auto`: 
+* `scale_by_lambda = true`:
+* `lambda_eps = 1e-10`:
+* `nonnegative::Bool = false`:
+* `verbose = true`:
+* `vector_transport_method = nothing`:
+* `pullback_eps = 1e-8`:
+* `als_polish_max_steps = nothing`:
+* `als_polish_chunk::Int = 10`:
+* `als_polish_rel_improve = 1e-10`:
+
+## Example 
+```julia-repl
+julia> using TensorKitchen
+julia> A = randn(20, 15, 10)
+julia> r = 35
+julia> res = cpd(A, r)
+CPDResult{Float64}
+  Order:        3
+  Dimensions:   (20, 15, 10)
+  Rank:         35
+  Rel. error:   0.4359141301703327
+```
 """
 function cpd(
     A::AbstractArray{T,N},
