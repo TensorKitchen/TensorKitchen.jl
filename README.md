@@ -4,7 +4,7 @@
 # TensorKitchen.jl
 
 
-<img src="docs/logo.png" width = "450px">
+<img src="docs/src/assets/logo.png" width = "450px">
 
 <br>
 
