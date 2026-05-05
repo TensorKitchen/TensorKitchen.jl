@@ -208,22 +208,26 @@ refines it. Returns a [`BTDResult`](@ref).
 * `warm_rel_error_gate = 5e-2`: Skips manifold refinement if the warm-start error is above this threshold.
 
 * `maxiter = 500`: Maximum number of Riemannian gradient descent iterations.
-* `stepsize = 0.01`: Initial step size for Riemannian gradient descent.
+* `stepsize = 0.01`: Initial step size for line search in Riemannian gradient descent.
 * `tol = 1e-6`: Convergence tolerance.
-* `gradient_mode = :riemannian`: Gradient type used by Riemannian gradient descent.
+* `gradient_mode = :riemannian`: rgrad can be directly applied for manifold solvers. 
+  - If the model has a direct rgrad, it uses that.
+  - Otherwise it computes egrad and projects it to the tangent space.
+  - This behavior is in src/solvers/abstract.jl (line 289).
 * `verbose = true`: Enables progress output.
-* `vector_transport_method = nothing`: Optional vector transport rule for Riemannian gradient descent.
 
-* `block_method = :hooi` or `:sthosvd`: Block update method used by Riemannian gradient descent.
-* `block_maxiter = 30`: Maximum number of inner block-update iterations.
+* `block_method = :hooi` or `:sthosvd`: Block update method used for manifold solvers.
+* `block_maxiter = 30`: Maximum number of inner block-update iterations for manifold solvers.
 * `btd_als_polish_maxiter = nothing`: Number of final ALS polishing iterations. If `nothing`, an automatic budget is selected.
 
-* `max_stagnation_restarts = 1`: Maximum number of restart attempts after stagnation.
-* `stagnation_rel_error = 1e-4`: Relative improvement threshold used to detect stagnation.
-* `restart_candidates = 24`: Number of candidate initializations considered during restart.
-* `restart_screening_steps = 5`: Number of quick ALS steps used to screen restart candidates.
-* `restart_block_maxiter = 20`: Inner block-update limit during restart screening.
-* `restart_seed = nothing`: Optional random seed for restart generation.
+* These settings are a robustness/quality feature for BTD-ALS. They are not used for manifold solvers.
+  - `max_stagnation_restarts = 1`: More retries after a bad stagnated ALS pass. Higher values can improve solution quality, but increases runtime.
+  - `stagnation_rel_error = 1e-4`: This is a “bad final error” cutoff, not an improvement threshold. Lower value means restarts trigger more easily.
+  - `restart_candidates = 24`: It usually improves chance of finding a better basin, but cost grows roughly linearly.
+  - `restart_screening_steps = 5`: It uses this many quick ALS steps to screen restart candidates.
+  - `restart_block_maxiter = 20`: Inner block-update limit during restart screening for BTD-ALS.
+  - `restart_seed = nothing`: Optional random seed for restart generation for BTD-ALS.
+
 
 ## Example
 ```julia-repl
