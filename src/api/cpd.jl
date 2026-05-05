@@ -473,9 +473,7 @@ If `r` is omitted, uses the smallest tensor mode as a conservative heuristic ran
 
 ## Example 
 ```julia-repl
-julia> using TensorKitchen
-julia> A = randn(20, 15, 10)
-julia> r = 35
+julia> A = randn(20, 15, 10); r = 35
 julia> res = cpd(A, r)
 CPDResult{Float64}
   Order:        3
