@@ -54,7 +54,7 @@ end
 # =========================================================================
 # tucker/hooi.jl
 # =========================================================================
-@testset "hooi.jl: hooi (TuckerResult), init :sthosvd :thosvd :hosvd" begin
+@testset "hooi.jl: hooi (TuckerResult), init :sthosvd" begin
     dims = (8, 6, 5)
     ranks = (3, 3, 2)
     core = randn(ranks...)
@@ -68,8 +68,10 @@ end
     @test td_zero isa TuckerResult
     @test size(td_zero.core) == ranks
     @test reconstruction_error(A, td_zero.core, td_zero.factors) < 1e-9
-    td_h = hooi(A, ranks; init = :hosvd, maxiter = 20, verbose = false)
-    @test td_h isa TuckerResult
+    td_st = hooi(A, ranks; init = :sthosvd, maxiter = 20, verbose = false)
+    @test td_st isa TuckerResult
+    @test_throws ErrorException hooi(A, ranks; init = :hosvd, maxiter = 20, verbose = false)
+    @test_throws ErrorException hooi(A, ranks; init = :thosvd, maxiter = 20, verbose = false)
 end
 
 # =========================================================================
@@ -1471,7 +1473,7 @@ end
         solver = :rgd,
         maxiter = 3,
         tol = 1e-6,
-        init = :hosvd,
+        init = :sthosvd,
         verbose = false,
     )
     @test res_tucker_auto isa BTDResult
@@ -1490,7 +1492,7 @@ end
         solver = :rgd,
         maxiter = 8,
         tol = 1e-6,
-        init = :hosvd,
+        init = :sthosvd,
         verbose = false,
     )
     @test res_btd isa BTDResult && length(res_btd.components) == 2
@@ -1507,7 +1509,7 @@ end
         solver = :als,
         init = :alswarm,
         warm_steps = 2,
-        warm_init = :hosvd,
+        warm_init = :sthosvd,
         warm_block_method = :hooi,
         warm_block_maxiter = 2,
         maxiter = 3,
@@ -1524,7 +1526,7 @@ end
         solver = :rgd,
         init = :alswarm,
         warm_steps = 2,
-        warm_init = :hosvd,
+        warm_init = :sthosvd,
         warm_block_method = :hooi,
         warm_block_maxiter = 2,
         maxiter = 3,
@@ -1541,7 +1543,7 @@ end
         solver = :rcg,
         init = :alswarm,
         warm_steps = 2,
-        warm_init = :hosvd,
+        warm_init = :sthosvd,
         warm_block_method = :hooi,
         warm_block_maxiter = 2,
         maxiter = 3,
@@ -1558,7 +1560,7 @@ end
         solver = :lbfgs,
         init = :alswarm,
         warm_steps = 2,
-        warm_init = :hosvd,
+        warm_init = :sthosvd,
         warm_block_method = :hooi,
         warm_block_maxiter = 2,
         maxiter = 5,
@@ -1649,7 +1651,7 @@ end
     )
     @test TensorKitchen.cost(model, p_warm_btd) <=
           TensorKitchen.cost(model, p_base_btd) + 1e-8
-    p0 = TensorKitchen.initial_point(model, :hosvd)
+    p0 = TensorKitchen.initial_point(model, :sthosvd)
     comps = TensorKitchen.extract_components(model, p0)
     Xhat = zero(A)
     for c in comps
@@ -1669,6 +1671,8 @@ end
     @test TensorKitchen.cost(model, p_ms) <= TensorKitchen.cost(model, p0) + 1e-8
     p_ms_sym = TensorKitchen.initial_point(model, :hosvd_multistart)
     @test isfinite(TensorKitchen.cost(model, p_ms_sym))
+    @test_throws ArgumentError TensorKitchen.initial_point(model, :hosvd)
+    @test_throws ArgumentError TensorKitchen.initial_point(model, :thosvd)
     @test_throws ArgumentError BTDHOSVDMultistartInit(0)
 
     eg = TensorKitchen.egrad(model, p0)
@@ -1858,17 +1862,13 @@ end
 
     # Tucker methods example coverage
     td_st = tucker(A, ranks; method = :sthosvd)
-    td_th = tucker(A, ranks; method = :thosvd)
-    td_hs = tucker(A, ranks; method = :hosvd)
     td_ho = tucker(A, ranks; method = :hooi, maxiter = 10, tol = 1e-6, verbose = false)
     @test td_st isa TuckerResult
-    @test td_th isa TuckerResult
-    @test td_hs isa TuckerResult
     @test td_ho isa TuckerResult
     @test size(reconstruct(td_st)) == size(A)
-    @test size(reconstruct(td_th)) == size(A)
-    @test size(reconstruct(td_hs)) == size(A)
     @test size(reconstruct(td_ho)) == size(A)
+    @test_throws ArgumentError tucker(A, ranks; method = :thosvd)
+    @test_throws ArgumentError tucker(A, ranks; method = :hosvd)
 
     # Join example
     target = [1.2, 0.4]

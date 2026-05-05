@@ -293,7 +293,7 @@ function initial_point(
 
     for c = 1:init.candidates
         p_candidate = if init.include_sequential && c == 1
-            _btd_sequential_tucker_init(model, :hosvd)
+            _btd_sequential_tucker_init(model, :sthosvd)
         else
             p = _btd_hosvd_split_candidate(
                 rng,

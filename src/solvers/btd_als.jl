@@ -53,8 +53,8 @@ end
 """
     _btd_block_fit_tucker(A, ranks; method=:hooi, kwargs...) -> TuckerResult
 
-Fit one Tucker block to the current BTD residual using HOOI, ST-HOSVD, or
-T-HOSVD, optionally warm-started from the previous block point.
+Fit one Tucker block to the current BTD residual using HOOI or ST-HOSVD,
+optionally warm-started from the previous block point.
 """
 function _btd_block_fit_tucker(
     A::AbstractArray{T,N},
@@ -64,7 +64,7 @@ function _btd_block_fit_tucker(
     tol::Real = 1e-6,
     verbose::Bool = false,
     warm::Union{Nothing,Manifolds.TuckerPoint{T}} = nothing,
-) where {T<:AbstractFloat,N}
+    ) where {T<:AbstractFloat,N}
     if method == :hooi
         hooi_init = if isnothing(warm)
             :sthosvd
@@ -87,12 +87,10 @@ function _btd_block_fit_tucker(
         )
     elseif method == :sthosvd
         return sthosvd(A, ranks)
-    elseif method in (:thosvd, :hosvd)
-        return thosvd(A, ranks)
     else
         throw(
             ArgumentError(
-                "Unknown block_method=$method. Use :hooi, :sthosvd, :thosvd, or :hosvd.",
+                "Unknown block_method=$method. Use :hooi or :sthosvd.",
             ),
         )
     end

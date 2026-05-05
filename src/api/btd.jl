@@ -178,13 +178,63 @@ function _merge_btd_solver_info(result, extra::NamedTuple)
 end
 
 """
-    btd(A, blocks, ranks; kwargs...) -> BTDResult
+    btd(A, blocks, ranks; kwargs...) returns a BTDResult
 
-Block-term decomposition (sum of Tucker blocks); default pipeline is
-`BTDHOSVDMultistartInit(candidates=64, screening_steps=10, block_maxiter=12)`
-followed by `ALSwarm(200)`, Riemannian gradient descent, and a final BTD-ALS
-polish step. By default, manifold polish is skipped when the warm-stage
-relative error exceeds `warm_rel_error_gate = 5e-2`.
+Computes a block-term decomposition of `A` with `blocks` Tucker blocks, each
+with multilinear rank `ranks`. The solver first finds an initial point, then
+refines it. Returns a [`BTDResult`](@ref).
+
+## Main Options
+
+* `init = :auto`: Sets the algorithm to find the initial point. Possible options are:
+    - `:auto`: Uses a default BTD initializer. For `solver = :als`, this uses `BTDHOSVDMultistartInit`; otherwise, it uses an ALS warm start.
+    - `:alswarm`: Runs ALS first and uses the result as the initial point for manifold solver refinement.
+    - custom initializer objects, e.g. `BTDHOSVDMultistartInit(...)`.
+
+* `solver = :rgd`: Sets the algorithm for refinement. Possible options are:
+    - `:rgd` (default): Riemannian gradient descent.
+    - `:als`: Alternating least squares.
+    - `:rcg`: Riemannian conjugate gradient.
+    - `:lbfgs`: Limited-memory quasi-Newton refinement.
+
+## Extended Options
+
+* `init_point = nothing`: Explicit initial point. If provided, it overrides the default initial point.
+
+* `warm_init = BTDHOSVDMultistartInit(...)`: Searches for initial points using HOSVD for :alswarm, optionally screens them with short ALS runs, and returns the lowest-cost candidate.
+* `warm_steps = 200`: Once finding the best initial point, it runs this many ALS iterations to refine the initial point.
+* `warm_block_method = :hooi` or `:sthosvd`: Block update method used during warm start.
+* `warm_block_maxiter = 20`: Maximum number of inner iterations for each block update during warm start.
+* `warm_rel_error_gate = 5e-2`: Skips manifold refinement if the warm-start error is above this threshold.
+
+* `maxiter = 500`: Maximum number of Riemannian gradient descent iterations.
+* `stepsize = 0.01`: Initial step size for Riemannian gradient descent.
+* `tol = 1e-6`: Convergence tolerance.
+* `gradient_mode = :riemannian`: Gradient type used by Riemannian gradient descent.
+* `verbose = true`: Enables progress output.
+* `vector_transport_method = nothing`: Optional vector transport rule for Riemannian gradient descent.
+
+* `block_method = :hooi` or `:sthosvd`: Block update method used by Riemannian gradient descent.
+* `block_maxiter = 30`: Maximum number of inner block-update iterations.
+* `btd_als_polish_maxiter = nothing`: Number of final ALS polishing iterations. If `nothing`, an automatic budget is selected.
+
+* `max_stagnation_restarts = 1`: Maximum number of restart attempts after stagnation.
+* `stagnation_rel_error = 1e-4`: Relative improvement threshold used to detect stagnation.
+* `restart_candidates = 24`: Number of candidate initializations considered during restart.
+* `restart_screening_steps = 5`: Number of quick ALS steps used to screen restart candidates.
+* `restart_block_maxiter = 20`: Inner block-update limit during restart screening.
+* `restart_seed = nothing`: Optional random seed for restart generation.
+
+## Example
+```julia-repl
+julia> using Random
+julia> Random.seed!(0)
+julia> A = randn(20, 15, 10); blocks = 10; ranks = (5, 4, 3)
+julia> res = btd(A, blocks, ranks; verbose = false)
+BTDResult{Float64}
+  Blocks:       10
+  Rel. error:   0.2625821087015455
+```
 """
 function btd(
     A::AbstractArray{T,N},

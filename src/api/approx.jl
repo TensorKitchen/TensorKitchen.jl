@@ -13,7 +13,7 @@ component manifold. Used to validate generic `approx(...; init=:alswarm)`.
     elseif M isa Manifolds.Segre
         return init_sym in (:random, :deterministic)
     elseif M isa Manifolds.Tucker
-        return init_sym in (:random, :hosvd, :tucker, :tucker_diag, :sthosvd, :thosvd)
+        return init_sym in (:random, :tucker, :tucker_diag, :sthosvd)
     end
     return init_sym == :random
 end
@@ -40,7 +40,7 @@ function _validate_warm_init(model::JoinModel, warm_init)
                         M isa Manifolds.Sphere ? "(:random, :deterministic, :target)" :
                         M isa Manifolds.Segre ? "(:random, :deterministic)" :
                         M isa Manifolds.Tucker ?
-                        "(:random, :hosvd, :tucker, :tucker_diag, :sthosvd, :thosvd)" :
+                        "(:random, :tucker, :tucker_diag, :sthosvd)" :
                         "(:random)"
                     ),
                 ),
@@ -88,9 +88,9 @@ function approx(
 end
 
 """
-    approx(manifolds, target; dispatch=:auto, kwargs...) -> Union{ApproxResult,CPDResult,BTDResult}
-    approx(base, r, target; dispatch=:auto, kwargs...) -> Union{ApproxResult,CPDResult,BTDResult}
-    approx(base, target; kwargs...) -> ApproxResult
+    approx(manifolds, target; dispatch=:auto, kwargs...) returns a Union{ApproxResult,CPDResult,BTDResult}
+    approx(base, r, target; dispatch=:auto, kwargs...) returns a Union{ApproxResult,CPDResult,BTDResult}
+    approx(base, target; kwargs...) returns a ApproxResult
 
 Convenience overloads for generic join approximation from manifold specifications:
 - `Tuple`/`Vector` of manifolds
@@ -98,9 +98,9 @@ Convenience overloads for generic join approximation from manifold specification
 - single `base::AbstractManifold` (one component)
 
 By default, `approx` auto-routes by manifold family:
-- uniform `Manifolds.Segre` summands -> `cpd(...)`
-- uniform `Manifolds.Tucker` summands -> `btd(...)`
-- otherwise -> generic `JoinModel(...)` and `ApproxResult`
+- uniform `Manifolds.Segre` summands calls `cpd(...)`
+- uniform `Manifolds.Tucker` summands calls `btd(...)`
+- otherwise calls `JoinModel(...)` and returns a `ApproxResult`
 
 For generic mixed joins, components only need to agree on the flattened ambient
 length of `target`; each manifold may still use its own native ambient shape.

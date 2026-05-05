@@ -450,36 +450,48 @@ If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
 
 ## Main Options 
 * `init = :auto`: Sets the algorithm to find the initial point. Possible options are:
-    - `:als` (default):
-    - `:tucker` (default when `solver = :als`):
-    - `:random`:
-    - `:hosvd`: 
-    - `:tucker_diag`: 
+    - `:auto`: Uses a default CPD initializer. For `solver = :als`, this uses `TuckerInit`; otherwise, it uses an ALS warm start.
+    - `:alswarm`: Runs ALS first and uses the result as the initial point for refinement.
+    - custom initializer objects, e.g. `TuckerInit(...)`.
+    - `:tucker` (default when `solver = :als`): Uses a default Tucker initializer.
+    - `:random`: Uses a random initial point.
+    - `:hosvd`: Uses a HOSVD initial point.
 * `solver = :rgd`: Sets the algorithm for refinement. Possible options are:
-    - `rgd` (default):
-    - `rgd_fixed`:
-    - `rcg`:
-    - `lbfgs`:
-    - `als`: 
+    - `rgd` (default): Riemannian gradient descent
+    - `rgd_fixed`: Riemannian gradient descent with fixed step size
+    - `rcg`: Riemannian conjugate gradient
+    - `lbfgs`: Limited-memory BFGS
+    - `als`: Alternating Least Squares
+* `geometry = :canonical`: Sets the geometry of the manifold. Possible options are:
+    - `:canonical`: Canonical geometry
+    - `:squaring_metric`: Squaring metric
+    - `:softplus_metric`: Softplus metric
+    - `:native`: Native geometry
+
 
 ## Extended Options
 * `p0 = nothing`: 
 * `warm_steps = 500`: 
 * `warm_init = TuckerInit()`:
+
 * `maxiter = 500`:
 * `stepsize = 1.0`:
 * `tol = 1e-6`:
+
 * `gradient_mode = :riemannian`:
 * `normalization = :auto`: 
 * `scale_by_lambda = true`:
 * `lambda_eps = 1e-10`:
+
 * `nonnegative::Bool = false`:
 * `verbose = true`:
-* `vector_transport_method = nothing`:
+* `vector_transport_method = nothing`: 
 * `pullback_eps = 1e-8`:
-* `als_polish_max_steps = nothing`:
-* `als_polish_chunk::Int = 10`:
-* `als_polish_rel_improve = 1e-10`:
+
+* `als_polish_max_steps = nothing`: Maximum number of ALS polishing iterations. If `nothing`, an automatic budget is selected.
+* `als_polish_chunk::Int = 10`: Number of ALS polishing iterations per chunk.
+* `als_polish_rel_improve = 1e-10`: Relative improvement threshold for ALS polishing. If the relative improvement is less than this threshold, the polishing stops.
+
 
 ## Example 
 ```julia-repl

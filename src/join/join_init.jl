@@ -69,7 +69,7 @@ function _tucker_init(M::Manifolds.Tucker, target, init::Symbol)
         factors = [_rand_orthonormal_tucker(d[m], r[m], T) for m = 1:length(d)]
         return Manifolds.TuckerPoint(core, factors...)
     end
-    if init in (:hosvd, :tucker, :tucker_diag)
+    if init in (:tucker, :tucker_diag)
         core, factors = tucker_hosvd(A, r)
         return Manifolds.TuckerPoint(core, factors...)
     end
@@ -77,10 +77,14 @@ function _tucker_init(M::Manifolds.Tucker, target, init::Symbol)
         td = sthosvd(A, r)
         return Manifolds.TuckerPoint(td.core, td.factors...)
     end
-    if init == :thosvd
-        td = thosvd(A, r)
-        return Manifolds.TuckerPoint(td.core, td.factors...)
+    if init in (:hosvd, :thosvd)
+        throw(
+            ArgumentError(
+                "Tucker init=$init is no longer supported in the pipeline. Use :sthosvd, :tucker, or :tucker_diag.",
+            ),
+        )
     end
+    
     # fallback to random
     core = randn(T, r...)
     factors = [_rand_orthonormal_tucker(d[m], r[m], T) for m = 1:length(d)]

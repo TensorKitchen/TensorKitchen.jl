@@ -97,7 +97,7 @@ end
 end
 
 @testset "tucker exact synthetic regression" begin
-    methods = (:hosvd, :sthosvd, :thosvd, :hooi)
+    methods = (:sthosvd, :hooi)
     for method in methods
         for seed = 1:3
             A = _make_tucker_tensor(seed; noisy = false)
@@ -111,13 +111,13 @@ end
 @testset "tucker noisy synthetic regression" begin
     for seed = 1:3
         A = _make_tucker_tensor(seed; noisy = true)
-        td_hosvd = tucker(A, (4, 3, 2); method = :hosvd)
+        td_sthosvd = tucker(A, (4, 3, 2); method = :sthosvd)
         td_hooi =
             tucker(A, (4, 3, 2); method = :hooi, maxiter = 20, tol = 1e-8, verbose = false)
-        err_hosvd = rel_error(A, td_hosvd)
+        err_sthosvd = rel_error(A, td_sthosvd)
         err_hooi = rel_error(A, td_hooi)
-        @test err_hosvd < 0.02
+        @test err_sthosvd < 0.02
         @test err_hooi < 0.02
-        @test err_hooi <= err_hosvd + 1e-8
+        @test err_hooi <= err_sthosvd + 1e-8
     end
 end
