@@ -28,9 +28,9 @@ What currently works is
 
 The next updates will include 
 
+- Handling of swamps/plateaus in the optimization step
 - Documentation
 - Improved User Interface
-- ProgressMeter
 - GPU Support 
 - LL1 Decomposition (3-way specialized BTD)
 - Symmetric CP / Waring Decomposition

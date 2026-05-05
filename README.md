@@ -30,9 +30,9 @@ See [PIPELINE.md](docs/src/PIPELINE.md) for the current execution flow.
 
 The next updates will include 
 
+- Handling of swamps/plateaus in the optimization step
 - Documentation
 - Improved User Interface
-- ProgressMeter
 - GPU Support 
 - LL1 Decomposition (3-way specialized BTD)
 - Symmetric CP / Waring Decomposition
@@ -195,7 +195,9 @@ reconstruct(join_res)
 <br>
 
 
+## Usage of AI
 
+AI coding assitants have been used to support the implementation process. All implemented functions have been designed and reviewed by humans. The documentation was written by humans.
 
 
 [docs-img]: https://img.shields.io/badge/docs-online-blue.svg
