@@ -1,12 +1,6 @@
 # src/core/model.jl
 export AbstractDecompositionModel,
-       rgrad,
-       supports_rgrad,
-       tensor,
-       cost,
-       cpd_point,
-       pack_cpd_point,
-       post_step!
+    rgrad, supports_rgrad, tensor, cost, cpd_point, pack_cpd_point, post_step!
 
 """
     AbstractDecompositionModel{T}
