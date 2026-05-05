@@ -5,12 +5,11 @@ export nncpd
      nncpd(A, r; kwargs...)
 
 Computes a nonnegative rank-`r` CP approximation of `A` in two steps: (1) the first step finds an initial point; (2) the second step refines the initial point. Returns a [`CPDResult`](@ref). 
-If `r` is omitted, uses the smallest tensor mode as a conservative heuristic rank.
+If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
 `cpd(A, r; nonnegative=true, ...)` routes here and adopts the same effective defaults.
 
-## Main Options 
-* `init = :auto`: Sets the algorithm to find the initial point.
-* `solver = :rgd`, `geometry=:softplus_metric`: is the default manifold route.
+## Options 
+The options are the same as for [`cpd`](@ref).
 
 Geometry guide:
 - `geometry=:softplus_metric`
@@ -20,25 +19,6 @@ Geometry guide:
 - `geometry=:canonical`
   Plain nonnegative CP coordinates without the pullback-style manifold geometry.
   This is the natural choice with `solver=:als`.
-
-## Extended Options
-* `p0 = nothing`: 
-* `warm_steps = 500`: 
-* `warm_init = TuckerInit()`:
-* `maxiter = 500`:
-* `stepsize = 1.0`:
-* `tol = 1e-6`:
-* `gradient_mode = :riemannian`:
-* `normalization = :auto`: 
-* `scale_by_lambda = true`:
-* `lambda_eps = 1e-10`:
-* `nonnegative::Bool = false`:
-* `verbose = true`:
-* `vector_transport_method = nothing`:
-* `pullback_eps = 1e-8`:
-* `als_polish_max_steps = nothing`:
-* `als_polish_chunk::Int = 10`:
-* `als_polish_rel_improve = 1e-10`:
 
 ## Example 
 ```julia-repl
@@ -51,11 +31,6 @@ CPDResult{Float64}
   Rank:         35
   Rel. error:   0.3765605093526155
 ``` 
-
-
-
-
-
 """
 
 function nncpd(

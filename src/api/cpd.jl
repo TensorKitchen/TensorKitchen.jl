@@ -446,11 +446,21 @@ end
     cpd(A, r; kwargs...)
 
 Computes a rank-`r` CP approximation of `A` in two steps: (1) the first step finds an initial point; (2) the second step refines the initial point. Returns a [`CPDResult`](@ref). 
-If `r` is omitted, uses the smallest tensor mode as a conservative heuristic rank.
+If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
 
 ## Main Options 
-* `init = :auto`: Sets the algorithm to find the initial point.
-* `solver = :rgd`: Sets the algorithm for refinement.
+* `init = :auto`: Sets the algorithm to find the initial point. Possible options are:
+    - `:als` (default):
+    - `:tucker` (default when `solver = :als`):
+    - `:random`:
+    - `:hosvd`: 
+    - `:tucker_diag`: 
+* `solver = :rgd`: Sets the algorithm for refinement. Possible options are:
+    - `rgd` (default):
+    - `rgd_fixed`:
+    - `rcg`:
+    - `lbfgs`:
+    - `als`: 
 
 ## Extended Options
 * `p0 = nothing`: 
