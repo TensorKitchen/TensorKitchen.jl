@@ -38,6 +38,5 @@ btd
 BTDResult
 blocks
 reconstruct(::BTDResult)
-BTDTSDSolver
-TSDSolver
+
 ```

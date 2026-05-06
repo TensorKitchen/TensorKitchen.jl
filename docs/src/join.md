@@ -30,15 +30,5 @@ ApproxResult
 reconstruct(::ApproxResult)
 join_product
 SegreProduct
-SqEuclidean
-pullback_metric_inverse
-sm_cost_nn_quadratic
-sm_egrad_nn_quadratic
-sm_cost_nn_rank1
-sm_egrad_nn_rank1
-sm_cost_double_circle
-sm_egrad_double_circle
-sm_double_circle_at_zero
-egrad_to_rgrad
-egrad_to_rgrad!
+
 ```
