@@ -52,7 +52,6 @@ or equivalently
 reconstruct_tucker(core(res), factors(res))
 ```
 ## Notes
-
 * `:sthosvd` is not an iterative solver. It directly returns a `TuckerResult` and does not expose solver-style outputs such as iteration counts or convergence diagnostics.
 * `:hooi` is the iterative refinement method in the current Tucker implementation.
 * Important distinction: For the current Tucker implementation, do not use `solver = :rgd`, `init = :auto`, or manifold solvers like RGD, RCG, LBFGS, etc.

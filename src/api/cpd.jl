@@ -377,41 +377,47 @@ If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
 * `init = :auto`: Sets the algorithm to find the initial point. Possible options are:
     - `:auto`: Uses a default CPD initializer. For `solver = :als`, this uses `TuckerInit`; otherwise, it uses an ALS warm start.
     - `:alswarm`: Runs ALS first and uses the result as the initial point for refinement.
-    - custom initializer objects, e.g. `TuckerInit(...)`.
-    - `:tucker` (default when `solver = :als`): Uses a default Tucker initializer.
-    - `:random`: Uses a random initial point.
-    - `:hosvd`: Uses a HOSVD initial point.
+    - customized initial point:
+        - `:tucker` (default when `solver = :als`): Uses a default Tucker initializer.
+        - `:random`: Uses a random initial point.
+        - `:hosvd`: Uses a HOSVD initial point.
 * `solver = :rgd`: Sets the algorithm for refinement. Possible options are:
     - `rgd` (default): Riemannian gradient descent
     - `rgd_fixed`: Riemannian gradient descent with fixed step size
     - `rcg`: Riemannian conjugate gradient
-    - `lbfgs`: Limited-memory BFGS
     - `als`: Alternating Least Squares
+
+## Extended Options
+* `p0 = nothing`: Explicit initial point. If provided, it overrides the default initial point.
+* `:alswarm`: ALS warm start option.
+    - `warm_init = TuckerInit()`: Before finding the warm start initial point, this sets the good starting point for ALS.
+    - `warm_steps = 500`: Once finding the best initial point from warm_init, it runs this many ALS iterations to refine the initial point.
+* `maxiter = 500`: Maximum number of Riemannian gradient descent iterations.
+* `stepsize = 1.0`: Initial step size for line search in Riemannian gradient descent.
+* `tol = 1e-6`: Convergence tolerance.
+* `gradient_mode = :riemannian`: Gradient rule for manifold solvers. 
+  - If the model has a direct rgrad, it uses that.
+  - Otherwise it computes egrad and projects it to the tangent space.
+  - This behavior is in src/solvers/abstract.jl (line 289).
 * `geometry = :canonical`: Sets the geometry of the manifold. Possible options are:
     - `:canonical`: Standard CPD parameterization with the usual Euclidean factors and canonical Riemannian gradient handling. Best default for general unconstrained CPD.
     - `:squaring_metric`: Nonnegative geometry based on squared latent coordinates. Enforces nonnegativity indirectly, but can become ill-conditioned near zero.
     - `:softplus_metric`: Nonnegative geometry uses a regularized pullback-inspired geometry induced by the softplus chart. Smoother and usually more stable near zero than `:squaring_metric`.
     - `:native`: Native CP manifold geometry using the model’s intrinsic CP/Segre representation not for nonnegative=true. Best for structured join layouts with `Manifolds.Segre` summands.
+* `verbose = true`: Enables progress output.
+* `nonnegative::Bool = false`: Nonnegative CPD option to be selected by the user. (same as `nncpd`)
+* `pullback_eps = 1e-8`: Regularization parameter for pullback-style nonnegative geometries.
 
-
-## Extended Options
-* `p0 = nothing`: 
-* `warm_steps = 500`: 
-* `warm_init = TuckerInit()`:
-
-* `maxiter = 500`:
-* `stepsize = 1.0`:
-* `tol = 1e-6`:
-
-* `gradient_mode = :riemannian`:
-* `normalization = :auto`: 
-* `scale_by_lambda = true`:
-* `lambda_eps = 1e-10`:
-
-* `nonnegative::Bool = false`:
-* `verbose = true`: 
-* `pullback_eps = 1e-8`:
-
+## Notes
+* `solver = :als` does not use manifold geometry. In that case:
+    - `geometry` must be `:canonical`
+    - `gradient_mode` is ignored except for validation
+* `:squaring_metric` and `:softplus_metric` require `nonnegative = true`.
+* When `nonnegative = true`, `cpd(...)` routes to `nncpd(...)`. In that route:
+    - if `solver != :als` and `geometry` is left at `:canonical`, the effective geometry becomes `:softplus_metric`
+    - if `stepsize` is left at `1.0`, the effective default becomes `0.01`
+    - if `init = :tucker`, the effective initializer becomes `:alswarm`
+    
 ## Example 
 ```julia-repl
 julia> A = randn(20, 15, 10); r = 35

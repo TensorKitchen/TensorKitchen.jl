@@ -1,11 +1,6 @@
 # api/approx.jl — user-facing generic approximation entry points
 export approx
 
-"""
-    _join_manifold_init_sym(M, init_sym)
-    Returns whether a built-in initializer symbol is supported by a single join
-    component manifold.
-"""
 @inline function _join_manifold_init_sym(M, init_sym::Symbol)
     if M isa Manifolds.Sphere
         return init_sym in (:random, :deterministic, :target)
@@ -42,11 +37,6 @@ function _validate_warm_init(model::JoinModel, warm_init)
     return nothing
 end
 
-"""
-    approx(model; init=:alswarm, solver=:rgd, ...) computes ApproxResult
-
-    Core approximation entry-point.
-"""
 function approx(
     model::JoinModel{T};
     init = :alswarm,
@@ -80,6 +70,54 @@ function approx(
 end
 
 """
+## Generic Join Approximation
+
+`approx(...)` is the main frontend for join decomposition.
+
+### Supported Forms
+
+```julia
+approx(model; kwargs...)                  # generic JoinModel -> ApproxResult
+approx(manifolds, target; kwargs...)      # tuple/vector of manifolds
+approx(M::ProductManifold, target; kwargs...)
+approx(base, r, target; kwargs...)
+approx(base, target; kwargs...)
+```
+### Return Types
+Depending on the manifold family, `approx(...)` may return:
+- `ApproxResult` for the generic join path
+- `CPDResult` when auto-routed to `cpd(...)`
+- `BTDResult` when auto-routed to `btd(...)`
+
+### Main Options
+For the generic join path:
+
+* `init = :alswarm`: Sets the algorithm to find the initial point. Runs ALS first and uses the result as the initial point for refinement
+   - `:alswarm`: ALS warm start option.
+
+build an initial point using warm_init
+run a short ALS-style warm stage
+refine with the selected manifold solver
+* `solver = :rgd`: Sets the algorithm for refinement. Possible options are:
+* `maxiter = 500`
+* `stepsize = 1.0`
+* `tol = 1e-6`: convergence tolerance
+* `gradient_mode = :riemannian`: gradient mode
+* `verbose = true`: progress output
+
+* `solver = :rgd`: Sets the algorithm for refinement. Possible options are:
+    - `rgd` (default): Riemannian gradient descent
+    - `rgd_fixed`: Riemannian gradient descent with fixed step size
+    - `rcg`: Riemannian conjugate gradient
+    - `als`: Alternating Least Squares
+
+## Extended Options
+* `p0 = nothing`: Explicit initial point. If provided, it overrides the default initial point.
+* `:alswarm`: ALS warm start option.
+    - `warm_init = TuckerInit()`: Before finding the warm start initial point, this sets the good starting point for ALS.
+    - `warm_steps = 500`: Once finding the best initial point from warm_init, it runs this many ALS iterations to refine the initial point.
+
+## Example
     approx(manifolds, target; dispatch=:auto, kwargs...) returns a Union{ApproxResult,CPDResult,BTDResult}
     approx(base, r, target; dispatch=:auto, kwargs...) returns a Union{ApproxResult,CPDResult,BTDResult}
     approx(base, target; kwargs...) returns a ApproxResult
