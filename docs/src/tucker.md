@@ -33,6 +33,4 @@ factors(::TuckerResult)
 multilinear_rank(::TuckerResult)
 factor_dims(::TuckerResult)
 reconstruct(::TuckerResult)
-sthosvd
-thosvd
 ```

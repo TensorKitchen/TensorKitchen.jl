@@ -1,45 +1,9 @@
 # api/approx.jl — user-facing generic approximation entry points
 export approx
 
-@inline function _join_manifold_init_sym(M, init_sym::Symbol)
-    if M isa Manifolds.Sphere
-        return init_sym in (:random, :deterministic, :target)
-    elseif M isa Manifolds.Segre
-        return init_sym in (:random, :deterministic)
-    elseif M isa Manifolds.Tucker
-        return init_sym in (:random, :tucker, :tucker_diag, :sthosvd)
-    end
-    return init_sym == :random
-end
-
-function _validate_warm_init(model::JoinModel, warm_init)
-    backend = model.backend
-    backend isa JoinBackend || return nothing
-    init_sym = _builtin_initializer_symbol(warm_init)
-    for (k, M) in enumerate(backend.manifolds)
-        if !_join_manifold_init_sym(M, init_sym)
-            throw(
-                ArgumentError(
-                    "approx(...; init=:alswarm, warm_init=$init_sym) is incompatible with " *
-                    "component $k ($(typeof(M))). " *
-                    "Choose a warm_init supported by all manifold components (for mixed joins, :random is safest). " *
-                    "Supported warm_init for this component: " *
-                    (
-                        M isa Manifolds.Sphere ? "(:random, :deterministic, :target)" :
-                        M isa Manifolds.Segre ? "(:random, :deterministic)" :
-                        M isa Manifolds.Tucker ?
-                        "(:random, :tucker, :tucker_diag, :sthosvd)" : "(:random)"
-                    ),
-                ),
-            )
-        end
-    end
-    return nothing
-end
-
 function approx(
     model::JoinModel{T};
-    init = :alswarm,
+    init = :random,
     solver = :rgd,
     maxiter = 500,
     stepsize = 1.0,
@@ -47,15 +11,11 @@ function approx(
     gradient_mode = :riemannian,
     verbose = true,
     vector_transport_method = nothing,
-    warm_steps = 500,
-    warm_init = :random,
     kwargs...,
 ) where {T<:AbstractFloat}
-    init == :alswarm && _validate_warm_init(model, warm_init)
-    init_eff = init == :alswarm ? ALSWarmStartInit(warm_steps; base_init = warm_init) : init
     result = _solve_model(
         model;
-        init = init_eff,
+        init = init,
         solver = solver,
         maxiter = maxiter,
         stepsize = stepsize,
@@ -78,34 +38,68 @@ end
 2. refine it with the selected solver
 
 ### Supported Forms
-* `approx(model; kwargs...)` : Builds a generic join model and routes to the generic join solver. Model can be any type that can be converted to a JoinModel, such as a tuple of manifolds, a ProductManifold, or a single manifold.
+
+* `approx(model; kwargs...)` : It is for an already constructed join model (`JoinModel(...)`) and routes to the generic join solver. Model can be a `JoinModel` of a tuple of manifolds, a `ProductManifold`, or a single manifold.
+    - model means an already constructed JoinModel.
+    - It fully fixes the decomposition structure and target.
+    - `approx(model; ...)` just solves that model.
+    - Example: If you want to approximate a point on the sphere, you can build a `JoinModel` and then use `approx` to refine it.
+        ```julia
+        target = [1.2, 0.4, -0.3]
+        model = JoinModel(Manifolds.Sphere(2), target)
+        approx(model; maxiter = 100, verbose = false)
+        # returns an ApproxResult
+        ```
+
+* `approx(manifolds, target; kwargs...)` : Builds a generic join model from a tuple of existing manifolds and routes to according to dispatch.
+    - Example:
+        ```julia
+        target = randn(2, 3)
+        approx((Manifolds.Segre((2, 3)), Manifolds.Segre((2, 3))), target; verbose = false)
+        # This builds a join with 2 copies of Manifolds.Segre((2, 3))".
+        ```  
+    
+* `approx(M::ProductManifold, target; kwargs...)` : Uses the factors of a product manifold and route to CPD, BTD, or the generic join solver according to `dispatch`. 
+    - M::ProductManifold means that you already have a product manifold whose factors are the join components.
+    - approx(M, target; ...) uses those factors directly.
+    - It is more explicit than `base`, because the components are already listed.
+    
    - Example:
     ```julia
-    approx(JoinModel(Manifolds.Sphere(2), , target); kwargs...) 
+    target = randn(2, 3)
+    M = ProductManifold(Manifolds.Segre((2, 3)), Manifolds.Segre((2, 3)))
+    approx(M, target; verbose = false)
+    # returns an CPDResult
     ```
-* `approx(manifolds, target; kwargs...)` : Builds a generic join model from a tuple of existing manifolds and routes to the generic join solver. 
-   - Example:
+    - Another example:
     ```julia
-    approx((Manifolds.Segre(2, 3), Manifolds.Segre(2, 3)), target; kwargs...)
+    target = randn(4, 3, 2)
+    M = ProductManifold(
+        Manifolds.Tucker((4, 3, 2), (2, 2, 2)),
+        Manifolds.Tucker((4, 3, 2), (2, 2, 2)),
+    )
+    approx(M, target; verbose = false)
+    # returns an BTDResult
     ```
-* `approx(M::ProductManifold, target; kwargs...)` : Uses the factors of a product manifold as join components and route to CPD, BTD,
-or the generic join solver according to `dispatch`. 
-   - Example:
-    ```julia
-    approx(ProductManifold(Manifolds.Segre(2, 3), Manifolds.Segre(2, 3)), target; kwargs...)
-    approx(ProductManifold(Manifolds.Tucker(2, 3), Manifolds.Tucker(2, 3)), target; kwargs...)
-    ```
-* `approx(base, r, target; kwargs...)` : Builds a rank-`r` Segre join and route to the CPD pipeline unless generic
+* `approx(base, r, target; kwargs...)` : builds a rank-r Segre join and routes to CPD when base isa Manifolds.Segre and BTD when base isa Manifolds.Tucker unless generic
 dispatch is explicitly requested. 
-   - Example:
-    ```julia
-    approx(Manifolds.Segre(2, 3), 3, target; kwargs...)
-    ```
+    - base means one manifold template, not yet a full join.
+    - `approx(base, r, target; ...)` repeats that same manifold r times to build a join.
+    - `approx(base, target; ...)` builds a one-component join.
+
+    - Example:
+        ```julia
+        target = randn(2, 3)
+        approx(Manifolds.Segre((2, 3)), 2, target; verbose = false)
+        # returns an CPDResult
+        ```
 * `approx(base, target; kwargs...)` : Builds a single-component generic join and route to the generic join solver.
-   - Example:
-    ```julia
-    approx(Manifolds.Sphere(2), target; kwargs...)
-    ```
+    - Example:
+        ```julia
+        target = [1.2, 0.4, -0.3]   
+        approx(Manifolds.Sphere(2), target; verbose = false)
+        # returns an ApproxResult
+        ```
 * By default, `approx` auto-routes by manifold family:
     - uniform `Manifolds.Segre` summands calls `cpd(...)`
     - uniform `Manifolds.Tucker` summands calls `btd(...)`
@@ -121,29 +115,17 @@ dispatch is explicitly requested.
 ### Main Options
 
 For the generic join path:
-* `init = :alswarm`: Sets the algorithm to find the initial point. Runs ALS first and uses the result as the initial point for refinement.
-    - Important: When init = :alswarm, warm_init must be supported by every component manifold
-    - For mixed joins, `warm_init = :random` is usually the safest choice
+* `init = :random`: Sets the algorithm to find the initial point.
 * `solver = :rgd`: Sets the algorithm for refinement. Possible options are:
     - `rgd` (default): Riemannian gradient descent
     - `rgd_fixed`: Riemannian gradient descent with fixed step size
     - `rcg`: Riemannian conjugate gradient
     - `lbfgs`: Limited-memory quasi-Newton
-    - `als`: Alternating Least Squares
-
-## Extended Options
-
-* `p0 = nothing`: Explicit initial point. If provided, it overrides the default initial point.
-* `:alswarm`: ALS warm start option.
-    - `warm_init = TuckerInit()`: Before finding the warm start initial point, this sets the good starting point for ALS.
-    - `warm_steps = 500`: Once finding the best initial point from warm_init, it runs this many ALS iterations to refine the initial point.
-* `dispatch=:generic` to force the generic join path
-* `dispatch=:cpd` to require CPD routing
-* `dispatch=:btd` to require BTD routing
 
 ##Notes##
 * `:als` is not a solver option for `approx(...)`. However, if `approx(...)` auto-routes to `cpd(...)` or `btd(...)`, then those specialized pipelines may support ALS separately.
-* For generic mixed joins, use manifold solvers such as `:rgd`, `:rcg`, or `:lbfgs` instead of `:als`.
+* `warm_steps` and `warm_init` are not part of the generic `approx(...)` path. Generic joins start from the selected initializer and then use manifold solvers for refinement.
+* For generic mixed joins, use manifold solvers such as `:rgd`, `:rcg`, or `:lbfgs`.
 """
 function approx(
     manifolds::Tuple{Vararg{AbstractManifold}},

@@ -245,6 +245,16 @@ end
 
     generic_segre = JoinModel(Manifolds.Segre((6, 5, 4)), A)
     @test generic_segre isa JoinModel
+
+    sphere_target = [1.2, 0.4, -0.3]
+    sphere_single = approx(Manifolds.Sphere(2), sphere_target; maxiter = 1, verbose = false)
+    @test sphere_single isa ApproxResult
+    @test isfinite(sphere_single.rel_error)
+
+    sphere_pair =
+        approx((Manifolds.Sphere(2), Manifolds.Sphere(2)), sphere_target; maxiter = 1, verbose = false)
+    @test sphere_pair isa ApproxResult
+    @test isfinite(sphere_pair.rel_error)
 end
 
 @testset "solver helpers accept omitted normA2" begin

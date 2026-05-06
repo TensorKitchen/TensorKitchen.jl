@@ -102,8 +102,8 @@ end
 """
     ApproxResult{T}
 
-Generic result of `approx(manifolds, target)` (generic join).
-- `point`: final point on product manifold
+Generic result of `approx(manifolds, target)` (generic join decomposition).
+- `point`: final point on the join manifold
 - `components`: extracted component descriptions
 - `cost`, `rel_error`, `grad_norm`, `iterations`, `converged`, `solver`: optimization metadata
 """
