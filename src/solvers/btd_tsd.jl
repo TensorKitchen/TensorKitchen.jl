@@ -319,11 +319,7 @@ function solve_btd_tsd(
     return solve_btd_tsd(model, p0; verbose, kwargs...)
 end
 
-"""
-    solve(solver::BTDTSDSolver, model; ...)
 
-Pipeline entry point for BTD-specific tangent-subspace descent.
-"""
 function solve(
     solver::BTDTSDSolver,
     model::JoinModel{<:AbstractFloat,<:BTDBackend};

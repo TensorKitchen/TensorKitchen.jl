@@ -6,11 +6,6 @@
 _rankr_components_from_λU(λ, U) =
     [RankOneTensor(λ[k], [Vector(U[m][:, k]) for m = 1:length(U)]) for k = 1:length(λ)]
 
-"""
-    pack_point_rank1_segre(λ, U)
-
-Pack for Manifolds.Segre: [[λ], x₁, …, x_d] with λ > 0. Absorbs sign into x₁ if λ < 0.
-"""
 function pack_point_rank1_segre(λ::T, U::Vector{Vector{T}}) where {T<:AbstractFloat}
     λ_abs = abs(λ)
     λ_abs < eps(T) && (λ_abs = one(T))
@@ -23,12 +18,6 @@ function pack_point_rank1_segre(λ::T, U::Vector{Vector{T}}) where {T<:AbstractF
     return parts
 end
 
-"""
-    pack_tangent_rank1_segre(ν, Udot)
-
-Pack tangent vector for the `Manifolds.Segre` point format: [[ν], u̇₁, …, u̇_d].
-Unlike point packing, tangent packing does not enforce positivity or absorb signs.
-"""
 function pack_tangent_rank1_segre(ν::T, Udot::Vector{Vector{T}}) where {T<:AbstractFloat}
     parts = Vector{Vector{T}}(undef, length(Udot) + 1)
     parts[1] = T[ν]
@@ -38,11 +27,6 @@ function pack_tangent_rank1_segre(ν::T, Udot::Vector{Vector{T}}) where {T<:Abst
     return parts
 end
 
-"""
-    pack_rankr_native(λ, U, r)
-
-Pack rank-r CP point for `ProductManifold(Manifolds.Segre(...), ...)`.
-"""
 function pack_rankr_native(
     λ::AbstractVector{T},
     U::Vector{<:AbstractMatrix{T}},
@@ -90,11 +74,6 @@ function pack_rankr_native_tuple(
     return pack_rankr_native_tuple(λ, U, r)
 end
 
-"""
-    pack_rankr_canonical(λ, U, r)
-
-Pack rank-r CP point for canonical manifold.
-"""
 function pack_rankr_canonical(
     λ::AbstractVector{T},
     U::Vector{<:AbstractMatrix{T}},
@@ -130,11 +109,6 @@ function pack_rankr_canonical_tuple(
     return (λn, mode_parts...)
 end
 
-"""
-    pack_rankr_join_tuple(λ, U, r)
-
-Strict internal join rank-r point layout as flattened tuple.
-"""
 function pack_rankr_join_tuple(
     λ::AbstractVector{T},
     U::Vector{<:AbstractMatrix{T}},

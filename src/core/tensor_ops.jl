@@ -40,14 +40,6 @@ end
     return mats
 end
 
-"""
-    _relative_error_frob_sq(‖residual‖²_F, ‖target‖²_F)
-
-Relative Frobenius reconstruction error `‖residual‖_F / ‖target‖_F` when `‖target‖²_F > 0`;
-otherwise return `‖residual‖_F` (absolute residual norm). When `‖target‖²_F > 0`, uses
-`sqrt(max(‖residual‖²_F,0) / ‖target‖²_F)` (one `sqrt`) instead of two `sqrt`s for slightly
-better rounding than `sqrt(a)/sqrt(b)`.
-"""
 @inline function _relative_error_frob_sq(
     n_residual_sq::T,
     n_target_sq::T,
@@ -56,12 +48,6 @@ better rounding than `sqrt(a)/sqrt(b)`.
     return n_target_sq > zero(T) ? sqrt(r / n_target_sq) : sqrt(r)
 end
 
-"""
-    relative_frobenius_error(A, B)
-
-Same as `‖A-B‖_F / ‖A‖_F` when `‖A‖_F > 0`, else `‖A-B‖_F`. One pass over indices (no full
-temporary `A .- B` array). `size(A)` must match `size(B)`.
-"""
 function relative_frobenius_error(A::AbstractArray, B::AbstractArray)
     size(A) == size(B) || throw(
         DimensionMismatch(
@@ -82,9 +68,6 @@ function relative_frobenius_error(A::AbstractArray, B::AbstractArray)
     return _relative_error_frob_sq(sR, sA)
 end
 
-"""
-Unfold tensor A along mode `mode`. Returns matrix of size (n_mode, ∏_{k≠mode} n_k).
-"""
 function unfold_mode(A::AbstractArray, mode::Int)
     dims = size(A)
     N = length(dims)
@@ -94,9 +77,6 @@ function unfold_mode(A::AbstractArray, mode::Int)
     return reshape(Aperm, dims[mode], :)
 end
 
-"""
-Mode-n product: A ×_mode U. Multiplies tensor A by matrix U along mode `mode`.
-"""
 function mode_n_product(A::AbstractArray, U::AbstractMatrix, mode::Int)
     dims = size(A)
     N = length(dims)
@@ -202,10 +182,6 @@ function rank1_inner(
     return s
 end
 
-"""
-Inner product ⟨A, x₁⊗...⊗xₙ⟩ from `Manifolds.Segre` point parts `[[λ], x₁, ..., xₙ]`.
-The λ entry is ignored; this reads factor references directly (no unpack copy).
-"""
 function rank1_inner_parts(A::AbstractArray{T,N}, parts) where {T<:AbstractFloat,N}
     s = zero(T)
     @inbounds for I in CartesianIndices(A)
@@ -241,10 +217,6 @@ function rank1_mode_contract(
     return rank1_mode_contract!(out, A, U, mode)
 end
 
-"""
-Mode-m contraction from `Manifolds.Segre` point parts `[[λ], x₁, ..., xₙ]`.
-The λ entry is ignored; this reads factor references directly (no unpack copy).
-"""
 function rank1_mode_contract_parts(
     A::AbstractArray{T,N},
     parts,
@@ -523,12 +495,6 @@ end
     return n2 < sqrt(eps(T)) * scale
 end
 
-"""
-    cp_residual_stats(A, normA2, components)
-
-Contraction-based residual ‖A-X‖²_F and relative error. Falls back to [`cp_residual_stats_explicit`](@ref)
-when the Gram shortcut is non-finite, negative, or likely dominated by cancellation (small vs. ‖A‖², ‖X‖²).
-"""
 function cp_residual_stats(
     A::AbstractArray{T,N},
     normA2::T,
@@ -543,13 +509,6 @@ function cp_residual_stats(
     return (n2, T(0.5) * n2, _relative_error_frob_sq(n2, normA2))
 end
 
-"""
-    cp_residual_stats_explicit(A, normA2, λ, U)
-
-Recompute CP residual statistics from the explicit reconstruction `X = reconstruct_cpd_rankr(λ, U)`.
-This is more expensive than the contraction-based shortcut, but it is numerically
-robust when `‖A‖² + ‖X‖² - 2⟨A, X⟩` suffers from catastrophic cancellation.
-"""
 function cp_residual_stats_explicit(
     A::AbstractArray{T,N},
     normA2::T,

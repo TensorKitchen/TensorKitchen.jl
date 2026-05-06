@@ -1,12 +1,6 @@
 # api/btd.jl — Block-term decomposition API
 export btd
 
-"""
-    _polish_btd_with_als(backend, result, manifold_solver; kwargs...) -> NamedTuple
-
-Run a final BTD-ALS polish from a manifold-solver result and keep it only if it
-improves relative error. Solver metadata records the polish budget and source.
-"""
 function _polish_btd_with_als(
     backend::BTDBackend,
     result,
@@ -51,23 +45,11 @@ function _polish_btd_with_als(
     )
 end
 
-"""
-    _resolve_btd_init(init, solver) -> initializer
-
-Resolve `:auto` to the default BTD initializer for the requested solver family.
-ALS uses multistart HOSVD; manifold solvers use ALS warm start.
-"""
 @inline function _resolve_btd_init(init, solver::Symbol)
     init == :auto || return init
     return solver == :als ? BTDHOSVDMultistartInit() : :alswarm
 end
 
-"""
-    _btd_effective_init(solver, init, warm_steps, warm_init, warm_block_method, warm_block_maxiter)
-
-Wrap non-ALS BTD initializers in `BTDALSWarmStartInit` so manifold solvers start
-from a short BTD-ALS warm point.
-"""
 function _btd_effective_init(
     solver::Symbol,
     init,
@@ -94,12 +76,7 @@ function _btd_effective_init(
     return init
 end
 
-"""
-    _btd_warm_start_result(model, backend, init, requested_solver; kwargs...)
 
-Execute the BTD-ALS warm-start phase, return the warm point and metadata, and
-optionally short-circuit when `warm_rel_error_gate` is exceeded.
-"""
 function _btd_warm_start_result(
     model::JoinModel{T,<:BTDBackend},
     backend::BTDBackend,

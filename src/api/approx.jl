@@ -2,10 +2,9 @@
 export approx
 
 """
-    _join_manifold_init_sym(M, init_sym) -> Bool
-
-Return whether a built-in initializer symbol is supported by a single join
-component manifold. Used to validate generic `approx(...; init=:alswarm)`.
+    _join_manifold_init_sym(M, init_sym)
+    Returns whether a built-in initializer symbol is supported by a single join
+    component manifold.
 """
 @inline function _join_manifold_init_sym(M, init_sym::Symbol)
     if M isa Manifolds.Sphere
@@ -18,12 +17,6 @@ component manifold. Used to validate generic `approx(...; init=:alswarm)`.
     return init_sym == :random
 end
 
-"""
-    _validate_warm_init(model, warm_init)
-
-Validate that an ALS warm-start initializer is compatible with every component
-of a generic `JoinModel`; throws an `ArgumentError` with per-component guidance.
-"""
 function _validate_warm_init(model::JoinModel, warm_init)
     backend = model.backend
     backend isa JoinBackend || return nothing
@@ -50,9 +43,9 @@ function _validate_warm_init(model::JoinModel, warm_init)
 end
 
 """
-    approx(model; init=:alswarm, solver=:rgd, ...) -> ApproxResult
+    approx(model; init=:alswarm, solver=:rgd, ...) computes ApproxResult
 
-Core approximation entry-point. Solves any model that implements the common manifold hooks.
+    Core approximation entry-point.
 """
 function approx(
     model::JoinModel{T};
@@ -277,11 +270,6 @@ function approx(
     return approx(JoinModel(base, target); kwargs...)
 end
 
-"""
-    approx(manifolds, target; kwargs...)
-
-Error-reporting fallback for unsupported manifold specifications.
-"""
 function approx(manifolds, target::AbstractArray{T,N}; kwargs...) where {T<:AbstractFloat,N}
     throw(
         ArgumentError(

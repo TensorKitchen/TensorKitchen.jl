@@ -21,8 +21,7 @@ export SqEuclidean,
 """
     SqEuclidean(n; ε=1e-8)
 
-Euclidean space ℝⁿ with a regularized pullback-inspired metric induced by the
-squaring map `p ↦ p.^2`.
+Euclidean space `ℝⁿ` induced by the squared map `p ↦ p.^2`.
 - `inner(M, p, X, Y)` = X' G(p) Y with G(p) = diag(4*p.² + ε)
 - Riemannian gradient: grad = G(p)^{-1} * egrad
 
@@ -67,31 +66,16 @@ ManifoldsBase.exp!(M::SqEuclidean, q, p, X) = ManifoldsBase.exp!(_euclidean(M), 
 
 ManifoldsBase.log!(M::SqEuclidean, X, p, q) = ManifoldsBase.log!(_euclidean(M), X, p, q)
 
-"""
-    pullback_metric_diag(M, p)
 
-Diagonal of G(p) = diag(4*p.² + ε). Returns a vector.
-"""
 function pullback_metric_diag(M::SqEuclidean, p::AbstractVector)
     return 4 .* (p .^ 2) .+ M.ε
 end
 
-"""
-    pullback_metric_inverse(M, p)
-
-Apply G(p)^{-1} to vector X. For diagonal G, (G^{-1} X)_i = X_i / (4*p_i² + ε).
-Used to convert Euclidean gradient to Riemannian gradient.
-"""
 function pullback_metric_inverse(M::SqEuclidean, p::AbstractVector, X::AbstractVector)
     g_inv = 1.0 ./ pullback_metric_diag(M, p)
     return g_inv .* X
 end
 
-"""
-    inner(M, p, X, Y)
-
-Riemannian inner product: ⟨X, Y⟩_G = X' G(p) Y with G = diag(4*p.² + ε).
-"""
 function ManifoldsBase.inner(M::SqEuclidean, p, X::AbstractVector, Y::AbstractVector)
     g = pullback_metric_diag(M, p)
     return dot(X, g .* Y)
@@ -118,50 +102,25 @@ function sm_cost_nn_quadratic(p::AbstractVector; a::Real = 1.0, b::Real = 1.0)
     return 0.5 * ((x^2 - a)^2 + (y^2 - b)^2)
 end
 
-"""
-    sm_egrad_nn_quadratic(p; a=1, b=1)
-
-Euclidean gradient of `sm_cost_nn_quadratic`.
-"""
 function sm_egrad_nn_quadratic(p::AbstractVector; a::Real = 1.0, b::Real = 1.0)
     x, y = _sm_xy(p)
     return [2 * x * (x^2 - a), 2 * y * (y^2 - b)]
 end
 
-"""
-    sm_cost_nn_rank1(p; A=1)
-
-f(x,y) = 0.5*(A - x^2*y^2)^2
-"""
 function sm_cost_nn_rank1(p::AbstractVector; A::Real = 1.0)
     x, y = _sm_xy(p)
     r = A - x^2 * y^2
     return 0.5 * r^2
 end
 
-"""
-    sm_egrad_nn_rank1(p; A=1)
-
-Euclidean gradient of `sm_cost_nn_rank1`.
-"""
 function sm_egrad_nn_rank1(p::AbstractVector; A::Real = 1.0)
     x, y = _sm_xy(p)
     r = A - x^2 * y^2
     return [-2 * x * y^2 * r, -2 * y * x^2 * r]
 end
 
-"""
-    sm_cost_repelling_test(p)
-
-f(x,y) = 0.5*((x^2-1)^2 + (y^2-1)^2)
-"""
 sm_cost_repelling_test(p::AbstractVector) = sm_cost_nn_quadratic(p; a = 1.0, b = 1.0)
 
-"""
-    sm_egrad_repelling_test(p)
-
-Euclidean gradient of `sm_cost_repelling_test`.
-"""
 sm_egrad_repelling_test(p::AbstractVector) = sm_egrad_nn_quadratic(p; a = 1.0, b = 1.0)
 
 @inline function _sm_circle_terms(
@@ -177,11 +136,6 @@ sm_egrad_repelling_test(p::AbstractVector) = sm_egrad_nn_quadratic(p; a = 1.0, b
     return C1, C2
 end
 
-"""
-    sm_cost_double_circle(p; c1=(5,5), c2=(-1.5,5), r1=1, r2=1)
-
-f(x,y) = C1*C2 with circle level sets C1=0, C2=0.
-"""
 function sm_cost_double_circle(
     p::AbstractVector;
     c1::NTuple{2,<:Real} = (5.0, 5.0),
@@ -194,11 +148,6 @@ function sm_cost_double_circle(
     return C1 * C2
 end
 
-"""
-    sm_egrad_double_circle(p; c1=(5,5), c2=(-1.5,5), r1=1, r2=1)
-
-Euclidean gradient of `sm_cost_double_circle`.
-"""
 function sm_egrad_double_circle(
     p::AbstractVector;
     c1::NTuple{2,<:Real} = (5.0, 5.0),
@@ -213,11 +162,6 @@ function sm_egrad_double_circle(
     return [dfdx, dfdy]
 end
 
-"""
-    sm_double_circle_at_zero(; c1=(5,5), c2=(-1.5,5), r1=1, r2=1)
-
-Return value and gradient of the double-circle objective at (0,0).
-"""
 function sm_double_circle_at_zero(;
     c1::NTuple{2,<:Real} = (5.0, 5.0),
     c2::NTuple{2,<:Real} = (-1.5, 5.0),

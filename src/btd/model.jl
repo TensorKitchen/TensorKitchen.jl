@@ -1,12 +1,7 @@
 # btd/model.jl — BTD backend and model hooks
 
 # Small index-based tensor cache for tight inner loops.
-"""
-    _WorkspaceTensorCache{T,N}
 
-Reusable tensor-buffer pool keyed by dimensions. Used by BTD contractions to
-avoid repeated temporary allocations in tight loops.
-"""
 mutable struct _WorkspaceTensorCache{T,N}
     dims::Vector{NTuple{N,Int}}
     bufs::Vector{Array{T,N}}
@@ -15,12 +10,6 @@ end
 _WorkspaceTensorCache{T,N}() where {T,N} =
     _WorkspaceTensorCache{T,N}(NTuple{N,Int}[], Array{T,N}[])
 
-"""
-    BTDContractionWorkspace{T,N}
-
-Grouped scratch buffers for BTD reconstruction, residual, permutation, and
-persistent contraction work.
-"""
 mutable struct BTDContractionWorkspace{T,N}
     tensor_slot1::_WorkspaceTensorCache{T,N}
     tensor_slot2::_WorkspaceTensorCache{T,N}
@@ -76,12 +65,7 @@ model_exact_join_basis_function(model::JoinModel{<:AbstractFloat,<:BTDBackend}) 
         _join_basis_project(backend.manifolds, p, residual)
     end
 
-"""
-    _btd_sequential_tucker_init(model, init) -> ArrayPartition
 
-Initialize BTD blocks sequentially on the current residual so later blocks fit
-what earlier blocks have not yet explained.
-"""
 function _btd_sequential_tucker_init(model::JoinModel{<:AbstractFloat,<:BTDBackend}, init)
     backend = model.backend
     # Initialize Tucker blocks on the current residual rather than cloning the
@@ -101,11 +85,6 @@ function _btd_sequential_tucker_init(model::JoinModel{<:AbstractFloat,<:BTDBacke
     return ArrayPartition(parts...)
 end
 
-"""
-    _btd_block_ranks_by_mode(backend) -> Vector{NTuple}
-
-Collect the multilinear ranks for every Tucker block in a BTD backend.
-"""
 function _btd_block_ranks_by_mode(backend::BTDBackend{T,N}) where {T,N}
     ranks = Vector{NTuple{N,Int}}(undef, backend.r)
     for b = 1:backend.r
@@ -120,12 +99,6 @@ function _btd_block_ranks_by_mode(backend::BTDBackend{T,N}) where {T,N}
     return ranks
 end
 
-"""
-    _btd_hosvd_subspaces(backend, ranks_by_block) -> Tuple
-
-Compute mode-wise HOSVD subspaces large enough to supply all BTD blocks for
-multistart split initialization.
-"""
 function _btd_hosvd_subspaces(backend::BTDBackend{T,N}, ranks_by_block) where {T,N}
     A = backend.target
     return ntuple(N) do mode
@@ -136,12 +109,6 @@ function _btd_hosvd_subspaces(backend::BTDBackend{T,N}, ranks_by_block) where {T
     end
 end
 
-"""
-    _btd_split_columns(rng, total, ranks, candidate) -> Vector{Vector{Int}}
-
-Split a shared HOSVD basis into per-block column groups. The first candidate is
-deterministic; later candidates use randomized permutations.
-"""
 function _btd_split_columns(
     rng::AbstractRNG,
     total::Int,
@@ -164,11 +131,6 @@ function _btd_split_columns(
     return cols
 end
 
-"""
-    _btd_project_core(A, factors) -> Array
-
-Project tensor `A` onto a Tucker factor basis to form the candidate core.
-"""
 function _btd_project_core(A::AbstractArray{T,N}, factors) where {T<:AbstractFloat,N}
     core = A
     for mode = 1:N
@@ -177,12 +139,6 @@ function _btd_project_core(A::AbstractArray{T,N}, factors) where {T<:AbstractFlo
     return core
 end
 
-"""
-    _btd_hosvd_split_candidate(rng, backend, ranks_by_block, subspaces, candidate)
-
-Construct one BTD multistart candidate by splitting mode-wise HOSVD subspaces
-among Tucker blocks and fitting each block on the residual.
-"""
 function _btd_hosvd_split_candidate(
     rng::AbstractRNG,
     backend::BTDBackend{T,N},
@@ -244,12 +200,6 @@ function initial_point(
     return _btd_sequential_tucker_init(model, init)
 end
 
-"""
-    initial_point(model::JoinModel{<:BTDBackend}, init::BTDALSWarmStartInit; verbose=false)
-
-Build a base BTD initializer, run a short BTD-ALS warm-start phase, and return
-the warmed point.
-"""
 function initial_point(
     model::JoinModel{<:AbstractFloat,<:BTDBackend},
     init::BTDALSWarmStartInit;
@@ -272,12 +222,6 @@ function initial_point(
     return warm.point
 end
 
-"""
-    initial_point(model::JoinModel{<:BTDBackend}, init::BTDHOSVDMultistartInit; verbose=false)
-
-Generate multiple HOSVD subspace-split BTD candidates, optionally screen them
-with short ALS runs, and return the lowest-cost candidate.
-"""
 function initial_point(
     model::JoinModel{<:AbstractFloat,<:BTDBackend},
     init::BTDHOSVDMultistartInit;
@@ -333,12 +277,7 @@ function initial_point(
     return best_point
 end
 
-"""
-    rgrad(model::JoinModel{<:BTDBackend}, p)
 
-Convert the BTD Euclidean gradient blockwise to a Riemannian gradient on the
-product of Tucker manifolds.
-"""
 function rgrad(model::JoinModel{<:AbstractFloat,<:BTDBackend}, p)
     backend = model.backend
     parts = point_parts(p)

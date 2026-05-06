@@ -9,11 +9,6 @@ include("api/btd.jl")
 include("api/tucker.jl")
 
 
-"""
-    save_result(path, result)
-
-Serialize a result to disk (Julia Serialization).
-"""
 function save_result(path::AbstractString, result)
     open(path, "w") do io
         Base.Serialization.serialize(io, result)
@@ -21,11 +16,6 @@ function save_result(path::AbstractString, result)
     return path
 end
 
-"""
-    load_result(path)
-
-Load a result serialized by `save_result`.
-"""
 function load_result(path::AbstractString)
     open(path, "r") do io
         return Base.Serialization.deserialize(io)

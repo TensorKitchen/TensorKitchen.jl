@@ -1,12 +1,7 @@
 export tucker_hosvd, reconstruct_tucker
 
 """
-Tucker decomposition via HOSVD and reconstruction utilities.
-Uses unfold_mode and mode_n_product from core/tensor_ops.
-"""
-
-"""
-    tucker_hosvd(A, ranks) -> (core, factors)
+    tucker_hosvd(A, ranks) computes (core, factors)
 
 Compute Tucker decomposition via Higher-Order SVD (HOSVD).
 
@@ -39,9 +34,9 @@ function tucker_hosvd(A::AbstractArray{T}, ranks::NTuple{N,Int}) where {T<:Abstr
 end
 
 """
-    reconstruct_tucker(core, factors) -> Array
+    reconstruct_tucker(core, factors) reconstructs the tensor from Tucker decomposition
 
-Reconstruct the tensor from Tucker decomposition: core ×₁ factors[1] ×₂ factors[2] ⋯
+    A = core ×₁ factors[1] ×₂ factors[2] ⋯ ×_d factors[d]
 """
 function reconstruct_tucker(core::AbstractArray{T}, factors) where {T<:AbstractFloat}
     A = core

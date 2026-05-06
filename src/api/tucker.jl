@@ -1,9 +1,8 @@
 export tucker
 
 """
-    tucker(A, ranks; method=:sthosvd, kwargs...) -> TuckerResult
-
-Tucker decomposition. `method`: `:sthosvd` (default) or `:hooi`.
+    tucker(A, ranks; method=:sthosvd, kwargs...)
+    Computes Tucker decomposition. `method`: `:sthosvd` (default) or `:hooi`.
 """
 function tucker(A, ranks; method::Symbol = :sthosvd, kwargs...)
     fn = (sthosvd = sthosvd, hooi = hooi)

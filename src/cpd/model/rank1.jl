@@ -208,13 +208,6 @@ function cpd_point(model::Rank1CPDModel{T,N}, p) where {T<:AbstractFloat,N}
     return CPDPoint(T[λ], [reshape(U[m], :, 1) for m = 1:length(U)])
 end
 
-"""
-    pack_cpd_point(model::Rank1CPDModel, point)
-
-Pack a canonical [`CPDPoint`](@ref) back into the rank-1 layout used by
-`model`, restoring either the `Manifolds.Segre` layout or a nonnegative
-internal parameterization as needed.
-"""
 function pack_cpd_point(
     model::Rank1CPDModel{T,N},
     point::CPDPoint{T},
@@ -238,15 +231,6 @@ function pack_cpd_point(
     return pack_point_rank1_segre(λ, U)
 end
 
-"""
-    post_step!(model::Rank1CPDModel, p; normalization=...)
-
-Rank-1 CPD post-step hook.
-
-For supported policies this converts `p` to [`CPDPoint`](@ref), applies
-normalization in canonical CP coordinates, and packs the result back into the
-model-specific layout.
-"""
 function post_step!(
     model::Rank1CPDModel,
     p;

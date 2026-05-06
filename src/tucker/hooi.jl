@@ -3,10 +3,6 @@ export hooi
 """
 High-order orthogonal iteration (HOOI) for Tucker decomposition.
 
-Unified implementation: one `hooi` that supports init from ST-HOSVD or a
-compatible [`TuckerResult`](@ref) (warm-started factor matrices), and returns a
-`TuckerResult`.
-Use `td.core` and `td.factors` for (core, factors).
 """
 
 function hooi(

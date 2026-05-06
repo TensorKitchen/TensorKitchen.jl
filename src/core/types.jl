@@ -55,15 +55,6 @@ struct CPDResult{T<:AbstractFloat,C,W,F,S}
     solver_info::S
 end
 
-"""
-    DecompositionComponent{T, N}
-
-Concrete component descriptor used by [`ApproxResult`](@ref) and [`BTDResult`](@ref).
-It stores only the abstract component payload: the manifold point, the ambient
-manifold, and the target tensor shape. Derived structure such as reconstructed
-tensors, Tucker cores, or factor matrices is exposed through dispatched
-accessors rather than stored eagerly in the container.
-"""
 struct DecompositionComponent{T<:AbstractFloat,N,P,MT}
     point::P
     manifold::MT
@@ -115,7 +106,6 @@ Generic result of `approx(manifolds, target)` (generic join).
 - `point`: final point on product manifold
 - `components`: extracted component descriptions
 - `cost`, `rel_error`, `grad_norm`, `iterations`, `converged`, `solver`: optimization metadata
-- `solver_info`: lightweight solver diagnostics
 """
 struct ApproxResult{T<:AbstractFloat,P,C,S}
     point::P
@@ -201,52 +191,21 @@ converged(r::Union{CPDResult,ApproxResult,BTDResult}) = r.converged
 solver(r::Union{CPDResult,ApproxResult,BTDResult}) = r.solver
 solver_info(r::Union{CPDResult,ApproxResult,BTDResult}) = r.solver_info
 
-"""
-    components(r) -> AbstractVector
-
-Return the component list of a decomposition result (`CPDResult`, `ApproxResult`,
-`BTDResult`, or `LL1Result`). For CP this is a vector of `RankOneTensor`; for
-Tucker-block results (BTD, LL1) and generic join (`approx`) it is a vector of
-`DecompositionComponent`.
-"""
 components(r::CPDResult) = r.components
 components(r::ApproxResult) = r.components
 components(r::BTDResult) = r.components
 components(r::NamedTuple) = getproperty(r, :components)
 
-"""
-    blocks(r::BTDResult) -> Vector{DecompositionComponent}
-
-Return the Tucker block components of a `BTDResult`. Each block `blk` supports
-`core(blk)` and `factors(blk)`.
-"""
 blocks(r::BTDResult) = r.components
 
-"""
-    weights(res::CPDResult)
-
-If the decomposition in `res` is `λ_1 A_1 + … + λ_r A_r`, `weights(res)` return the per-component scalar weights `[λ_1, …, λ_r]`.
-"""
 weights(r::CPDResult) = [λ(c) for c in components(r)]
 weights(r::NamedTuple) = getproperty(r, :weights)
 
-"""
-    comp_weight(res::CPDResult)
-
-Return component weights from `solver_info(r)` when available, otherwise fall
-back to [`weights`](@ref).
-"""
 function comp_weight(r::CPDResult)
     si = solver_info(r)
     return hasproperty(si, :comp_weight) ? getproperty(si, :comp_weight) : weights(r)
 end
 
-"""
-    factors(res::CPDResult)
-
-Return the mode-wise factor matrices `(A, B, C, …)`; column `k` of mode `m` is
-the `m`-th factor vector of the `k`-th rank-one component.
-"""
 factors(r::CPDResult) = factors_from_components(components(r))
 factors(r::NamedTuple) = getproperty(r, :factors)
 
@@ -274,16 +233,8 @@ function Base.show(io::IO, r::BTDResult{T}) where {T}
     print(io, "  Rel. error:   $(rel_error(r))")
 end
 
-"""
-    LinearAlgebra.cond(R::CPDResult)
+# This forms dense tangent-basis blocksusing repeated Kronecker products and then computes singular values of the assembled matrix.
 
-    Compute a conditioning surrogate for a CPD result by assembling tangent-like
-    columns per component and returning `1 / σ_min(U)`.
-
-This is an expensive diagnostic routine: it forms dense tangent-basis blocks
-using repeated Kronecker products and then computes singular values of the
-assembled matrix.
-"""
 function LinearAlgebra.cond(R::CPDResult{T}) where {T<:AbstractFloat}
     comps = components(R)
     isempty(comps) && throw(ArgumentError("cond(CPDResult): empty components"))
@@ -324,35 +275,11 @@ struct TuckerResult{T<:AbstractFloat,N}
     singular_values::Vector{Vector{T}}
 end
 
-
-"""
-    core(td::TuckerResult) -> Array{T,N}
-
-Return the core tensor `C` of a Tucker decomposition `Â = (U₁ ⊗ U₂ ⊗ … ⊗ U_N) · C`.
-"""
 core(td::TuckerResult) = td.core
-
-"""
-    factors(td::TuckerResult) -> Vector{Matrix{T}}
-
-Return the factor matrices `(U₁, U₂, …, U_N)` of a Tucker decomposition.
-"""
 factors(td::TuckerResult) = td.factors
 processing_order(td::TuckerResult) = td.processing_order
 singular_values(td::TuckerResult) = td.singular_values
-
-"""
-    multilinear_rank(td::TuckerResult) -> NTuple{N,Int}
-
-Return the multilinear rank, i.e. the tuple `size(core(td))`.
-"""
 multilinear_rank(td::TuckerResult) = size(core(td))
-
-"""
-    factor_dims(td::TuckerResult) -> NTuple{N,Int}
-
-Return the ambient mode sizes, i.e. `size(U_m, 1)` for each factor.
-"""
 factor_dims(td::TuckerResult{T,N}) where {T,N} = ntuple(m -> size(factors(td)[m], 1), N)
 
 function Base.show(io::IO, td::TuckerResult{T,N}) where {T,N}

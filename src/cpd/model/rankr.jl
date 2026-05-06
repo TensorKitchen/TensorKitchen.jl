@@ -318,14 +318,6 @@ function _segre_tangent_tensorvec(comp, Xcomp)
     return v
 end
 
-"""
-    rgrad_exact(model, p)
-
-Fast closed-form Riemannian gradient for CPD on
-`ProductManifold(Manifolds.Segre(...), ...)`.
-Uses the Euclidean gradient in the `Manifolds.Segre` representation plus the package-local
-`egrad_to_rgrad(::Manifolds.Segre, ...)` / product-manifold projection path.
-"""
 function rgrad_exact(model::RankRCPDModel{T,N}, p) where {T,N} # exact gradient for geometry=:native
     model.geometry == :native ||
         throw(ArgumentError("rgrad_exact requires geometry=:native."))
@@ -450,15 +442,6 @@ initial_point(model::RankRCPDModel, init::FunctionInit; kwargs...) = init.f(mode
 supports_normalization_policy(model::RankRCPDModel, policy::AbstractNormalizationPolicy) =
     model.nonnegative || policy isa Union{NoNormalization,SeparateLambdaNormalization}
 
-"""
-    cpd_point(model::RankRCPDModel, p)
-
-Interpret a rank-`r` solver point `p` as a canonical [`CPDPoint`](@ref).
-
-This erases the distinction between canonical, `ProductManifold(Manifolds.Segre(...), ...)`, and
-nonnegative internal layouts so that backend postprocessing can operate on a
-single CP representation.
-"""
 function cpd_point(model::RankRCPDModel{T,N}, p) where {T<:AbstractFloat,N}
     if model.nonnegative
         λ̃, Ũ = unpack_point_rankr(p, model.dims, model.r)
@@ -476,15 +459,6 @@ function cpd_point(model::RankRCPDModel{T,N}, p) where {T<:AbstractFloat,N}
     return CPDPoint(λ, U)
 end
 
-"""
-    pack_cpd_point(model::RankRCPDModel, point)
-
-Pack a canonical [`CPDPoint`](@ref) back into the layout required by `model`.
-
-Depending on the CPD geometry this rebuilds either a
-`ProductManifold(Manifolds.Segre(...), ...)` point, a canonical CP tuple, or
-the internal nonnegative parameterization.
-"""
 function pack_cpd_point(
     model::RankRCPDModel{T,N},
     point::CPDPoint{T},
@@ -509,15 +483,6 @@ function pack_cpd_point(
            pack_rankr_canonical(lambda(point), factors(point), model.r)
 end
 
-"""
-    post_step!(model::RankRCPDModel, p; normalization=...)
-
-Rank-`r` CPD post-step hook.
-
-This is the backend normalization adapter used by manifold solvers: convert the
-current iterate to [`CPDPoint`](@ref), apply the requested normalization in CP
-coordinates, then pack back into the model-specific layout.
-"""
 function post_step!(
     model::RankRCPDModel,
     p;

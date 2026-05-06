@@ -159,11 +159,6 @@ function _embedded_euclidean_basis_fallback(M, p, egrad)
     )
 end
 
-"""
-    egrad_to_rgrad!(M, X, p, egrad)
-
-In-place variant. Uses `project!` when available, else `egrad_to_rgrad` + `copyto!`.
-"""
 function egrad_to_rgrad!(M, X, p, egrad)
     if applicable(ManifoldsBase.project!, M, X, p, egrad)
         return ManifoldsBase.project!(M, X, p, egrad)
@@ -208,18 +203,8 @@ function egrad_to_rgrad!(M::SoftplusEuclidean, X, p, egrad)
     )
 end
 
-"""
-    grad(M, p, egrad)
-
-Riemannian gradient from ambient/Euclidean gradient.
-"""
 grad(M, p, egrad) = egrad_to_rgrad(M, p, egrad)
 
-"""
-    grad(egrad_fn)
-
-Lift `(M, p) -> egrad` to `(M, p) -> grad`.
-"""
 grad(egrad_fn::Function) = (M, p) -> egrad_to_rgrad(M, p, egrad_fn(M, p))
 
 # ---- Helpers ----

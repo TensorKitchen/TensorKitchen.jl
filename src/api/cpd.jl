@@ -1,12 +1,6 @@
 # api/cpd.jl — user-facing CP decomposition entry points
 export cpd
 
-"""
-    CPDOpts
-
-Keyword-struct form of the CPD frontend options. Used by the legacy
-`cpd(A, r, opts)` path and for keyword validation in the compact API.
-"""
 Base.@kwdef struct CPDOpts{T<:Real}
     solver::Symbol = :rgd
     geometry::Symbol = :canonical
@@ -35,11 +29,6 @@ function _validate_opts(opts::CPDOpts)
     return opts
 end
 
-"""
-    _resolve_cpd_init(init, solver) -> initializer
-
-Resolve `:auto` to the default CPD initializer for the selected solver family.
-"""
 @inline function _resolve_cpd_init(init, solver::Symbol)
     init == :auto || return init
     return solver == :als ? :tucker : :alswarm
@@ -72,13 +61,6 @@ function _pack_cpd_explicit_p0(model, p0)
     return p0
 end
 
-"""
-    _cpd_als_warm_then_pack(target, init; tol, normalization, ...)
-
-Run the same CP-ALS solve as `solver=:als` on a canonical `JoinModel` (matching
-`target`'s nonnegative mode and factor scaling), then pack the resulting
-[`CPDResult`](@ref) into `target`'s manifold coordinates for manifold refinement.
-"""
 function _cpd_als_warm_then_pack(
     target::JoinModel{<:AbstractFloat,<:CPDBackend},
     init::ALSWarmStartInit;
