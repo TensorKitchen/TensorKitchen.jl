@@ -386,27 +386,27 @@ function rgrad(model::RankRCPDModel{T,N}, p) where {T,N} # Riemannian gradient f
         return rgrad_exact(model, p) # fast native closed-form via local Segre projection
     end
 
-    λ, U = unpack_rankr_canonical(p, model.dims, model.r) 
+    λ, U = unpack_rankr_canonical(p, model.dims, model.r)
 
-    Nmodes = length(U) 
-    r = model.r 
+    Nmodes = length(U)
+    r = model.r
 
-    contracts = Vector{Matrix{T}}(undef, Nmodes) 
+    contracts = Vector{Matrix{T}}(undef, Nmodes)
     for m = 1:Nmodes
-        contracts[m] = mttkrp(model.A, U, m; method = :auto) 
+        contracts[m] = mttkrp(model.A, U, m; method = :auto)
     end
 
-    inner = _inner_from_mttkrp_first_mode(U, contracts[1]) 
+    inner = _inner_from_mttkrp_first_mode(U, contracts[1])
     grams = _gram_matrices(U)
-    cross_mat = _cross_unit_from_grams(grams) 
-    grad_λ = grad_lambda_cp(λ, inner, cross_mat) 
+    cross_mat = _cross_unit_from_grams(grams)
+    grad_λ = grad_lambda_cp(λ, inner, cross_mat)
 
     gradU = _rankr_gradU_from_terms(U, λ, contracts, grams)
     for m = 1:Nmodes
         Gm = gradU[m]
         if model.scale_by_lambda
             for k = 1:r
-                Gm[:, k] ./= max(abs(λ[k]), model.lambda_eps) 
+                Gm[:, k] ./= max(abs(λ[k]), model.lambda_eps)
             end
         end
 

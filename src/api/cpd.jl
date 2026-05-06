@@ -170,9 +170,9 @@ function initial_point(
 ) where {T<:AbstractFloat,N}
     ε = _pullback_eps_value(T, 1e-8)
     geom =
-        model.nonnegative ? (
-            _rank1_uses_softplus_metric(model.M) ? :softplus_metric : :squaring_metric
-        ) : :native
+        model.nonnegative ?
+        (_rank1_uses_softplus_metric(model.M) ? :softplus_metric : :squaring_metric) :
+        :native
     target = JoinModel(
         model.A,
         1;
@@ -237,7 +237,8 @@ function _cpd_impl(
             NoNormalization()
         ) : _normalization_policy(normalization)
     als_normalization_eff =
-        normalization == :auto ? (nonnegative ? NoNormalization() : SeparateLambdaNormalization()) :
+        normalization == :auto ?
+        (nonnegative ? NoNormalization() : SeparateLambdaNormalization()) :
         _normalization_policy(normalization)
     pullback_eps_eff = _pullback_eps_value(T, pullback_eps)
 
@@ -286,20 +287,19 @@ function _cpd_impl(
         use_pullback_metric = (geometry_eff == :squaring_metric),
         pullback_eps = pullback_eps_eff,
     )
-    p_solve =
-        if init_eff isa ALSWarmStartInit && isnothing(p0) && solver ∈ manifold_solvers
-            _cpd_als_warm_then_pack(
-                model,
-                init_eff;
-                tol,
-                normalization = als_normalization_eff,
-                verbose,
-                pullback_eps = pullback_eps_eff,
-                kwargs...,
-            )
-        else
-            _pack_cpd_explicit_p0(model, p0)
-        end
+    p_solve = if init_eff isa ALSWarmStartInit && isnothing(p0) && solver ∈ manifold_solvers
+        _cpd_als_warm_then_pack(
+            model,
+            init_eff;
+            tol,
+            normalization = als_normalization_eff,
+            verbose,
+            pullback_eps = pullback_eps_eff,
+            kwargs...,
+        )
+    else
+        _pack_cpd_explicit_p0(model, p0)
+    end
     result_rgd = with_phase_progress() do
         _solve_model(
             model;
