@@ -122,10 +122,10 @@ function sthosvd(
         Sk_unfold = unfold_mode(S, k)
 
         F = svd(Sk_unfold)
-        rk_actual = min(rk, length(F.S)) 
+        rk_actual = min(rk, length(F.S))
 
-        Uk = F.U[:, 1:rk_actual]     
-        singular_vals[k] = F.S 
+        Uk = F.U[:, 1:rk_actual]
+        singular_vals[k] = F.S
 
         factors[k] = Uk
 
