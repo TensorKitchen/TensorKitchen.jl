@@ -68,9 +68,6 @@ function nncpd(
     verbose = true,
     vector_transport_method = nothing,
     pullback_eps = 1e-8,
-    als_polish_max_steps = nothing,
-    als_polish_chunk::Int = 10,
-    als_polish_rel_improve = 1e-10,
     kwargs...,
 ) where {T<:AbstractFloat,N}
     return _cpd_impl(
@@ -93,9 +90,6 @@ function nncpd(
         verbose = verbose,
         vector_transport_method = vector_transport_method,
         pullback_eps = pullback_eps,
-        als_polish_max_steps = als_polish_max_steps,
-        als_polish_chunk = als_polish_chunk,
-        als_polish_rel_improve = als_polish_rel_improve,
         kwargs...,
     )
 end

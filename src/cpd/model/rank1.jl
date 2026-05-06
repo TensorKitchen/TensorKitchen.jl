@@ -178,46 +178,6 @@ function initial_point(
     return pack_point_rank1_segre(one(T), U0)
 end
 
-function initial_point(
-    model::Rank1CPDModel{T,N},
-    init::ALSWarmStartInit;
-    verbose::Bool = false,
-) where {T,N}
-    p_base = initial_point(model, init.base_init; verbose)
-    λ0, U0 = _cp_init_factors_from_rank1_point(
-        p_base,
-        model.dims;
-        nonnegative = model.nonnegative,
-        geometry = _rank1_uses_softplus_metric(model.M) ? :softplus_metric :
-                   :squaring_metric,
-    )
-    λw, Uw = fit_cp_als(
-        model.A,
-        1;
-        maxiter = init.nsteps,
-        tol = zero(T),
-        init = RandomInit(),
-        init_factors = (λ0, U0),
-        nonnegative = model.nonnegative,
-        verbose = verbose,
-        return_stats = false,
-        progress_phase = :initialization,
-    )
-    λ1 = λw[1]
-    U1 = [vec(Um[:, 1]) for Um in Uw]
-    if model.nonnegative
-        if _rank1_uses_softplus_metric(model.M)
-            λ̃ = _invsoftplus(max(abs(λ1), eps(T)))
-            Ũ = [_invsoftplus.(max.(u, eps(T))) for u in U1]
-        else
-            λ̃ = sqrt(max(abs(λ1), eps(T)))
-            Ũ = [sqrt.(max.(u, eps(T))) for u in U1]
-        end
-        return pack_point_rank1(λ̃, Ũ)
-    end
-    return pack_point_rank1_segre(λ1, U1)
-end
-
 initial_point(model::Rank1CPDModel, init::PointInit; kwargs...) = init.point
 initial_point(model::Rank1CPDModel, init::FunctionInit; kwargs...) = init.f(model)
 

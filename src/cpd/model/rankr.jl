@@ -386,27 +386,27 @@ function rgrad(model::RankRCPDModel{T,N}, p) where {T,N} # Riemannian gradient f
         return rgrad_exact(model, p) # fast native closed-form via local Segre projection
     end
 
-    λ, U = unpack_rankr_canonical(p, model.dims, model.r) # unpack the point
+    λ, U = unpack_rankr_canonical(p, model.dims, model.r) 
 
-    Nmodes = length(U) # number of modes
-    r = model.r # rank
+    Nmodes = length(U) 
+    r = model.r 
 
-    contracts = Vector{Matrix{T}}(undef, Nmodes) # contracts for each mode
+    contracts = Vector{Matrix{T}}(undef, Nmodes) 
     for m = 1:Nmodes
-        contracts[m] = mttkrp(model.A, U, m; method = :auto) # compute the MTTKRP for the m-th mode
+        contracts[m] = mttkrp(model.A, U, m; method = :auto) 
     end
 
-    inner = _inner_from_mttkrp_first_mode(U, contracts[1]) # compute the inner product for the first mode
-    grams = _gram_matrices(U) # compute the Gram matrices
-    cross_mat = _cross_unit_from_grams(grams) # compute the cross unit matrix
-    grad_λ = grad_lambda_cp(λ, inner, cross_mat) # compute the gradient for the lambda
+    inner = _inner_from_mttkrp_first_mode(U, contracts[1]) 
+    grams = _gram_matrices(U)
+    cross_mat = _cross_unit_from_grams(grams) 
+    grad_λ = grad_lambda_cp(λ, inner, cross_mat) 
 
-    gradU = _rankr_gradU_from_terms(U, λ, contracts, grams) # compute the gradient for the U
+    gradU = _rankr_gradU_from_terms(U, λ, contracts, grams)
     for m = 1:Nmodes
-        Gm = gradU[m] # gradient for the m-th mode
+        Gm = gradU[m]
         if model.scale_by_lambda
             for k = 1:r
-                Gm[:, k] ./= max(abs(λ[k]), model.lambda_eps) # scale the gradient by the lambda if the scale_by_lambda flag is true
+                Gm[:, k] ./= max(abs(λ[k]), model.lambda_eps) 
             end
         end
 
@@ -442,45 +442,6 @@ function initial_point(
     end
     return model.geometry == :native ? pack_rankr_native(λ0, U0, model.r) :
            pack_rankr_canonical(λ0, U0, model.r) # native: ArrayPartition, canonical: tuple            
-end
-
-function initial_point(
-    model::RankRCPDModel{T,N},
-    init::ALSWarmStartInit;
-    verbose::Bool = false,
-) where {T,N}
-    p_base = initial_point(model, init.base_init; verbose)
-    λ0, U0 = _cp_init_factors_from_rankr_point(
-        p_base,
-        model.dims,
-        model.r;
-        nonnegative = model.nonnegative,
-        geometry = model.geometry,
-    )
-    λw, Uw = fit_cp_als(
-        model.A,
-        model.r;
-        maxiter = init.nsteps,
-        tol = zero(T),
-        init = RandomInit(),
-        init_factors = (λ0, U0),
-        nonnegative = model.nonnegative,
-        verbose = verbose,
-        return_stats = false,
-        progress_phase = :initialization,
-    )
-    if model.nonnegative
-        if model.geometry == :softplus_metric
-            λ̃ = _invsoftplus.(max.(abs.(λw), eps(T)))
-            Ũ = [_invsoftplus.(max.(Um, eps(T))) for Um in Uw]
-        else
-            λ̃ = sqrt.(max.(abs.(λw), eps(T)))
-            Ũ = [sqrt.(max.(Um, eps(T))) for Um in Uw]
-        end
-        return pack_point_rankr(λ̃, Ũ, model.r)
-    end
-    return model.geometry == :native ? pack_rankr_native(λw, Uw, model.r) :
-           pack_rankr_canonical(λw, Uw, model.r)
 end
 
 initial_point(model::RankRCPDModel, init::PointInit; kwargs...) = init.point

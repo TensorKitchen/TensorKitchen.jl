@@ -437,6 +437,37 @@ end
     @test res_alswarm_sym isa CPDResult
     @test isfinite(res_alswarm_sym.rel_error)
 
+    res_als_warm = cpd(
+        A,
+        r;
+        solver = :als,
+        init = TuckerInit(),
+        maxiter = 3,
+        tol = 1e-6,
+        verbose = false,
+    )
+    res_alswarm_zero = cpd(
+        A,
+        r;
+        solver = :rgd,
+        init = :alswarm,
+        warm_steps = 3,
+        warm_init = TuckerInit(),
+        maxiter = 0,
+        tol = 1e-6,
+        verbose = false,
+    )
+    res_manual_zero = cpd(
+        A,
+        r;
+        solver = :rgd,
+        p0 = res_als_warm,
+        maxiter = 0,
+        tol = 1e-6,
+        verbose = false,
+    )
+    @test res_alswarm_zero.rel_error ≈ res_manual_zero.rel_error atol = 1e-12
+
     res_rcg =
         cpd(A, r; solver = :rcg, init = :tucker, maxiter = 5, tol = 1e-6, verbose = false)
     @test res_rcg.solver_info.total_iterations == res_rcg.iterations
@@ -656,6 +687,37 @@ end
     @test all(w -> w >= -1e-12, TensorKitchen.weights(res_nn_api))
     @test all(F -> all(F .>= -1e-12), TensorKitchen.factors(res_nn_api))
     @test isfinite(res_nn_api.rel_error)
+
+    res_nn_als_warm = nncpd(
+        A,
+        r;
+        solver = :als,
+        maxiter = 3,
+        tol = 1e-6,
+        init = TuckerInit(),
+        verbose = false,
+    )
+    res_nn_alswarm_rgd = nncpd(
+        A,
+        r;
+        solver = :rgd,
+        init = :alswarm,
+        warm_steps = 3,
+        warm_init = TuckerInit(),
+        maxiter = 0,
+        tol = 1e-6,
+        verbose = false,
+    )
+    res_nn_manual_rgd = nncpd(
+        A,
+        r;
+        solver = :rgd,
+        p0 = res_nn_als_warm,
+        maxiter = 0,
+        tol = 1e-6,
+        verbose = false,
+    )
+    @test res_nn_alswarm_rgd.rel_error ≈ res_nn_manual_rgd.rel_error atol = 1e-12
 
     res_nn_api_heur = nncpd(
         A;
