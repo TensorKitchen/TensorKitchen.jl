@@ -43,63 +43,69 @@ end
     - model means an already constructed JoinModel.
     - It fully fixes the decomposition structure and target.
     - `approx(model; ...)` just solves that model.
-    - Example: If you want to approximate a point on the sphere, you can build a `JoinModel` and then use `approx` to refine it.
-        ```julia
-        target = [1.2, 0.4, -0.3]
-        model = JoinModel(Manifolds.Sphere(2), target)
-        approx(model; maxiter = 100, verbose = false)
-        # returns an ApproxResult
-        ```
+    Example: If you want to approximate a point on the sphere, you can build a `JoinModel` and then use `approx` to refine it.
+
+```julia
+target = [1.2, 0.4, -0.3]
+model = JoinModel(Manifolds.Sphere(2), target)
+approx(model; maxiter = 100, verbose = false)
+# returns an ApproxResult
+```
 
 * `approx(manifolds, target; kwargs...)` : Builds a generic join model from a tuple of existing manifolds and routes to according to dispatch.
-    - Example:
-        ```julia
-        target = randn(2, 3)
-        approx((Manifolds.Segre((2, 3)), Manifolds.Segre((2, 3))), target; verbose = false)
-        # This builds a join with 2 copies of Manifolds.Segre((2, 3))".
-        ```  
+    Example:
+
+```julia
+target = randn(2, 3)
+approx((Manifolds.Segre((2, 3)), Manifolds.Segre((2, 3))), target; verbose = false)
+# This builds a join with 2 copies of Manifolds.Segre((2, 3))".
+```  
     
 * `approx(M::ProductManifold, target; kwargs...)` : Uses the factors of a product manifold and route to CPD, BTD, or the generic join solver according to `dispatch`. 
     - M::ProductManifold means that you already have a product manifold whose factors are the join components.
     - approx(M, target; ...) uses those factors directly.
     - It is more explicit than `base`, because the components are already listed.
     
-   - Example:
-    ```julia
-    target = randn(2, 3)
-    M = ProductManifold(Manifolds.Segre((2, 3)), Manifolds.Segre((2, 3)))
-    approx(M, target; verbose = false)
-    # returns an CPDResult
-    ```
-    - Another example:
-    ```julia
-    target = randn(4, 3, 2)
-    M = ProductManifold(
-        Manifolds.Tucker((4, 3, 2), (2, 2, 2)),
-        Manifolds.Tucker((4, 3, 2), (2, 2, 2)),
-    )
-    approx(M, target; verbose = false)
-    # returns an BTDResult
-    ```
+   Example:
+
+```julia
+# Example 1
+target = randn(2, 3)
+M = ProductManifold(Manifolds.Segre((2, 3)), Manifolds.Segre((2, 3)))
+approx(M, target; verbose = false)
+# returns an CPDResult
+
+# Example 2
+target = randn(4, 3, 2)
+M = ProductManifold(
+    Manifolds.Tucker((4, 3, 2), (2, 2, 2)),
+    Manifolds.Tucker((4, 3, 2), (2, 2, 2)),
+)
+approx(M, target; verbose = false)
+# returns an BTDResult
+```
+
 * `approx(base, r, target; kwargs...)` : builds a rank-r Segre join and routes to CPD when base isa Manifolds.Segre and BTD when base isa Manifolds.Tucker unless generic
 dispatch is explicitly requested. 
     - base means one manifold template, not yet a full join.
     - `approx(base, r, target; ...)` repeats that same manifold r times to build a join.
     - `approx(base, target; ...)` builds a one-component join.
 
-    - Example:
-        ```julia
-        target = randn(2, 3)
-        approx(Manifolds.Segre((2, 3)), 2, target; verbose = false)
-        # returns an CPDResult
-        ```
+```julia
+target = randn(2, 3)
+approx(Manifolds.Segre((2, 3)), 2, target; verbose = false)
+# returns an CPDResult
+```
+
 * `approx(base, target; kwargs...)` : Builds a single-component generic join and route to the generic join solver.
-    - Example:
-        ```julia
-        target = [1.2, 0.4, -0.3]   
-        approx(Manifolds.Sphere(2), target; verbose = false)
-        # returns an ApproxResult
-        ```
+    Example:
+
+```julia
+target = [1.2, 0.4, -0.3]   
+approx(Manifolds.Sphere(2), target; verbose = false)
+# returns an ApproxResult
+```
+
 * By default, `approx` auto-routes by manifold family:
     - uniform `Manifolds.Segre` summands calls `cpd(...)`
     - uniform `Manifolds.Tucker` summands calls `btd(...)`
