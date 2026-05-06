@@ -32,7 +32,6 @@ CPDResult{Float64}
   Rel. error:   0.3765605093526155
 ``` 
 """
-
 function nncpd(
     A::AbstractArray{T,N};
     r::Union{Int,Nothing} = nothing,
