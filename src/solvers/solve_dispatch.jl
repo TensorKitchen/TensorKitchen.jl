@@ -1,11 +1,5 @@
 # solvers/solve_dispatch.jl — shared symbol-based solver dispatch
 
-"""
-    _solver_object(solver, stepsize; kwargs...) -> AbstractSolver
-
-Construct the concrete solver object selected by a public `solver::Symbol`.
-Solver-specific keyword arguments are consumed here before generic dispatch.
-"""
 function _solver_object(solver::Symbol, stepsize::Real; kwargs...)
     solvers = (
         als = () -> ALSSolver(),
@@ -51,12 +45,6 @@ function _solver_object(solver::Symbol, stepsize::Real; kwargs...)
     return f()
 end
 
-"""
-    _solve_with_solver(solver_obj::AbstractROSolver, model; kwargs...)
-
-Route Riemannian optimization solvers through their common `solve` interface
-with gradient-mode, normalization, and vector-transport options.
-"""
 function _solve_with_solver(
     solver_obj::AbstractROSolver,
     model;
@@ -85,12 +73,6 @@ function _solve_with_solver(
     )
 end
 
-"""
-    _solve_with_solver(solver_obj::Union{ALSSolver,RALSSolver}, model; kwargs...)
-
-Route ALS-family solvers through their Euclidean factor-update path, where
-gradient-mode and vector transport are not used.
-"""
 function _solve_with_solver(
     solver_obj::Union{ALSSolver,RALSSolver},
     model;

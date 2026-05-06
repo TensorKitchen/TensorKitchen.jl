@@ -11,5 +11,6 @@ makedocs(
         "Join" => "join.md",
         "Utilities" => "utils.md",
         "Pipeline" => "PIPELINE.md",
+        "References" => "references.md",
     ],
 )

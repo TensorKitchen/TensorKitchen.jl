@@ -2,12 +2,6 @@
 
 @inline _is_manifold_like(x) = x isa AbstractManifold
 
-"""
-    _as_join_manifold_tuple(manifolds) -> Tuple
-
-Normalize tuple/vector/product-manifold specifications into the tuple of
-component manifolds used by join backends.
-"""
 function _as_join_manifold_tuple(manifolds::Tuple)
     all(_is_manifold_like, manifolds) || throw(
         ArgumentError(
@@ -36,12 +30,6 @@ _as_join_manifold_tuple(M::ProductManifold) = Tuple(M.manifolds)
     )
 end
 
-"""
-    _manifold_init(M, target, init)
-
-Dispatch built-in initialization for a single join component manifold using the
-current target or residual.
-"""
 function _manifold_init(M, target, init)
     init_sym = _builtin_initializer_symbol(init)
     if M isa Manifolds.Sphere

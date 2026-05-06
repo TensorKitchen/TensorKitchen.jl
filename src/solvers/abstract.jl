@@ -356,9 +356,9 @@ end
 
 @inline _unwrap_solver_manifold(M) = hasproperty(M, :M) ? getproperty(M, :M) : M
 
-# Solver retractions: one `ProductRetraction` per `ProductManifold` factor, using ManifoldsBase
-# defaults for each component type (e.g. `ExponentialRetraction` on `SoftplusEuclidean` / `Segre`,
-# `StabilizedRetraction` on `Sphere`). No separate `retractions.jl` — this is the only dispatch.
+# The actual methods depend on the registered defaults, e.g. custom manifolds such
+# as Segre or SoftplusEuclidean may choose ExponentialRetraction, while sphere-like
+# factors may choose their ManifoldsBase default.
 @inline function _default_component_retraction_method(Mi, pi)
     return ManifoldsBase.default_retraction_method(Mi, typeof(pi))
 end

@@ -3,7 +3,7 @@ export reconstruct, sthosvd, thosvd, optimal_mode_order, error_bound
 """
     ST-HOSVD (Sequentially Truncated HOSVD)
 
-Implementation of the Sequentially Truncated Higher-Order Singular Value Decomposition (ST-HOSVD)
+    Sequentially Truncated Higher-Order Singular Value Decomposition (ST-HOSVD)
 from:
 
     N. Vannieuwenhoven, R. Vandebril, K. Meerbergen,
@@ -12,17 +12,15 @@ from:
     DOI: 10.1137/110836067
 
 The ST-HOSVD computes a Tucker decomposition A ≈ S ×₁ U₁ ×₂ U₂ ⋯ ×_d U_d
-by sequentially computing truncated SVDs mode by mode, projecting (shrinking) the
-tensor after each mode. Uses `unfold_mode` and `mode_n_product` from the Tucker module.
+by sequentially computing truncated SVDs mode by mode, projecting (shrinking) the tensor after each mode.
 """
 
 # TuckerResult struct and show live in core/types.jl. Uses unfold_mode, mode_n_product from core/tensor_ops.
 
 """
-    reconstruct(td::TuckerResult) -> Array
+    reconstruct(td::TuckerResult) reconstructs the tensor from Tucker decomposition
 
-Reconstruct the full tensor from a Tucker decomposition:
-    A ≈ S ×₁ U₁ ×₂ U₂ ⋯ ×_d U_d
+    A = S ×₁ U₁ ×₂ U₂ ⋯ ×_d U_d
 """
 function reconstruct(td::TuckerResult{T,N}) where {T,N}
     A = td.core
@@ -36,7 +34,7 @@ end
 # Processing order heuristics (Section 6.3 of the paper)
 
 """
-    optimal_mode_order(dims::Tuple, ranks::Tuple) -> Vector{Int}
+    optimal_mode_order(dims::Tuple, ranks::Tuple) returns a vector of indices for the optimal mode order
 
 Heuristic for choosing a good processing order for ST-HOSVD.
 
@@ -61,12 +59,10 @@ end
 
 
 """
-    sthosvd(A, ranks; [processing_order], [verbose]) -> TuckerResult
-
-Compute the rank-(r₁,…,r_d) Sequentially Truncated HOSVD (ST-HOSVD).
+    sthosvd(A, ranks; [processing_order], [verbose])
+    Computes the rank-(r₁,…,r_d) Sequentially Truncated HOSVD (ST-HOSVD).
 
 # Algorithm (Definition 6.1, Algorithm 1)
-
 Given tensor A ∈ ℝ^{n₁×⋯×n_d} and target multilinear rank (r₁,…,r_d):
 
 1. Set Ŝ₀ = A
@@ -95,6 +91,7 @@ td = sthosvd(A, (5, 4, 3))
 rel_err = relative_error(A, td)
 ```
 """
+
 function sthosvd(
     A::AbstractArray{T,N},
     ranks::NTuple{N,Int};
@@ -122,20 +119,16 @@ function sthosvd(
     for (step, k) in enumerate(processing_order)
         rk = ranks[k]
 
-        # Mode-k unfolding of current (partially truncated) core tensor
         Sk_unfold = unfold_mode(S, k)
 
-        # Compact SVD, truncated to rank rk
         F = svd(Sk_unfold)
-        rk_actual = min(rk, length(F.S))  # handle rank-deficient case
+        rk_actual = min(rk, length(F.S))
 
-        Uk = F.U[:, 1:rk_actual]           # nk × rk  (orthonormal columns)
-        singular_vals[k] = F.S             # store full spectrum for error bound
+        Uk = F.U[:, 1:rk_actual]
+        singular_vals[k] = F.S
 
-        # Store factor matrix
         factors[k] = Uk
 
-        # Project: Ŝₖ = Ŝ_{k-1} ×_k Ûₖᵀ  (shrinks mode k from nk to rk)
         S = mode_n_product(S, Uk', k)
 
         verbose && update_progress!(
@@ -153,7 +146,7 @@ end
 
 
 """
-    sthosvd(A, tol; [processing_order], [verbose]) -> TuckerResult
+    sthosvd(A, tol; [processing_order], [verbose]) computes TuckerResult
 
 Tolerance-based ST-HOSVD: automatically determine ranks to achieve
     ‖A - Â‖_F ≤ tol · ‖A‖_F
@@ -255,13 +248,12 @@ end
 # T-HOSVD (classical truncated HOSVD) for comparison
 
 """
-    thosvd(A, ranks; [verbose]) -> TuckerResult
+    thosvd(A, ranks; [verbose]) computes TuckerResult
 
 Classical Truncated HOSVD (T-HOSVD).
 
 Computes all factor matrices from the *original* tensor (no sequential truncation),
-then computes the core tensor at the end. This is the standard approach from
-De Lathauwer et al. (2000).
+then computes the core tensor at the end.
 
 The ST-HOSVD is generally preferred: it requires fewer operations and typically
 yields a better approximation.
@@ -315,13 +307,11 @@ end
 
 # Error analysis utilities (Theorem 6.4)
 """
-    error_bound(td::TuckerResult) -> Float64
+    error_bound(td::TuckerResult) 
 
-Compute the a posteriori error bound from Theorem 6.4:
+    Returns the a posteriori error bound from Theorem 6.4:
     ‖A - Â‖²_F = Σₖ Σ_{j > rₖ} σ²_{k,j}
-where σ_{k,j} are the singular values at step k of the ST-HOSVD.
-
-This is exact (not just a bound) for the ST-HOSVD.
+    where σ_{k,j} are the singular values at step k of the ST-HOSVD.
 """
 function error_bound(td::TuckerResult{T,N}) where {T,N}
     sq_error = zero(T)

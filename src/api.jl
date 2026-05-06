@@ -8,11 +8,10 @@ include("api/nncpd.jl")
 include("api/btd.jl")
 include("api/tucker.jl")
 
-
 """
-    save_result(path, result)
+    save_result(path::AbstractString, result)
 
-Serialize a result to disk (Julia Serialization).
+Save a result to a file.
 """
 function save_result(path::AbstractString, result)
     open(path, "w") do io
@@ -20,11 +19,10 @@ function save_result(path::AbstractString, result)
     end
     return path
 end
-
 """
-    load_result(path)
+    load_result(path::AbstractString)
 
-Load a result serialized by `save_result`.
+Load a result from a file
 """
 function load_result(path::AbstractString)
     open(path, "r") do io

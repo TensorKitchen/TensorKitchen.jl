@@ -41,13 +41,7 @@ Â = reconstruct(res)
 cpd
 nncpd
 CPDResult
-RankOneTensor
 weights(::CPDResult)
-comp_weight(::CPDResult)
 factors(::CPDResult)
 reconstruct(::CPDResult)
-reconstruct_cp_rank1
-reconstruct_cpd_rankr
-normalize_components!
-normalize_components
 ```

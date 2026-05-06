@@ -33,10 +33,4 @@ factors(::TuckerResult)
 multilinear_rank(::TuckerResult)
 factor_dims(::TuckerResult)
 reconstruct(::TuckerResult)
-sthosvd
-thosvd
-optimal_mode_order
-error_bound
-tucker_hosvd
-reconstruct_tucker
 ```

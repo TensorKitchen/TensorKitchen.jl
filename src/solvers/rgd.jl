@@ -2,12 +2,7 @@
 export RGDSolver, RGDFixedSolver
 using Manopt
 
-"""
-    StopWhenCostRelChangeAndGradientLess(tol_cost, tol_grad)
 
-Manopt stopping criterion that requires both small relative cost change and
-small gradient norm. Used as a robust secondary stop for Riemannian solvers.
-"""
 mutable struct StopWhenCostRelChangeAndGradientLess{T<:Real} <: Manopt.StoppingCriterion
     tol_cost::T
     tol_grad::T
@@ -37,12 +32,7 @@ function (c::StopWhenCostRelChangeAndGradientLess)(problem, state, i)
     return false
 end
 
-"""
-    _tk_get_solver_result(state)
 
-Prefer Manopt's documented stable result accessor and keep a local fallback for
-older/wrapped states that may not dispatch cleanly.
-"""
 function _tk_get_solver_result(state)
     try
         return Manopt.get_solver_result(state)
@@ -61,23 +51,13 @@ function _tk_get_solver_result(state)
     )
 end
 
-"""
-    _align_layout_like_point(p, x)
 
-Adapt tuple/`ArrayPartition` layout of a gradient-like object to match the
-solver point representation expected by Manopt.
-"""
 @inline _align_layout_like_point(p, x) =
     hasproperty(p, :x) ?
     (hasproperty(x, :x) ? x : (x isa Tuple ? ArrayPartition(x...) : x)) :
     (hasproperty(x, :x) ? Tuple(getproperty(x, :x)) : x)
 
-"""
-    _to_array_partition(x)
 
-Recursively convert tuple-like product points into `ArrayPartition` so Manopt's
-`ProductManifold` methods receive their preferred layout.
-"""
 function _to_array_partition(x)
     if x isa ArrayPartition
         return ArrayPartition(map(_to_array_partition, x.x)...)
@@ -89,23 +69,13 @@ function _to_array_partition(x)
     return x
 end
 
-"""
-    _solver_point(M, p0)
 
-Normalize an initial point to the representation expected by the solver
-manifold, especially for `ProductManifold`-based joins.
-"""
 function _solver_point(M, p0)
     M2 = _unwrap_solver_manifold(M)
     return M2 isa ProductManifold ? _to_array_partition(p0) : p0
 end
 
-"""
-    _contains_sqeuclidean_manifold(M) -> Bool
 
-Return whether a solver manifold contains a squaring or softplus Euclidean
-pullback component that benefits from adaptive Armijo scaling.
-"""
 function _contains_sqeuclidean_manifold(M)
     M2 = _unwrap_solver_manifold(M)
     if M2 isa SqEuclidean || M2 isa SoftplusEuclidean
@@ -121,12 +91,6 @@ function _contains_sqeuclidean_manifold(M)
     return false
 end
 
-"""
-    _contains_strict_sqeuclidean_manifold(M) -> Bool
-
-Return whether a solver manifold contains a strict squaring pullback component,
-excluding softplus pullback components.
-"""
 function _contains_strict_sqeuclidean_manifold(M)
     M2 = _unwrap_solver_manifold(M)
     if M2 isa SqEuclidean
@@ -139,12 +103,7 @@ function _contains_strict_sqeuclidean_manifold(M)
     return false
 end
 
-"""
-    _armijo_max_decreases(initial_stepsize, contraction, alpha_min) -> Int
 
-Compute a safe upper bound on Armijo backtracking contractions before the step
-falls below `alpha_min`.
-"""
 function _armijo_max_decreases(initial_stepsize::Real, contraction::Real, alpha_min::Real)
     initial_stepsize <= alpha_min && return 0
     (contraction <= 0 || contraction >= 1) && return 1000
@@ -152,12 +111,7 @@ function _armijo_max_decreases(initial_stepsize::Real, contraction::Real, alpha_
     return max(n, 0)
 end
 
-"""
-    _adaptive_initial_stepsize(M, p0, model_grad, retraction_method, base_stepsize; kwargs...)
 
-Estimate a scale-aware initial Armijo step with a small retraction-based probe.
-Falls back to `base_stepsize` whenever the probe is unsupported or non-finite.
-"""
 function _adaptive_initial_stepsize(
     M,
     p0,
@@ -218,12 +172,7 @@ function _all_finite(x)
     end
 end
 
-"""
-    _safe_cost_function(model_cost)
 
-Wrap a model cost so non-finite points or costs are reported as `Inf` instead
-of propagating invalid values into Manopt line search.
-"""
 function _safe_cost_function(model_cost)
     return function (M, p)
         _all_finite(p) || return Inf
@@ -272,12 +221,7 @@ end
     end
 end
 
-"""
-    _solver_iterations(state, maxiter)
 
-Prefer Manopt's stable iteration-count accessor when available and keep a
-fallback for older versions / unusual wrapped states.
-"""
 function _solver_iterations(state, maxiter::Int)
     if isdefined(Manopt, :stopped_at)
         try
@@ -297,11 +241,6 @@ end
     return isdefined(Manopt, :stopped_at) ? :stopped_at : :stop_at_iteration_fallback
 end
 
-"""
-    _solver_stats(model_cost, model_grad, M, p_opt, state; tol_T, maxiter, normA2, solver, tiny_grad_tol)
-
-Build stats tuple for manifold optimizers.
-"""
 function _solver_stats(
     model_cost,
     model_grad,
@@ -586,12 +525,6 @@ function _solver_post_step_callback(
     end
 end
 
-"""
-    solve_rgd(model_cost, model_egrad, M, p0; maxiter, stepsize, tol, verbose, return_stats, model_grad)
-
-Riemannian gradient descent inner loop. Uses Armijo line search and an optional
-precomputed gradient closure `model_grad`.
-"""
 function solve_rgd(
     model_cost,
     model_egrad,
@@ -614,8 +547,6 @@ function solve_rgd(
     model_grad_local = _layout_adapt_gradient(model_grad_raw)
     retraction_method = _solver_retraction_method(M, p0_local)
     armijo_alpha_min = T(1e-8)
-    # Legacy value was a fixed 1e-5; use adaptive tol_g for robust convergence
-    # reporting across scales while still passing through tiny_grad_tol API.
     tol_g = max(sqrt(T(tol)), T(1e-4))
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
 

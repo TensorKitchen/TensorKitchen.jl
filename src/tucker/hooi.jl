@@ -3,9 +3,6 @@ export hooi
 """
 High-order orthogonal iteration (HOOI) for Tucker decomposition.
 
-Unified implementation: one `hooi` that supports init from HOSVD, ST-HOSVD, T-HOSVD,
-or a compatible [`TuckerResult`](@ref) (warm-started factor matrices), and returns a `TuckerResult`.
-Use `td.core` and `td.factors` for (core, factors).
 """
 
 function hooi(
@@ -42,19 +39,12 @@ function hooi(
         end
         factors0 = td0.factors
         singular_vals = [copy(td0.singular_values[m]) for m = 1:d]
-    elseif init == :hosvd
-        _, factors0 = tucker_hosvd(A, ranks)
-        singular_vals = [T[] for _ = 1:d]
     elseif init == :sthosvd
         td0 = sthosvd(A, ranks)
         factors0 = td0.factors
         singular_vals = td0.singular_values
-    elseif init == :thosvd
-        td0 = thosvd(A, ranks)
-        factors0 = td0.factors
-        singular_vals = td0.singular_values
     else
-        error("Unknown init: $init. Use :hosvd, :sthosvd, :thosvd, or a TuckerResult.")
+        error("Unknown init: $init. Use :sthosvd or a TuckerResult.")
     end
 
     factors = [copy(factors0[m]) for m = 1:d]

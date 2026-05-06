@@ -1,12 +1,6 @@
 # api/cpd.jl — user-facing CP decomposition entry points
 export cpd
 
-"""
-    CPDOpts
-
-Keyword-struct form of the CPD frontend options. Used by the legacy
-`cpd(A, r, opts)` path and for keyword validation in the compact API.
-"""
 Base.@kwdef struct CPDOpts{T<:Real}
     solver::Symbol = :rgd
     geometry::Symbol = :canonical
@@ -35,19 +29,9 @@ function _validate_opts(opts::CPDOpts)
     return opts
 end
 
-"""
-    _resolve_cpd_init(init, solver) -> initializer
-
-Resolve `:auto` to the default CPD initializer for the selected solver family.
-"""
 @inline function _resolve_cpd_init(init, solver::Symbol)
     init == :auto || return init
     return solver == :als ? :tucker : :alswarm
-end
-
-function _default_als_polish_max_steps(r::Int)
-    r >= 1 || throw(ArgumentError("rank r must be >= 1, got r=$r"))
-    return clamp(10 + 5 * r, 20, 120)
 end
 
 function _pullback_eps_value(::Type{T}, pullback_eps) where {T<:AbstractFloat}
@@ -55,37 +39,6 @@ function _pullback_eps_value(::Type{T}, pullback_eps) where {T<:AbstractFloat}
     isfinite(ε) && ε > zero(T) ||
         throw(ArgumentError("pullback_eps must be finite and positive, got $pullback_eps."))
     return ε
-end
-
-"""
-    _nncpd_manifold_snapshot(model, p, solver; kwargs...) -> NamedTuple
-
-Build result-like statistics for a nonnegative CPD manifold point, typically
-used to compare warm-start, RGD, and polished candidates.
-"""
-function _nncpd_manifold_snapshot(
-    model::JoinModel,
-    p,
-    solver::Symbol;
-    iterations::Int,
-    converged::Bool,
-    solver_info = (;),
-)
-    M = manifold(model)
-    pl = _solver_point(M, p)
-    cp = cpd_point(model, pl)
-    X = reconstruct_cpd_rankr(lambda(cp), factors(cp))
-    rel = rel_error(tensor(model), X)
-    return (
-        point = pl,
-        cost = cost(model, pl),
-        rel_error = rel,
-        grad_norm = norm(M, pl, rgrad(model, pl)),
-        iterations = iterations,
-        converged = converged,
-        solver = solver,
-        solver_info = solver_info,
-    )
 end
 
 function _merge_res_solver_info(res, patch::NamedTuple)
@@ -102,123 +55,125 @@ function _merge_res_solver_info(res, patch::NamedTuple)
     )
 end
 
-"""
-    _polish_nonneg_with_als(model, result, r; kwargs...) -> NamedTuple
+function _pack_cpd_explicit_p0(model, p0)
+    p0 isa CPDPoint && return pack_cpd_point(model, p0)
+    p0 isa CPDResult && return pack_cpd_point(model, cpd_point(p0))
+    return p0
+end
 
-Run chunked NNCP-ALS polish after manifold optimization and stop when the
-relative-error gain stalls or the step budget is exhausted.
-"""
-function _polish_nonneg_with_als(
-    model::JoinModel,
-    result,
-    r::Int;
-    als_normalization,
-    polish_max_steps::Int,
-    polish_chunk::Int = 10,
-    polish_rel_improve::Real = 1e-10,
+function _cpd_als_warm_then_pack(
+    target::JoinModel{<:AbstractFloat,<:CPDBackend},
+    init::ALSWarmStartInit;
+    tol::Real,
+    normalization,
+    verbose::Bool,
+    pullback_eps::Real,
+    kwargs...,
 )
-    polish_max_steps <= 0 &&
-        return (result = result, als_polish_steps = 0, als_polish_chunks = 0)
-    polish_chunk < 1 && throw(ArgumentError("polish_chunk must be >= 1, got $polish_chunk"))
-    M = manifold(model)
-    base_iters = iterations(result)
-    current = result
-    total_als_iters = 0
-    chunks = 0
-    T = eltype(rel_error(current))
-    floor_improve = T(polish_rel_improve)
-
-    while total_als_iters < polish_max_steps
-        step = min(polish_chunk, polish_max_steps - total_als_iters)
-        step <= 0 && break
-        cp = cpd_point(model, point(current))
-        als_out = fit_cp_als(
-            tensor(model),
-            r;
-            maxiter = step,
-            tol = zero(eltype(lambda(cp))),
-            init = RandomInit(),
-            init_factors = (lambda(cp), factors(cp)),
-            nonnegative = true,
-            normalization = als_normalization,
-            verbose = false,
+    inner = cpd_model(target)
+    A = tensor(target)
+    r = inner isa RankRCPDModel ? inner.r : 1
+    T = eltype(A)
+    warm_init = _resolve_cpd_init(init.base_init, :als)
+    if r == 1
+        warm_out = fit_cp_als(
+            A,
+            1;
+            init = warm_init,
+            maxiter = init.nsteps,
+            tol = tol,
+            normalization = normalization,
+            mttkrp_method = get(kwargs, :mttkrp_method, :auto),
+            nonnegative = inner.nonnegative,
+            verbose = verbose,
             return_stats = true,
         )
-        chunks += 1
-        total_als_iters += iterations(als_out)
-        cp_new = CPDPoint(weights(als_out), factors(als_out))
-        p_new = _solver_point(M, pack_cpd_point(model, cp_new))
-        rel_new =
-            rel_error(tensor(model), reconstruct_cpd_rankr(lambda(cp_new), factors(cp_new)))
-        rel_old = rel_error(current)
-        if !(rel_new < rel_old)
-            break
-        end
-        improvement = rel_old - rel_new
-        current = (
-            point = p_new,
-            cost = cost(model, p_new),
-            rel_error = rel_new,
-            grad_norm = norm(M, p_new, rgrad(model, p_new)),
-            iterations = base_iters + total_als_iters,
-            converged = converged(result),
-            solver = solver(result),
-            solver_info = hasproperty(result, :solver_info) ? solver_info(result) : (;),
-        )
-        improvement <= floor_improve * max(rel_old, eps(T)) && break
+        return pack_cpd_point(target, CPDPoint(warm_out.weights, warm_out.factors))
     end
-    si0 = hasproperty(result, :solver_info) ? solver_info(result) : (;)
-    si = merge(
-        si0,
-        (
-            als_polish_steps = total_als_iters,
-            als_polish_chunks = chunks,
-            als_polish_applied = total_als_iters > 0,
-            als_polish_max_steps_cap = polish_max_steps,
-        ),
+    warm_model = JoinModel(
+        A,
+        r;
+        geometry = :canonical,
+        scale_by_lambda = inner.scale_by_lambda,
+        lambda_eps = inner.lambda_eps,
+        nonnegative = inner.nonnegative,
+        use_pullback_metric = false,
+        pullback_eps = pullback_eps,
     )
-    current = (
-        point = point(current),
-        cost = cost(current),
-        rel_error = rel_error(current),
-        grad_norm = grad_norm(current),
-        iterations = iterations(current),
-        converged = converged(current),
-        solver = solver(current),
-        solver_info = si,
+    warm_result = _solve_model(
+        warm_model;
+        init = warm_init,
+        solver = :als,
+        maxiter = init.nsteps,
+        stepsize = one(T),
+        tol = tol,
+        gradient_mode = :riemannian,
+        normalization = normalization,
+        verbose = verbose,
+        vector_transport_method = nothing,
+        nonnegative = inner.nonnegative,
+        kwargs...,
     )
-    return (
-        result = current,
-        als_polish_steps = total_als_iters,
-        als_polish_chunks = chunks,
+    warm_cpd = _to_cpd_result(warm_model, warm_result, size(A), r)
+    return pack_cpd_point(target, cpd_point(warm_cpd))
+end
+
+function initial_point(
+    model::RankRCPDModel{T,N},
+    init::ALSWarmStartInit;
+    verbose::Bool = false,
+) where {T<:AbstractFloat,N}
+    ε = _pullback_eps_value(T, 1e-8)
+    target = JoinModel(
+        model.A,
+        model.r;
+        geometry = model.geometry,
+        scale_by_lambda = model.scale_by_lambda,
+        lambda_eps = model.lambda_eps,
+        nonnegative = model.nonnegative,
+        use_pullback_metric = (model.geometry == :squaring_metric),
+        pullback_eps = ε,
+    )
+    norm_als = model.nonnegative ? NoNormalization() : SeparateLambdaNormalization()
+    return _cpd_als_warm_then_pack(
+        target,
+        init;
+        tol = T(1e-6),
+        normalization = norm_als,
+        verbose,
+        pullback_eps = ε,
     )
 end
 
-"""
-    _nncpd_pick_best_candidate(model, warm_res, rgd_res, polished_res, polish_meta)
-
-Select the best nonnegative CPD candidate by relative error and attach metadata
-summarizing the candidate comparison.
-"""
-function _nncpd_pick_best_candidate(
-    ::JoinModel,
-    warm_res,
-    rgd_res,
-    polished_res,
-    polish_meta,
-)
-    candidates = ((:warm, warm_res), (:rgd, rgd_res), (:polished, polished_res))
-    best_tag, best_res = candidates[argmin([rel_error(c[2]) for c in candidates])]
-    info = merge(
-        polish_meta,
-        (
-            nncp_best_candidate = best_tag,
-            nncp_rel_warm = rel_error(warm_res),
-            nncp_rel_rgd = rel_error(rgd_res),
-            nncp_rel_polished = rel_error(polished_res),
-        ),
+function initial_point(
+    model::Rank1CPDModel{T,N},
+    init::ALSWarmStartInit;
+    verbose::Bool = false,
+) where {T<:AbstractFloat,N}
+    ε = _pullback_eps_value(T, 1e-8)
+    geom =
+        model.nonnegative ?
+        (_rank1_uses_softplus_metric(model.M) ? :softplus_metric : :squaring_metric) :
+        :native
+    target = JoinModel(
+        model.A,
+        1;
+        geometry = geom,
+        scale_by_lambda = model.scale_by_lambda,
+        lambda_eps = model.lambda_eps,
+        nonnegative = model.nonnegative,
+        use_pullback_metric = (geom == :squaring_metric),
+        pullback_eps = ε,
     )
-    return _merge_res_solver_info(best_res, info)
+    norm_als = model.nonnegative ? NoNormalization() : SeparateLambdaNormalization()
+    return _cpd_als_warm_then_pack(
+        target,
+        init;
+        tol = T(1e-6),
+        normalization = norm_als,
+        verbose,
+        pullback_eps = ε,
+    )
 end
 
 function _cpd_impl(
@@ -241,9 +196,6 @@ function _cpd_impl(
     verbose,
     vector_transport_method,
     pullback_eps = 1e-8,
-    als_polish_max_steps = nothing,
-    als_polish_chunk::Int = 10,
-    als_polish_rel_improve = 1e-10,
     kwargs...,
 ) where {T<:AbstractFloat,N}
     haskey(kwargs, :softplus_beta) && throw(
@@ -266,14 +218,18 @@ function _cpd_impl(
             (nonnegative ? NoNormalization() : SeparateLambdaNormalization()) :
             NoNormalization()
         ) : _normalization_policy(normalization)
+    als_normalization_eff =
+        normalization == :auto ?
+        (nonnegative ? NoNormalization() : SeparateLambdaNormalization()) :
+        _normalization_policy(normalization)
     pullback_eps_eff = _pullback_eps_value(T, pullback_eps)
 
     r >= 1 || throw(ArgumentError("rank r must be >= 1, got r=$r"))
     nonnegative &&
-        solver ∉ (:als, :rgd, :rcg) &&
+        solver ∉ (:als, :rgd, :rgd_fixed, :rcg) &&
         throw(
             ArgumentError(
-                "nonnegative=true requires solver=:als, :rgd, or :rcg. Got solver=$solver.",
+                "nonnegative=true requires solver=:als, :rgd, :rgd_fixed, or :rcg. Got solver=$solver.",
             ),
         )
     geometry_eff ∈ (:native, :canonical, :squaring_metric, :softplus_metric) || throw(
@@ -313,15 +269,19 @@ function _cpd_impl(
         use_pullback_metric = (geometry_eff == :squaring_metric),
         pullback_eps = pullback_eps_eff,
     )
-    p_solve =
-        if nonnegative &&
-           solver ∈ (:rgd, :rcg) &&
-           init_eff isa ALSWarmStartInit &&
-           isnothing(p0)
-            initial_point(model, init_eff; verbose)
-        else
-            p0
-        end
+    p_solve = if init_eff isa ALSWarmStartInit && isnothing(p0) && solver ∈ manifold_solvers
+        _cpd_als_warm_then_pack(
+            model,
+            init_eff;
+            tol,
+            normalization = als_normalization_eff,
+            verbose,
+            pullback_eps = pullback_eps_eff,
+            kwargs...,
+        )
+    else
+        _pack_cpd_explicit_p0(model, p0)
+    end
     result_rgd = with_phase_progress() do
         _solve_model(
             model;
@@ -341,55 +301,17 @@ function _cpd_impl(
         )
     end
     result = result_rgd
-    if nonnegative && solver ∈ (:rgd, :rcg) && init_eff isa ALSWarmStartInit
-        p_warm = p_solve
-        warm_iters = init_eff isa ALSWarmStartInit ? init_eff.nsteps : 0
-        warm_res = _nncpd_manifold_snapshot(
-            model,
-            p_warm,
-            result_rgd.solver;
-            iterations = warm_iters,
-            converged = false,
-            solver_info = (nncp_snapshot = :warm,),
-        )
-        polish_cap = something(als_polish_max_steps, _default_als_polish_max_steps(r))
-        polish_out = _polish_nonneg_with_als(
-            model,
-            result_rgd,
-            r;
-            als_normalization = normalization_eff,
-            polish_max_steps = polish_cap,
-            polish_chunk = als_polish_chunk,
-            polish_rel_improve = als_polish_rel_improve,
-        )
-        polish_meta = (
-            nncp_als_polish_steps = polish_out.als_polish_steps,
-            nncp_als_polish_chunks = polish_out.als_polish_chunks,
-        )
-        result = _nncpd_pick_best_candidate(
-            model,
-            warm_res,
-            result_rgd,
-            polish_out.result,
-            polish_meta,
-        )
-    end
     if nonnegative && geometry_eff ∈ (:squaring_metric, :softplus_metric)
         result = _merge_res_solver_info(result, (nncp_pullback_eps = pullback_eps_eff,))
     end
     return _to_cpd_result(model, result, dims, r)
 end
 
-"""
-    cpd(A, r, opts::CPDOpts)
-    cpd(A, r; kwargs...)
+#### MAIN CPD ####
 
-Rank-`r` CP decomposition of `A`; `:als` converges linearly with rate ≈ 0.83 (~200 iters to machine precision on exact low-rank CP).
-"""
 function cpd(A::AbstractArray{T,N}, r::Int, opts::CPDOpts) where {T,N}
     _validate_opts(opts)
 
-    # nonnegative=true 일 경우 내부적으로 자동 NNCPD 파이프라인으로 라우팅 (중복 제거)
     if opts.nonnegative
         return nncpd(
             A,
@@ -407,7 +329,6 @@ function cpd(A::AbstractArray{T,N}, r::Int, opts::CPDOpts) where {T,N}
         )
     end
 
-    # Route through the public keyword API so dispatch/validation stays consistent.
     return cpd(
         A,
         r;
@@ -422,14 +343,7 @@ function cpd(A::AbstractArray{T,N}, r::Int, opts::CPDOpts) where {T,N}
     )
 end
 
-"""
-    cpd(A, r; kwargs...) -> CPDResult
-
-Keyword API backed by `CPDOpts` validation. Unknown keywords are rejected before
-entering the decomposition pipeline.
-"""
 function cpd(A::AbstractArray{T,N}, r::Int; kwargs...) where {T,N}
-    # 지원하지 않는 kwargs 방어
     valid_keys = fieldnames(CPDOpts)
     for k in keys(kwargs)
         k in valid_keys || throw(ArgumentError("Unknown keyword argument: $k"))
@@ -438,12 +352,6 @@ function cpd(A::AbstractArray{T,N}, r::Int; kwargs...) where {T,N}
     return cpd(A, r, opts)
 end
 
-"""
-    cpd(A; r=nothing, kwargs...) -> CPDResult
-
-Rank-optional CPD frontend. If `r` is omitted, uses the smallest tensor mode as
-a conservative heuristic rank.
-"""
 function cpd(
     A::AbstractArray{T,N};
     r::Union{Int,Nothing} = nothing,
@@ -460,10 +368,66 @@ function cpd(
 end
 
 """
-    cpd(A, r; init=:auto, solver=:rgd, geometry=:canonical, kwargs...) -> CPDResult
+    cpd(A, r; kwargs...)
 
-Main CPD frontend. Routes nonnegative requests to `nncpd`, otherwise delegates
-to the shared CPD implementation.
+Computes a rank-`r` CP approximation of `A` in two steps: (1) the first step finds an initial point; (2) the second step refines the initial point. Returns a [`CPDResult`](@ref). 
+If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
+
+## Main Options 
+* `init = :auto`: Sets the algorithm to find the initial point. Possible options are:
+    - `:auto`: Uses a default CPD initializer. For `solver = :als`, this uses `TuckerInit`; otherwise, it uses an ALS warm start.
+    - `:alswarm`: Runs ALS first and uses the result as the initial point for refinement.
+    - customized initial point:
+        - `:tucker` (default when `solver = :als`): Uses a default Tucker initializer.
+        - `:random`: Uses a random initial point.
+        - `:hosvd`: Uses a HOSVD initial point.
+* `solver = :rgd`: Sets the algorithm for refinement. Possible options are:
+    - `rgd` (default): Riemannian gradient descent
+    - `rgd_fixed`: Riemannian gradient descent with fixed step size
+    - `rcg`: Riemannian conjugate gradient
+    - `als`: Alternating Least Squares
+
+## Extended Options
+* `p0 = nothing`: Explicit initial point. If provided, it overrides the default initial point.
+* `:alswarm`: ALS warm start option.
+    - `warm_init = TuckerInit()`: Before finding the warm start initial point, this sets the good starting point for ALS.
+    - `warm_steps = 500`: Once finding the best initial point from warm_init, it runs this many ALS iterations to refine the initial point.
+* `maxiter = 500`: Maximum number of Riemannian gradient descent iterations.
+* `stepsize = 1.0`: Initial step size for line search in Riemannian gradient descent.
+* `tol = 1e-6`: Convergence tolerance.
+* `gradient_mode = :riemannian`: Gradient rule for manifold solvers. 
+  - If the model has a direct rgrad, it uses that.
+  - Otherwise it computes egrad and projects it to the tangent space.
+  - This behavior is in src/solvers/abstract.jl (line 289).
+* `geometry = :canonical`: Sets the geometry of the manifold. Possible options are:
+    - `:canonical`: Standard CPD parameterization with the usual Euclidean factors and canonical Riemannian gradient handling. Best default for general unconstrained CPD.
+    - `:squaring_metric`: Nonnegative geometry based on squared latent coordinates. Enforces nonnegativity indirectly, but can become ill-conditioned near zero.
+    - `:softplus_metric`: Nonnegative geometry uses a regularized pullback-inspired geometry induced by the softplus chart. Smoother and usually more stable near zero than `:squaring_metric`.
+    - `:native`: Native CP manifold geometry using the model’s intrinsic CP/Segre representation not for nonnegative=true. Best for structured join layouts with `Manifolds.Segre` summands.
+* `verbose = true`: Enables progress output.
+* `nonnegative::Bool = false`: Nonnegative CPD option to be selected by the user. (same as `nncpd`)
+* `pullback_eps = 1e-8`: Regularization parameter for pullback-style nonnegative geometries.
+
+## Notes
+* `solver = :als` does not use manifold geometry. In that case:
+    - `geometry` must be `:canonical`
+    - `gradient_mode` is ignored except for validation
+* `:squaring_metric` and `:softplus_metric` require `nonnegative = true`.
+* When `nonnegative = true`, `cpd(...)` routes to `nncpd(...)`. In that route:
+    - if `solver != :als` and `geometry` is left at `:canonical`, the effective geometry becomes `:softplus_metric`
+    - if `stepsize` is left at `1.0`, the effective default becomes `0.01`
+    - if `init = :tucker`, the effective initializer becomes `:alswarm`
+    
+## Example 
+```julia-repl
+julia> A = randn(20, 15, 10); r = 35
+julia> res = cpd(A, r)
+CPDResult{Float64}
+  Order:        3
+  Dimensions:   (20, 15, 10)
+  Rank:         35
+  Rel. error:   0.4359141301703327
+```
 """
 function cpd(
     A::AbstractArray{T,N},
@@ -485,9 +449,6 @@ function cpd(
     verbose = true,
     vector_transport_method = nothing,
     pullback_eps = 1e-8,
-    als_polish_max_steps = nothing,
-    als_polish_chunk::Int = 10,
-    als_polish_rel_improve = 1e-10,
     kwargs...,
 ) where {T<:AbstractFloat,N}
     if nonnegative
@@ -522,9 +483,6 @@ function cpd(
             pullback_eps = pullback_eps,
             verbose = verbose,
             vector_transport_method = vector_transport_method,
-            als_polish_max_steps = als_polish_max_steps,
-            als_polish_chunk = als_polish_chunk,
-            als_polish_rel_improve = als_polish_rel_improve,
             kwargs...,
         )
     end
@@ -548,9 +506,6 @@ function cpd(
         pullback_eps = pullback_eps,
         verbose = verbose,
         vector_transport_method = vector_transport_method,
-        als_polish_max_steps = als_polish_max_steps,
-        als_polish_chunk = als_polish_chunk,
-        als_polish_rel_improve = als_polish_rel_improve,
         kwargs...,
     )
 end

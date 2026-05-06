@@ -9,32 +9,29 @@ computed from an explicit approximation `Â`.
 
 Supported second arguments:
 - `Â::AbstractArray`
-- [`CPDResult`](@ref), [`TuckerResult`](@ref), [`ApproxResult`](@ref), [`BTDResult`](@ref)
+- [`CPDResult`](@ref) / [`ApproxResult`](@ref) / [`BTDResult`](@ref) as `res` (as in `res = cpd(A, r)`)
+- [`TuckerResult`](@ref) as `tucker_res` (as in `tucker_res = tucker(A, mlrank)`)
 - `(core, factors)` for Tucker via `rel_error(A, core, factors)`
 
-# Solver field `rel_error` vs. this function
-
-`cpd` / `btd` / join solvers set `result.rel_error` (a **field**) from fast in-loop statistics. This
-function** recomputes the error from the explicit reconstruction.
 """
 function rel_error(A::AbstractArray, Ahat::AbstractArray)
     return relative_frobenius_error(A, Ahat)
 end
 
-function rel_error(A::AbstractArray, r::CPDResult)
-    return relative_frobenius_error(A, reconstruct(r))
+function rel_error(A::AbstractArray, res::CPDResult)
+    return relative_frobenius_error(A, reconstruct(res))
 end
 
-function rel_error(A::AbstractArray, td::TuckerResult)
-    return relative_frobenius_error(A, reconstruct(td))
+function rel_error(A::AbstractArray, tucker_res::TuckerResult)
+    return relative_frobenius_error(A, reconstruct(tucker_res))
 end
 
-function rel_error(A::AbstractArray, r::ApproxResult)
-    return relative_frobenius_error(A, reconstruct(r))
+function rel_error(A::AbstractArray, res::ApproxResult)
+    return relative_frobenius_error(A, reconstruct(res))
 end
 
-function rel_error(A::AbstractArray, r::BTDResult)
-    return relative_frobenius_error(A, reconstruct(r))
+function rel_error(A::AbstractArray, res::BTDResult)
+    return relative_frobenius_error(A, reconstruct(res))
 end
 
 function rel_error(A::AbstractArray, core, factors)
@@ -42,4 +39,4 @@ function rel_error(A::AbstractArray, core, factors)
 end
 
 reconstruction_error(A, core, factors) = rel_error(A, core, factors)
-relative_error(A::AbstractArray, td::TuckerResult) = rel_error(A, td)
+relative_error(A::AbstractArray, tucker_res::TuckerResult) = rel_error(A, tucker_res)

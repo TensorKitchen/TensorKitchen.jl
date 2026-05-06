@@ -9,13 +9,6 @@
 
 export CPJoin, TuckerJoin, SegreProduct, CanonicalCP
 
-"""
-Named tensor-decomposition parameter manifolds built from join_product.
-
-These are semantic constructors for CPD/BTD-style models.
-"""
-
-
 
 """
     SegreProduct(dims, r)

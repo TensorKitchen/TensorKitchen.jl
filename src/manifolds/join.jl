@@ -26,7 +26,7 @@ function _segre_flat_factors(M::Manifolds.Segre)
 end
 
 """
-    join_product(base, r) -> ProductManifold
+    join_product(base, r) constructs a ProductManifold
 
 Construct rank-`r` join parameter manifold as a plain `ProductManifold`.
 For `Manifolds.Segre`, uses flattened `(Euclidean(1), Sphere, ..., Sphere)` factors

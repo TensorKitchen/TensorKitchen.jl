@@ -1,11 +1,7 @@
 # solvers/cp_als.jl — CP-ALS
 export ALSSolver, fit_cp_als
 
-"""
-    fit_cp_als(A, r; maxiter, tol, init, mttkrp_method, nonnegative, ...)
 
-CP-ALS. Uses MTTKRP; no manifold. Supports nonnegative coordinate updates.
-"""
 struct CPALSWorkspace
     grams::Any
     V::Any
@@ -88,7 +84,6 @@ function CPALSWorkspace(
     )
 end
 
-# --- small linear-algebra primitives ----------------------------------------
 
 @inline function _update_gram!(
     G::AbstractMatrix{T},
@@ -366,7 +361,6 @@ function fit_cp_als(
         stop_by_fit = fit_change < tol
         stop_by_kkt = update_policy == :ls || (iter >= miniter_eff && pg_norm <= pg_tol_eff)
 
-        # Tighten inner NNLS solves only when outer ALS appears stalled but KKT residual remains large.
         if update_policy == :nnls &&
            iter >= miniter_eff &&
            fit_change < max(T(5) * T(tol), sqrt(eps(T))) &&
@@ -444,7 +438,7 @@ end
 """
     ALSSolver
 
-CP-ALS. Uses Euclidean space; MTTKRP from tensor_ops.jl.
+CP-ALS solver; MTTKRP from tensor_ops.jl.
 """
 struct ALSSolver{P<:AbstractNormalizationPolicy} <: AbstractALSSolver
     normalization::P

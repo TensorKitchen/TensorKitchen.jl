@@ -1,12 +1,5 @@
 # solvers/rals.jl — Randomized ALS (CPRAND/CPRAND-MIX)
 
-"""
-    fit_cp_rals(A, r; samples, mix, ...)
-
-Randomized ALS (CPRAND/CPRAND-MIX). Battaglino et al., arXiv:1701.06600.
-- `samples`: least-squares samples (default: 10*r)
-- `mix`: if true, use CPRAND-MIX (random orthogonal mixing)
-"""
 function fit_cp_rals(
     A::AbstractArray{T,N},
     r::Int;

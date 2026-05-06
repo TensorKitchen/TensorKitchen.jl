@@ -178,46 +178,6 @@ function initial_point(
     return pack_point_rank1_segre(one(T), U0)
 end
 
-function initial_point(
-    model::Rank1CPDModel{T,N},
-    init::ALSWarmStartInit;
-    verbose::Bool = false,
-) where {T,N}
-    p_base = initial_point(model, init.base_init; verbose)
-    λ0, U0 = _cp_init_factors_from_rank1_point(
-        p_base,
-        model.dims;
-        nonnegative = model.nonnegative,
-        geometry = _rank1_uses_softplus_metric(model.M) ? :softplus_metric :
-                   :squaring_metric,
-    )
-    λw, Uw = fit_cp_als(
-        model.A,
-        1;
-        maxiter = init.nsteps,
-        tol = zero(T),
-        init = RandomInit(),
-        init_factors = (λ0, U0),
-        nonnegative = model.nonnegative,
-        verbose = verbose,
-        return_stats = false,
-        progress_phase = :initialization,
-    )
-    λ1 = λw[1]
-    U1 = [vec(Um[:, 1]) for Um in Uw]
-    if model.nonnegative
-        if _rank1_uses_softplus_metric(model.M)
-            λ̃ = _invsoftplus(max(abs(λ1), eps(T)))
-            Ũ = [_invsoftplus.(max.(u, eps(T))) for u in U1]
-        else
-            λ̃ = sqrt(max(abs(λ1), eps(T)))
-            Ũ = [sqrt.(max.(u, eps(T))) for u in U1]
-        end
-        return pack_point_rank1(λ̃, Ũ)
-    end
-    return pack_point_rank1_segre(λ1, U1)
-end
-
 initial_point(model::Rank1CPDModel, init::PointInit; kwargs...) = init.point
 initial_point(model::Rank1CPDModel, init::FunctionInit; kwargs...) = init.f(model)
 
@@ -248,13 +208,6 @@ function cpd_point(model::Rank1CPDModel{T,N}, p) where {T<:AbstractFloat,N}
     return CPDPoint(T[λ], [reshape(U[m], :, 1) for m = 1:length(U)])
 end
 
-"""
-    pack_cpd_point(model::Rank1CPDModel, point)
-
-Pack a canonical [`CPDPoint`](@ref) back into the rank-1 layout used by
-`model`, restoring either the `Manifolds.Segre` layout or a nonnegative
-internal parameterization as needed.
-"""
 function pack_cpd_point(
     model::Rank1CPDModel{T,N},
     point::CPDPoint{T},
@@ -278,15 +231,6 @@ function pack_cpd_point(
     return pack_point_rank1_segre(λ, U)
 end
 
-"""
-    post_step!(model::Rank1CPDModel, p; normalization=...)
-
-Rank-1 CPD post-step hook.
-
-For supported policies this converts `p` to [`CPDPoint`](@ref), applies
-normalization in canonical CP coordinates, and packs the result back into the
-model-specific layout.
-"""
 function post_step!(
     model::Rank1CPDModel,
     p;

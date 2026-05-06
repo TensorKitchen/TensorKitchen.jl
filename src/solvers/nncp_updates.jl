@@ -86,7 +86,6 @@ function _nncp_hals_mode_update!(
     V::AbstractMatrix{T},
     work::AbstractMatrix{T},
 ) where {T<:AbstractFloat}
-    # GPU-friendly fallback: projected Jacobi-style HALS step using matrix kernels.
     floor = sqrt(eps(T))
     d = max.(diag(V), floor)
     d_row = reshape(d, 1, :)
@@ -134,7 +133,6 @@ function _nncp_nnls_row_update!(
     max_cd_sweeps::Int = 10,
     row_tol::T = sqrt(eps(T)),
 ) where {T<:AbstractFloat}
-    # GPU-friendly fallback: projected gradient with diagonal preconditioning.
     floor = sqrt(eps(T))
     d = max.(diag(V), floor)
     @inbounds for _ = 1:max_cd_sweeps
@@ -176,7 +174,6 @@ function _nncp_nnls_mode_update!(
     max_cd_sweeps::Int = 10,
     row_tol::T = sqrt(eps(T)),
 ) where {T<:AbstractFloat}
-    # GPU-friendly fallback: matrix-wise projected gradient NNLS updates.
     floor = sqrt(eps(T))
     d = max.(diag(V), floor)
     d_row = reshape(d, 1, :)

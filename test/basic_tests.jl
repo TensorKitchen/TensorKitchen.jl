@@ -54,7 +54,7 @@ end
 # =========================================================================
 # tucker/hooi.jl
 # =========================================================================
-@testset "hooi.jl: hooi (TuckerResult), init :sthosvd :thosvd :hosvd" begin
+@testset "hooi.jl: hooi (TuckerResult), init :sthosvd" begin
     dims = (8, 6, 5)
     ranks = (3, 3, 2)
     core = randn(ranks...)
@@ -68,8 +68,16 @@ end
     @test td_zero isa TuckerResult
     @test size(td_zero.core) == ranks
     @test reconstruction_error(A, td_zero.core, td_zero.factors) < 1e-9
-    td_h = hooi(A, ranks; init = :hosvd, maxiter = 20, verbose = false)
-    @test td_h isa TuckerResult
+    td_st = hooi(A, ranks; init = :sthosvd, maxiter = 20, verbose = false)
+    @test td_st isa TuckerResult
+    @test_throws ErrorException hooi(A, ranks; init = :hosvd, maxiter = 20, verbose = false)
+    @test_throws ErrorException hooi(
+        A,
+        ranks;
+        init = :thosvd,
+        maxiter = 20,
+        verbose = false,
+    )
 end
 
 # =========================================================================
@@ -237,6 +245,20 @@ end
 
     generic_segre = JoinModel(Manifolds.Segre((6, 5, 4)), A)
     @test generic_segre isa JoinModel
+
+    sphere_target = [1.2, 0.4, -0.3]
+    sphere_single = approx(Manifolds.Sphere(2), sphere_target; maxiter = 1, verbose = false)
+    @test sphere_single isa ApproxResult
+    @test isfinite(sphere_single.rel_error)
+
+    sphere_pair = approx(
+        (Manifolds.Sphere(2), Manifolds.Sphere(2)),
+        sphere_target;
+        maxiter = 1,
+        verbose = false,
+    )
+    @test sphere_pair isa ApproxResult
+    @test isfinite(sphere_pair.rel_error)
 end
 
 @testset "solver helpers accept omitted normA2" begin
@@ -428,6 +450,37 @@ end
     )
     @test res_alswarm_sym isa CPDResult
     @test isfinite(res_alswarm_sym.rel_error)
+
+    res_als_warm = cpd(
+        A,
+        r;
+        solver = :als,
+        init = TuckerInit(),
+        maxiter = 3,
+        tol = 1e-6,
+        verbose = false,
+    )
+    res_alswarm_zero = cpd(
+        A,
+        r;
+        solver = :rgd,
+        init = :alswarm,
+        warm_steps = 3,
+        warm_init = TuckerInit(),
+        maxiter = 0,
+        tol = 1e-6,
+        verbose = false,
+    )
+    res_manual_zero = cpd(
+        A,
+        r;
+        solver = :rgd,
+        p0 = res_als_warm,
+        maxiter = 0,
+        tol = 1e-6,
+        verbose = false,
+    )
+    @test res_alswarm_zero.rel_error ≈ res_manual_zero.rel_error atol = 1e-12
 
     res_rcg =
         cpd(A, r; solver = :rcg, init = :tucker, maxiter = 5, tol = 1e-6, verbose = false)
@@ -648,6 +701,37 @@ end
     @test all(w -> w >= -1e-12, TensorKitchen.weights(res_nn_api))
     @test all(F -> all(F .>= -1e-12), TensorKitchen.factors(res_nn_api))
     @test isfinite(res_nn_api.rel_error)
+
+    res_nn_als_warm = nncpd(
+        A,
+        r;
+        solver = :als,
+        maxiter = 3,
+        tol = 1e-6,
+        init = TuckerInit(),
+        verbose = false,
+    )
+    res_nn_alswarm_rgd = nncpd(
+        A,
+        r;
+        solver = :rgd,
+        init = :alswarm,
+        warm_steps = 3,
+        warm_init = TuckerInit(),
+        maxiter = 0,
+        tol = 1e-6,
+        verbose = false,
+    )
+    res_nn_manual_rgd = nncpd(
+        A,
+        r;
+        solver = :rgd,
+        p0 = res_nn_als_warm,
+        maxiter = 0,
+        tol = 1e-6,
+        verbose = false,
+    )
+    @test res_nn_alswarm_rgd.rel_error ≈ res_nn_manual_rgd.rel_error atol = 1e-12
 
     res_nn_api_heur = nncpd(
         A;
@@ -1471,7 +1555,7 @@ end
         solver = :rgd,
         maxiter = 3,
         tol = 1e-6,
-        init = :hosvd,
+        init = :sthosvd,
         verbose = false,
     )
     @test res_tucker_auto isa BTDResult
@@ -1490,7 +1574,7 @@ end
         solver = :rgd,
         maxiter = 8,
         tol = 1e-6,
-        init = :hosvd,
+        init = :sthosvd,
         verbose = false,
     )
     @test res_btd isa BTDResult && length(res_btd.components) == 2
@@ -1507,7 +1591,7 @@ end
         solver = :als,
         init = :alswarm,
         warm_steps = 2,
-        warm_init = :hosvd,
+        warm_init = :sthosvd,
         warm_block_method = :hooi,
         warm_block_maxiter = 2,
         maxiter = 3,
@@ -1524,7 +1608,7 @@ end
         solver = :rgd,
         init = :alswarm,
         warm_steps = 2,
-        warm_init = :hosvd,
+        warm_init = :sthosvd,
         warm_block_method = :hooi,
         warm_block_maxiter = 2,
         maxiter = 3,
@@ -1541,7 +1625,7 @@ end
         solver = :rcg,
         init = :alswarm,
         warm_steps = 2,
-        warm_init = :hosvd,
+        warm_init = :sthosvd,
         warm_block_method = :hooi,
         warm_block_maxiter = 2,
         maxiter = 3,
@@ -1558,7 +1642,7 @@ end
         solver = :lbfgs,
         init = :alswarm,
         warm_steps = 2,
-        warm_init = :hosvd,
+        warm_init = :sthosvd,
         warm_block_method = :hooi,
         warm_block_maxiter = 2,
         maxiter = 5,
@@ -1649,7 +1733,7 @@ end
     )
     @test TensorKitchen.cost(model, p_warm_btd) <=
           TensorKitchen.cost(model, p_base_btd) + 1e-8
-    p0 = TensorKitchen.initial_point(model, :hosvd)
+    p0 = TensorKitchen.initial_point(model, :sthosvd)
     comps = TensorKitchen.extract_components(model, p0)
     Xhat = zero(A)
     for c in comps
@@ -1669,6 +1753,8 @@ end
     @test TensorKitchen.cost(model, p_ms) <= TensorKitchen.cost(model, p0) + 1e-8
     p_ms_sym = TensorKitchen.initial_point(model, :hosvd_multistart)
     @test isfinite(TensorKitchen.cost(model, p_ms_sym))
+    @test_throws ArgumentError TensorKitchen.initial_point(model, :hosvd)
+    @test_throws ArgumentError TensorKitchen.initial_point(model, :thosvd)
     @test_throws ArgumentError BTDHOSVDMultistartInit(0)
 
     eg = TensorKitchen.egrad(model, p0)
@@ -1858,17 +1944,13 @@ end
 
     # Tucker methods example coverage
     td_st = tucker(A, ranks; method = :sthosvd)
-    td_th = tucker(A, ranks; method = :thosvd)
-    td_hs = tucker(A, ranks; method = :hosvd)
     td_ho = tucker(A, ranks; method = :hooi, maxiter = 10, tol = 1e-6, verbose = false)
     @test td_st isa TuckerResult
-    @test td_th isa TuckerResult
-    @test td_hs isa TuckerResult
     @test td_ho isa TuckerResult
     @test size(reconstruct(td_st)) == size(A)
-    @test size(reconstruct(td_th)) == size(A)
-    @test size(reconstruct(td_hs)) == size(A)
     @test size(reconstruct(td_ho)) == size(A)
+    @test_throws ArgumentError tucker(A, ranks; method = :thosvd)
+    @test_throws ArgumentError tucker(A, ranks; method = :hosvd)
 
     # Join example
     target = [1.2, 0.4]

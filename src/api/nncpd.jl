@@ -2,10 +2,35 @@
 export nncpd
 
 """
-    nncpd(A; r=nothing, kwargs...) -> CPDResult
+     nncpd(A, r; kwargs...)
 
-Nonnegative CP decomposition. If `r` is omitted, uses the same rank heuristic as
-`cpd(A; r=nothing, ...)`.
+Computes a nonnegative rank-`r` CP approximation of `A` in two steps: (1) the first step finds an initial point; (2) the second step refines the initial point. Returns a [`CPDResult`](@ref). 
+If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
+`cpd(A, r; nonnegative=true, ...)` routes here and adopts the same effective defaults.
+
+## Options 
+The options are the same as for [`cpd`](@ref).
+
+Geometry guide:
+- `geometry=:softplus_metric`
+  Default and usually the safest choice. 
+- `geometry=:squaring_metric`
+  Uses a regularized pullback-inspired geometry induced by the squaring chart.
+- `geometry=:canonical`
+  Plain nonnegative CP coordinates without the pullback-style manifold geometry.
+  This is the natural choice with `solver=:als`.
+
+## Example 
+```julia-repl
+julia> A = randn(20, 15, 10); r = 35;
+julia> B = abs.(A)
+julia> nncpd(B, r)
+CPDResult{Float64}
+  Order:        3
+  Dimensions:   (20, 15, 10)
+  Rank:         35
+  Rel. error:   0.3765605093526155
+``` 
 """
 function nncpd(
     A::AbstractArray{T,N};
@@ -22,36 +47,7 @@ function nncpd(
     return nncpd(A, r_eff; kwargs...)
 end
 
-"""
-    nncpd(A, r; kwargs...) -> CPDResult
 
-Nonnegative CP decomposition with its own frontend defaults.
-
-Key options:
-- `solver=:rgd`, `geometry=:softplus_metric` is the default manifold route.
-- `solver=:als` uses the canonical nonnegative ALS route and ignores manifold
-  geometry.
-- `warm_steps=500` enables an ALS warm start before manifold refinement.
-
-Geometry guide:
-- `geometry=:softplus_metric`
-  Default and usually the safest choice. Uses a regularized pullback-inspired
-  geometry induced by the softplus chart. Good general-purpose option for dense
-  strictly positive data.
-- `geometry=:squaring_metric`
-  Uses a regularized pullback-inspired geometry induced by the squaring chart.
-  This can be useful on some sparse or near-zero exact nonnegative tensors, but
-  it is more chart-sensitive and should be treated as a specialized option.
-- `geometry=:canonical`
-  Plain nonnegative CP coordinates without the pullback-style manifold geometry.
-  This is the natural choice with `solver=:als`.
-
-Notes:
-- `pullback_eps` regularizes the diagonal metric in `:softplus_metric` and
-  `:squaring_metric`.
-- `cpd(A, r; nonnegative=true, ...)` routes here and adopts the same effective
-  defaults.
-"""
 function nncpd(
     A::AbstractArray{T,N},
     r::Int;
@@ -71,9 +67,6 @@ function nncpd(
     verbose = true,
     vector_transport_method = nothing,
     pullback_eps = 1e-8,
-    als_polish_max_steps = nothing,
-    als_polish_chunk::Int = 10,
-    als_polish_rel_improve = 1e-10,
     kwargs...,
 ) where {T<:AbstractFloat,N}
     return _cpd_impl(
@@ -96,9 +89,6 @@ function nncpd(
         verbose = verbose,
         vector_transport_method = vector_transport_method,
         pullback_eps = pullback_eps,
-        als_polish_max_steps = als_polish_max_steps,
-        als_polish_chunk = als_polish_chunk,
-        als_polish_rel_improve = als_polish_rel_improve,
         kwargs...,
     )
 end

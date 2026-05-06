@@ -1,12 +1,6 @@
 # solvers/btd_als.jl — Block coordinate ALS for BTD (sum of Tucker blocks)
 export fit_btd_als
 
-"""
-    _btd_block_ranks(backend, b) -> Tuple
-
-Return the multilinear rank of BTD block `b`, requiring the block manifold to be
-`Manifolds.Tucker`.
-"""
 @inline function _btd_block_ranks(backend::BTDBackend, b::Int)
     M = backend.manifolds[b]
     M isa Manifolds.Tucker || throw(
@@ -17,31 +11,15 @@ Return the multilinear rank of BTD block `b`, requiring the block manifold to be
     return multilinear_rank(M)
 end
 
-"""
-    _btd_block_point(td) -> Manifolds.TuckerPoint
-
-Convert a `TuckerResult` into the point representation used by the BTD join
-manifold.
-"""
 @inline function _btd_block_point(td::TuckerResult)
     return Manifolds.TuckerPoint(td.core, td.factors...)
 end
 
-"""
-    _btd_block_tensor(p) -> Array
-
-Reconstruct one BTD block tensor from its Tucker manifold point.
-"""
 @inline function _btd_block_tensor(p::Manifolds.TuckerPoint)
     core, factors = _tucker_data(p)
     return reconstruct_tucker(core, factors)
 end
 
-"""
-    _btd_tucker_point_to_result(p) -> TuckerResult
-
-Wrap a Tucker manifold point as a `TuckerResult` so it can warm-start HOOI.
-"""
 function _btd_tucker_point_to_result(p::Manifolds.TuckerPoint{T}) where {T<:AbstractFloat}
     core, factors = _tucker_data(p)
     N = length(factors)
@@ -50,12 +28,6 @@ function _btd_tucker_point_to_result(p::Manifolds.TuckerPoint{T}) where {T<:Abst
     return TuckerResult{T,N}(core, collect(factors), collect(1:N), [T[] for _ = 1:N])
 end
 
-"""
-    _btd_block_fit_tucker(A, ranks; method=:hooi, kwargs...) -> TuckerResult
-
-Fit one Tucker block to the current BTD residual using HOOI, ST-HOSVD, or
-T-HOSVD, optionally warm-started from the previous block point.
-"""
 function _btd_block_fit_tucker(
     A::AbstractArray{T,N},
     ranks::NTuple{N,Int};
@@ -87,24 +59,11 @@ function _btd_block_fit_tucker(
         )
     elseif method == :sthosvd
         return sthosvd(A, ranks)
-    elseif method in (:thosvd, :hosvd)
-        return thosvd(A, ranks)
     else
-        throw(
-            ArgumentError(
-                "Unknown block_method=$method. Use :hooi, :sthosvd, :thosvd, or :hosvd.",
-            ),
-        )
+        throw(ArgumentError("Unknown block_method=$method. Use :hooi or :sthosvd."))
     end
 end
 
-"""
-    fit_btd_als(A, backend; maxiter, tol, init, block_method, block_maxiter, ...)
-
-Block-coordinate ALS for BTD. Each pass refits every Tucker block against the
-current residual, tracks fit stagnation, and can restart from a stronger
-multistart initializer when progress stalls at high relative error.
-"""
 function fit_btd_als(
     A::AbstractArray{T,N},
     backend::BTDBackend{T,N};
@@ -283,12 +242,6 @@ function fit_btd_als(
     return return_stats ? result : point
 end
 
-"""
-    solve(::ALSSolver, model::JoinModel{<:BTDBackend}; kwargs...)
-
-Dispatch BTD models to `fit_btd_als`, preserving the common solver-result
-contract used by the rest of the pipeline.
-"""
 function solve(
     solver::ALSSolver,
     model::JoinModel{T,<:BTDBackend};

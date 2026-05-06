@@ -318,14 +318,6 @@ function _segre_tangent_tensorvec(comp, Xcomp)
     return v
 end
 
-"""
-    rgrad_exact(model, p)
-
-Fast closed-form Riemannian gradient for CPD on
-`ProductManifold(Manifolds.Segre(...), ...)`.
-Uses the Euclidean gradient in the `Manifolds.Segre` representation plus the package-local
-`egrad_to_rgrad(::Manifolds.Segre, ...)` / product-manifold projection path.
-"""
 function rgrad_exact(model::RankRCPDModel{T,N}, p) where {T,N} # exact gradient for geometry=:native
     model.geometry == :native ||
         throw(ArgumentError("rgrad_exact requires geometry=:native."))
@@ -386,27 +378,27 @@ function rgrad(model::RankRCPDModel{T,N}, p) where {T,N} # Riemannian gradient f
         return rgrad_exact(model, p) # fast native closed-form via local Segre projection
     end
 
-    λ, U = unpack_rankr_canonical(p, model.dims, model.r) # unpack the point
+    λ, U = unpack_rankr_canonical(p, model.dims, model.r)
 
-    Nmodes = length(U) # number of modes
-    r = model.r # rank
+    Nmodes = length(U)
+    r = model.r
 
-    contracts = Vector{Matrix{T}}(undef, Nmodes) # contracts for each mode
+    contracts = Vector{Matrix{T}}(undef, Nmodes)
     for m = 1:Nmodes
-        contracts[m] = mttkrp(model.A, U, m; method = :auto) # compute the MTTKRP for the m-th mode
+        contracts[m] = mttkrp(model.A, U, m; method = :auto)
     end
 
-    inner = _inner_from_mttkrp_first_mode(U, contracts[1]) # compute the inner product for the first mode
-    grams = _gram_matrices(U) # compute the Gram matrices
-    cross_mat = _cross_unit_from_grams(grams) # compute the cross unit matrix
-    grad_λ = grad_lambda_cp(λ, inner, cross_mat) # compute the gradient for the lambda
+    inner = _inner_from_mttkrp_first_mode(U, contracts[1])
+    grams = _gram_matrices(U)
+    cross_mat = _cross_unit_from_grams(grams)
+    grad_λ = grad_lambda_cp(λ, inner, cross_mat)
 
-    gradU = _rankr_gradU_from_terms(U, λ, contracts, grams) # compute the gradient for the U
+    gradU = _rankr_gradU_from_terms(U, λ, contracts, grams)
     for m = 1:Nmodes
-        Gm = gradU[m] # gradient for the m-th mode
+        Gm = gradU[m]
         if model.scale_by_lambda
             for k = 1:r
-                Gm[:, k] ./= max(abs(λ[k]), model.lambda_eps) # scale the gradient by the lambda if the scale_by_lambda flag is true
+                Gm[:, k] ./= max(abs(λ[k]), model.lambda_eps)
             end
         end
 
@@ -444,60 +436,12 @@ function initial_point(
            pack_rankr_canonical(λ0, U0, model.r) # native: ArrayPartition, canonical: tuple            
 end
 
-function initial_point(
-    model::RankRCPDModel{T,N},
-    init::ALSWarmStartInit;
-    verbose::Bool = false,
-) where {T,N}
-    p_base = initial_point(model, init.base_init; verbose)
-    λ0, U0 = _cp_init_factors_from_rankr_point(
-        p_base,
-        model.dims,
-        model.r;
-        nonnegative = model.nonnegative,
-        geometry = model.geometry,
-    )
-    λw, Uw = fit_cp_als(
-        model.A,
-        model.r;
-        maxiter = init.nsteps,
-        tol = zero(T),
-        init = RandomInit(),
-        init_factors = (λ0, U0),
-        nonnegative = model.nonnegative,
-        verbose = verbose,
-        return_stats = false,
-        progress_phase = :initialization,
-    )
-    if model.nonnegative
-        if model.geometry == :softplus_metric
-            λ̃ = _invsoftplus.(max.(abs.(λw), eps(T)))
-            Ũ = [_invsoftplus.(max.(Um, eps(T))) for Um in Uw]
-        else
-            λ̃ = sqrt.(max.(abs.(λw), eps(T)))
-            Ũ = [sqrt.(max.(Um, eps(T))) for Um in Uw]
-        end
-        return pack_point_rankr(λ̃, Ũ, model.r)
-    end
-    return model.geometry == :native ? pack_rankr_native(λw, Uw, model.r) :
-           pack_rankr_canonical(λw, Uw, model.r)
-end
-
 initial_point(model::RankRCPDModel, init::PointInit; kwargs...) = init.point
 initial_point(model::RankRCPDModel, init::FunctionInit; kwargs...) = init.f(model)
 
 supports_normalization_policy(model::RankRCPDModel, policy::AbstractNormalizationPolicy) =
     model.nonnegative || policy isa Union{NoNormalization,SeparateLambdaNormalization}
 
-"""
-    cpd_point(model::RankRCPDModel, p)
-
-Interpret a rank-`r` solver point `p` as a canonical [`CPDPoint`](@ref).
-
-This erases the distinction between canonical, `ProductManifold(Manifolds.Segre(...), ...)`, and
-nonnegative internal layouts so that backend postprocessing can operate on a
-single CP representation.
-"""
 function cpd_point(model::RankRCPDModel{T,N}, p) where {T<:AbstractFloat,N}
     if model.nonnegative
         λ̃, Ũ = unpack_point_rankr(p, model.dims, model.r)
@@ -515,15 +459,6 @@ function cpd_point(model::RankRCPDModel{T,N}, p) where {T<:AbstractFloat,N}
     return CPDPoint(λ, U)
 end
 
-"""
-    pack_cpd_point(model::RankRCPDModel, point)
-
-Pack a canonical [`CPDPoint`](@ref) back into the layout required by `model`.
-
-Depending on the CPD geometry this rebuilds either a
-`ProductManifold(Manifolds.Segre(...), ...)` point, a canonical CP tuple, or
-the internal nonnegative parameterization.
-"""
 function pack_cpd_point(
     model::RankRCPDModel{T,N},
     point::CPDPoint{T},
@@ -548,15 +483,6 @@ function pack_cpd_point(
            pack_rankr_canonical(lambda(point), factors(point), model.r)
 end
 
-"""
-    post_step!(model::RankRCPDModel, p; normalization=...)
-
-Rank-`r` CPD post-step hook.
-
-This is the backend normalization adapter used by manifold solvers: convert the
-current iterate to [`CPDPoint`](@ref), apply the requested normalization in CP
-coordinates, then pack back into the model-specific layout.
-"""
 function post_step!(
     model::RankRCPDModel,
     p;

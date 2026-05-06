@@ -41,9 +41,21 @@ end
     CPDResult{T}
 
 Result of a Canonical Polyadic Decomposition.
-- `components`: vector of `RankOneTensor`
-- `cost`, `rel_error`, `grad_norm`, `iterations`, `converged`, `solver`: metadata
-- `solver_info`: lightweight solver diagnostics (for example line-search/evaluation counts)
+
+
+Stores the decoded CP representation together with solver diagnostics:
+- `components`: rank-one tensor components
+- `weights`: component weights
+- `factors`: factor matrices
+- `cost`: final objective function value at the returned solution
+- `rel_error`: final relative reconstruction error
+- `grad_norm`: norm of the final optimization gradient reported by the solver; for manifold solvers this is the Riemannian gradient norm
+- `iterations`: number of refinement iterations
+- `converged`: whether the solver reported convergence
+- `solver`: solver optimization method used to produce the result
+- `solver_info`: solver-specific diagnostics/metadata (`NamedTuple`). Typical keys include:
+    - `initial_stepsize_eff` (RGD), `memory_size` (LBFGS), `cautious_update` (LBFGS),
+    - `initial_scale`, `linesearch`, `has_preconditioner` (LBFGS), and `nncp_pullback_eps` (NNCP).
 """
 struct CPDResult{T<:AbstractFloat,C,W,F,S}
     components::C
@@ -59,13 +71,17 @@ struct CPDResult{T<:AbstractFloat,C,W,F,S}
 end
 
 """
-    DecompositionComponent{T, N}
+    DecompositionComponent{T,N}
 
-Concrete component descriptor used by [`ApproxResult`](@ref) and [`BTDResult`](@ref).
-It stores only the abstract component payload: the manifold point, the ambient
-manifold, and the target tensor shape. Derived structure such as reconstructed
-tensors, Tucker cores, or factor matrices is exposed through dispatched
-accessors rather than stored eagerly in the container.
+Generic component wrapper used by [`ApproxResult`](@ref) and [`BTDResult`](@ref).
+
+Each component stores:
+- `point`: the component point on its manifold
+- `manifold`: the component manifold
+- `target_shape`: ambient tensor shape used for reconstruction
+
+Use [`tensor`](@ref), [`core`](@ref), and [`factors`](@ref) to inspect the
+decoded component structure when supported by the underlying manifold.
 """
 struct DecompositionComponent{T<:AbstractFloat,N,P,MT}
     point::P
@@ -81,6 +97,11 @@ end
 @inline _component_core(p::Manifolds.TuckerPoint) = p.hosvd.core
 @inline _component_factors(p::Manifolds.TuckerPoint) = collect(p.hosvd.U)
 
+"""
+    reconstruct(c::DecompositionComponent)
+
+Reconstruct a component into its ambient tensor representation using the manifold embedding or directly from the structured core/factor data when the component is a Tucker point.
+"""
 function reconstruct(c::DecompositionComponent)
     p = getfield(c, :point)
     M = getfield(c, :manifold)
@@ -114,11 +135,16 @@ end
 """
     ApproxResult{T}
 
-Generic result of `approx(manifolds, target)` (generic join).
-- `point`: final point on product manifold
+Generic result of `approx(manifolds, target)` (generic join decomposition).
+- `point`: final point on the join manifold
 - `components`: extracted component descriptions
-- `cost`, `rel_error`, `grad_norm`, `iterations`, `converged`, `solver`: optimization metadata
-- `solver_info`: lightweight solver diagnostics
+- `cost`: the value of the optimization objective at the final returned point, that is typically the least-squares objective.
+- `rel_error`: relative error of the decomposition which is the ratio of the cost to the target norm. is scale-normalized and easier to compare across problems
+- `grad_norm`: norm of the final optimization gradient reported by the solver; for manifold solvers this is typically the Riemannian gradient norm
+- `iterations`: number of iterations used
+- `converged`: whether the decomposition converged
+- `solver`: solver used for the decomposition
+- `solver_info`: solver-specific diagnostics/metadata (`NamedTuple`)
 """
 struct ApproxResult{T<:AbstractFloat,P,C,S}
     point::P
@@ -138,6 +164,10 @@ end
 Result of block-term decomposition (`btd`); block
 components expose Tucker structure through accessors like
 `core(blk)`, `factors(blk)`, and `blk.tensor`.
+- `solver_info`: solver-specific diagnostics/metadata (`NamedTuple`). Typical keys include
+  BTD-ALS restart diagnostics (`total_iterations`, `stagnation_restarts`,
+  `restart_rel_error_history`) and BTD-TSD run settings (`schedule`, `block_repeats`,
+  `block_count`, `stepsize`).
 """
 struct BTDResult{T<:AbstractFloat,P,C,S}
     point::P
@@ -161,6 +191,26 @@ _cpd_components(weights::Vector{T}, factors::Vector{Matrix{T}}) where {T<:Abstra
     k = 1:length(weights)
 ]
 
+"""
+    CPDResult{T}
+
+Result of a Canonical Polyadic Decomposition.
+
+
+Stores the decoded CP representation together with solver diagnostics:
+- `components`: rank-one tensor components
+- `weights`: component weights
+- `factors`: factor matrices
+- `cost`: final objective function value at the returned solution
+- `rel_error`: final relative reconstruction error
+- `grad_norm`: norm of the final optimization gradient reported by the solver; for manifold solvers this is the Riemannian gradient norm
+- `iterations`: number of refinement iterations
+- `converged`: whether the solver reported convergence
+- `solver`: solver optimization method used to produce the result
+- `solver_info`: solver-specific diagnostics/metadata (`NamedTuple`). Typical keys include:
+    - `initial_stepsize_eff` (RGD), `memory_size` (LBFGS), `cautious_update` (LBFGS),
+    - `initial_scale`, `linesearch`, `has_preconditioner` (LBFGS), and `nncp_pullback_eps` (NNCP).
+"""
 function CPDResult(
     weights::Vector{T},
     factors::Vector{Matrix{T}},
@@ -187,30 +237,102 @@ function CPDResult(
 end
 
 λ(c::RankOneTensor) = c.λ
+
+"""
+    vectors(c::RankOneTensor)
+
+Return the factor vectors of a rank-one tensor component.
+"""
 vectors(c::RankOneTensor) = c.vectors
 kind(c::DecompositionComponent) = c.kind
+
+"""
+    point(x)
+
+Return the optimization point stored in a result or component.
+
+Supported inputs include [`CPDResult`](@ref), [`ApproxResult`](@ref),
+[`BTDResult`](@ref), and [`DecompositionComponent`](@ref).
+"""
 point(c::DecompositionComponent) = c.point
+
+"""
+    tensor(c::DecompositionComponent)
+
+Reconstruct a component into its ambient tensor representation.
+"""
 tensor(c::DecompositionComponent) = c.tensor
+
+"""
+    core(x)
+
+Return the Tucker core stored in a Tucker component.
+"""
 core(c::DecompositionComponent) = c.core
+
+"""
+    factors(x)
+
+Return factor matrices for a CP or Tucker result/component.
+"""
 factors(c::DecompositionComponent) = c.factors
 point(r::CPDResult) = cpd_point(r)
 point(r::ApproxResult) = r.point
 point(r::BTDResult) = r.point
+
+"""
+    cost(r)
+
+Return the final objective function value stored in a decomposition result.
+"""
 cost(r::Union{CPDResult,ApproxResult,BTDResult}) = r.cost
+
+"""
+    rel_error(r)
+
+Return the final relative reconstruction error stored in a decomposition result.
+"""
 rel_error(r::Union{CPDResult,ApproxResult,BTDResult}) = r.rel_error
+
+"""
+    grad_norm(r)
+
+Return the norm of the final optimization gradient reported by the solver; for manifold solvers this is typically the Riemannian gradient norm.
+"""
 grad_norm(r::Union{CPDResult,ApproxResult,BTDResult}) = r.grad_norm
+
+"""
+    iterations(r)
+
+Return the number of refinement iterations used to produce `r`.
+"""
 iterations(r::Union{CPDResult,ApproxResult,BTDResult}) = r.iterations
+
+"""
+    converged(r)
+
+Return whether the solver reported convergence.
+"""
 converged(r::Union{CPDResult,ApproxResult,BTDResult}) = r.converged
+
+"""
+    solver(r)
+
+Return the solver symbol recorded in a decomposition result.
+"""
 solver(r::Union{CPDResult,ApproxResult,BTDResult}) = r.solver
+
+"""
+    solver_info(r)
+
+Return solver-specific diagnostic information stored in a decomposition result.
+"""
 solver_info(r::Union{CPDResult,ApproxResult,BTDResult}) = r.solver_info
 
 """
-    components(r) -> AbstractVector
+    components(r)
 
-Return the component list of a decomposition result (`CPDResult`, `ApproxResult`,
-`BTDResult`, or `LL1Result`). For CP this is a vector of `RankOneTensor`; for
-Tucker-block results (BTD, LL1) and generic join (`approx`) it is a vector of
-`DecompositionComponent`.
+Return the decoded components stored in a decomposition result.
 """
 components(r::CPDResult) = r.components
 components(r::ApproxResult) = r.components
@@ -218,17 +340,16 @@ components(r::BTDResult) = r.components
 components(r::NamedTuple) = getproperty(r, :components)
 
 """
-    blocks(r::BTDResult) -> Vector{DecompositionComponent}
+    blocks(r::BTDResult)
 
-Return the Tucker block components of a `BTDResult`. Each block `blk` supports
-`core(blk)` and `factors(blk)`.
+Return the Tucker block components of a block-term decomposition result.
 """
 blocks(r::BTDResult) = r.components
 
 """
-    weights(r::CPDResult) -> Vector{T}
+    weights(r::CPDResult)
 
-Return the per-component scalar weights `[λ_1, …, λ_r]`.
+Return the CP component weights stored in a CPD result.
 """
 weights(r::CPDResult) = [λ(c) for c in components(r)]
 weights(r::NamedTuple) = getproperty(r, :weights)
@@ -236,7 +357,7 @@ weights(r::NamedTuple) = getproperty(r, :weights)
 """
     comp_weight(r::CPDResult)
 
-Return component weights from `solver_info(r)` when available, otherwise fall
+Return component weights from `solver_info(r)` when available; otherwise fall
 back to [`weights`](@ref).
 """
 function comp_weight(r::CPDResult)
@@ -245,10 +366,10 @@ function comp_weight(r::CPDResult)
 end
 
 """
-    factors(r::CPDResult) -> Vector{Matrix{T}}
+    factors(res::CPDResult)
 
-Return the mode-wise factor matrices `(A, B, C, …)`; column `k` of mode `m` is
-the `m`-th factor vector of the `k`-th rank-one component.
+Return the CP factor matrices of `res` as a vector `[U₁, U₂, ..., U_N]`,
+where each `U_m` has size `size(A, m) × rank`.
 """
 factors(r::CPDResult) = factors_from_components(components(r))
 factors(r::NamedTuple) = getproperty(r, :factors)
@@ -277,16 +398,8 @@ function Base.show(io::IO, r::BTDResult{T}) where {T}
     print(io, "  Rel. error:   $(rel_error(r))")
 end
 
-"""
-    LinearAlgebra.cond(R::CPDResult)
+# This forms dense tangent-basis blocksusing repeated Kronecker products and then computes singular values of the assembled matrix.
 
-    Compute a conditioning surrogate for a CPD result by assembling tangent-like
-    columns per component and returning `1 / σ_min(U)`.
-
-This is an expensive diagnostic routine: it forms dense tangent-basis blocks
-using repeated Kronecker products and then computes singular values of the
-assembled matrix.
-"""
 function LinearAlgebra.cond(R::CPDResult{T}) where {T<:AbstractFloat}
     comps = components(R)
     isempty(comps) && throw(ArgumentError("cond(CPDResult): empty components"))
@@ -327,34 +440,40 @@ struct TuckerResult{T<:AbstractFloat,N}
     singular_values::Vector{Vector{T}}
 end
 
-
 """
-    core(td::TuckerResult) -> Array{T,N}
+    core(td::TuckerResult)
 
-Return the core tensor `C` of a Tucker decomposition `Â = (U₁ ⊗ U₂ ⊗ … ⊗ U_N) · C`.
+Return the Tucker core tensor for a Tucker result.
 """
 core(td::TuckerResult) = td.core
 
 """
-    factors(td::TuckerResult) -> Vector{Matrix{T}}
+    factors(td::TuckerResult)
 
-Return the factor matrices `(U₁, U₂, …, U_N)` of a Tucker decomposition.
+Return the Tucker factor matrices.
 """
 factors(td::TuckerResult) = td.factors
+
 processing_order(td::TuckerResult) = td.processing_order
+
+"""
+    singular_values(td::TuckerResult)
+
+Return the singular values recorded during Tucker truncation steps.
+"""
 singular_values(td::TuckerResult) = td.singular_values
 
 """
-    multilinear_rank(td::TuckerResult) -> NTuple{N,Int}
+    multilinear_rank(td::TuckerResult)
 
-Return the multilinear rank, i.e. the tuple `size(core(td))`.
+Return the Tucker multilinear rank tuple, i.e. the size of the core tensor.
 """
 multilinear_rank(td::TuckerResult) = size(core(td))
 
 """
-    factor_dims(td::TuckerResult) -> NTuple{N,Int}
+    factor_dims(td::TuckerResult)
 
-Return the ambient mode sizes, i.e. `size(U_m, 1)` for each factor.
+Return the original mode dimensions represented by the Tucker factor matrices.
 """
 factor_dims(td::TuckerResult{T,N}) where {T,N} = ntuple(m -> size(factors(td)[m], 1), N)
 

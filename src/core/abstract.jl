@@ -104,22 +104,12 @@ nn_update_symbol(::NNLSUpdate) = :nnls
 abstract type AbstractBTDBlockMethod end
 struct HOOIBlockMethod <: AbstractBTDBlockMethod end
 struct STHOSVDBlockMethod <: AbstractBTDBlockMethod end
-struct THOSVDBlockMethod <: AbstractBTDBlockMethod end
-struct HOSVDBlockMethod <: AbstractBTDBlockMethod end
 
 btd_block_method(method::AbstractBTDBlockMethod) = method
 function btd_block_method(method::Symbol)
     method === :hooi && return HOOIBlockMethod()
     method === :sthosvd && return STHOSVDBlockMethod()
-    method === :thosvd && return THOSVDBlockMethod()
-    method === :hosvd && return HOSVDBlockMethod()
-    throw(
-        ArgumentError(
-            "Unknown block_method=$method. Use :hooi, :sthosvd, :thosvd, or :hosvd.",
-        ),
-    )
+    throw(ArgumentError("Unknown block_method=$method. Use :hooi or :sthosvd."))
 end
 btd_block_method_symbol(::HOOIBlockMethod) = :hooi
 btd_block_method_symbol(::STHOSVDBlockMethod) = :sthosvd
-btd_block_method_symbol(::THOSVDBlockMethod) = :thosvd
-btd_block_method_symbol(::HOSVDBlockMethod) = :hosvd

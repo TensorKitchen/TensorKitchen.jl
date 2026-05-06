@@ -101,7 +101,6 @@ BTD-ALS stabilization behavior:
 It dispatches directly to decomposition routines:
 
 - `:sthosvd`
-- `:thosvd` / `:hosvd`
 - `:hooi`
 
 ## Generic `approx(...)` routing
