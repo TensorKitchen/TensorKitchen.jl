@@ -2,6 +2,13 @@
 export RGDSolver, RGDFixedSolver
 using Manopt
 
+struct _SolverDebugSink <: IO end
+Base.isopen(::_SolverDebugSink) = true
+Base.write(::_SolverDebugSink, ::UInt8) = 1
+Base.write(::_SolverDebugSink, s::Union{String,SubString{String}}) = sizeof(s)
+Base.unsafe_write(::_SolverDebugSink, ::Ptr{UInt8}, n::UInt) = Int(n)
+
+const _SOLVER_DEBUG_SINK = _SolverDebugSink()
 
 mutable struct StopWhenCostRelChangeAndGradientLess{T<:Real} <: Manopt.StoppingCriterion
     tol_cost::T
@@ -339,36 +346,36 @@ function _solver_stats(
     )
 end
 
+_solver_debug_callbacks(callbacks...) = Any[cb for cb in callbacks if !isnothing(cb)]
+
 # Allow callers to pass `nothing` (e.g., when verbose/debug is omitted)
-_solver_debug_actions(::Nothing, callbacks...) =
-    Any[cb for cb in callbacks if !isnothing(cb)]
+_solver_debug_actions(::Nothing, callbacks...) = _solver_debug_callbacks(callbacks...)
 
 function _solver_debug_actions(verbose::Bool, callbacks...)
+    callback_actions = _solver_debug_callbacks(callbacks...)
     if verbose
+        io = _SOLVER_DEBUG_SINK
         init_group = Manopt.DebugGroup([
-            Manopt.DebugDivider("Initial "; at_init = true),
-            Manopt.DebugCost(; format = "f(x): %.6e", at_init = true),
-            Manopt.DebugGradientNorm(; format = "|grad f(p)|:%.6e", at_init = true),
-            Manopt.DebugDivider("\n"; at_init = true),
+            Manopt.DebugDivider("Initial "; io, at_init = true),
+            Manopt.DebugCost(; io, format = "f(x): %.6e", at_init = true),
+            Manopt.DebugGradientNorm(; io, format = "|grad f(p)|:%.6e", at_init = true),
+            Manopt.DebugDivider("\n"; io, at_init = true),
         ])
         iter_group = Manopt.DebugEvery(
             Manopt.DebugGroup([
-                Manopt.DebugIteration(; format = "# %-6d"),
-                Manopt.DebugDivider(" "; at_init = true),
-                Manopt.DebugCost(; format = "f(x): %.6e", at_init = true),
-                Manopt.DebugGradientNorm(; format = "|grad f(p)|:%.6e", at_init = true),
-                Manopt.DebugDivider("\n"; at_init = true),
+                Manopt.DebugIteration(; io, format = "# %-6d"),
+                Manopt.DebugDivider(" "; io, at_init = true),
+                Manopt.DebugCost(; io, format = "f(x): %.6e", at_init = true),
+                Manopt.DebugGradientNorm(; io, format = "|grad f(p)|:%.6e", at_init = true),
+                Manopt.DebugDivider("\n"; io, at_init = true),
             ]),
             100,
         )
-        actions = Any[init_group, iter_group]
-    else
-        actions = Any[]
+        iteration_actions = Any[iter_group]
+        append!(iteration_actions, callback_actions)
+        return Any[:Start => Any[init_group], :Iteration => iteration_actions]
     end
-    for callback in callbacks
-        !isnothing(callback) && push!(actions, callback)
-    end
-    return actions
+    return callback_actions
 end
 
 function _solver_progress_callback(
