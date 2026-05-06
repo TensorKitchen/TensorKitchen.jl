@@ -8,14 +8,22 @@ include("api/nncpd.jl")
 include("api/btd.jl")
 include("api/tucker.jl")
 
+"""
+    save_result(path::AbstractString, result)
 
+Save a result to a file.
+"""
 function save_result(path::AbstractString, result)
     open(path, "w") do io
         Base.Serialization.serialize(io, result)
     end
     return path
 end
+"""
+    load_result(path::AbstractString)
 
+Load a result from a file
+"""
 function load_result(path::AbstractString)
     open(path, "r") do io
         return Base.Serialization.deserialize(io)
