@@ -365,6 +365,12 @@ function comp_weight(r::CPDResult)
     return hasproperty(si, :comp_weight) ? getproperty(si, :comp_weight) : weights(r)
 end
 
+"""
+    factors(res::CPDResult)
+
+Return the CP factor matrices of `res` as a vector `[U₁, U₂, ..., U_N]`,
+where each `U_m` has size `size(A, m) × rank`.
+"""
 factors(r::CPDResult) = factors_from_components(components(r))
 factors(r::NamedTuple) = getproperty(r, :factors)
 
