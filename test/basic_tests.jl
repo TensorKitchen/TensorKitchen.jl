@@ -251,8 +251,12 @@ end
     @test sphere_single isa ApproxResult
     @test isfinite(sphere_single.rel_error)
 
-    sphere_pair =
-        approx((Manifolds.Sphere(2), Manifolds.Sphere(2)), sphere_target; maxiter = 1, verbose = false)
+    sphere_pair = approx(
+        (Manifolds.Sphere(2), Manifolds.Sphere(2)),
+        sphere_target;
+        maxiter = 1,
+        verbose = false,
+    )
     @test sphere_pair isa ApproxResult
     @test isfinite(sphere_pair.rel_error)
 end
