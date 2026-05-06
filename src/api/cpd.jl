@@ -87,6 +87,7 @@ function _cpd_als_warm_then_pack(
             nonnegative = inner.nonnegative,
             verbose = verbose,
             return_stats = true,
+            progress_phase = :initialization,
         )
         return pack_cpd_point(target, CPDPoint(warm_out.weights, warm_out.factors))
     end
@@ -112,6 +113,7 @@ function _cpd_als_warm_then_pack(
         verbose = verbose,
         vector_transport_method = nothing,
         nonnegative = inner.nonnegative,
+        progress_phase = :initialization,
         kwargs...,
     )
     warm_cpd = _to_cpd_result(warm_model, warm_result, size(A), r)
