@@ -271,20 +271,21 @@ function _cpd_impl(
         use_pullback_metric = (geometry_eff == :squaring_metric),
         pullback_eps = pullback_eps_eff,
     )
-    p_solve = if init_eff isa ALSWarmStartInit && isnothing(p0) && solver ∈ manifold_solvers
-        _cpd_als_warm_then_pack(
-            model,
-            init_eff;
-            tol,
-            normalization = als_normalization_eff,
-            verbose,
-            pullback_eps = pullback_eps_eff,
-            kwargs...,
-        )
-    else
-        _pack_cpd_explicit_p0(model, p0)
-    end
     result_rgd = with_phase_progress() do
+        p_solve =
+            if init_eff isa ALSWarmStartInit && isnothing(p0) && solver ∈ manifold_solvers
+                _cpd_als_warm_then_pack(
+                    model,
+                    init_eff;
+                    tol,
+                    normalization = als_normalization_eff,
+                    verbose,
+                    pullback_eps = pullback_eps_eff,
+                    kwargs...,
+                )
+            else
+                _pack_cpd_explicit_p0(model, p0)
+            end
         _solve_model(
             model;
             init = init_eff,
