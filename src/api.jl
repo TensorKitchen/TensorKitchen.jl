@@ -1,4 +1,4 @@
-# User-facing convenience API: tucker, save_result, load_result
+# User-facing convenience API: save_result, load_result
 export save_result, load_result
 
 

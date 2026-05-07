@@ -19,18 +19,18 @@ join_product(base, r) constructs the product-domain manifold used to
 parameterize sums of r structured components. It does not construct the
 image join/secant variety itself.
 """
-
 function _segre_flat_factors(M::Manifolds.Segre)
     dims = factor_dims(M)
     return (Euclidean(1), (Sphere(n - 1) for n in dims)...)
 end
 
 """
-    join_product(base, r) constructs a ProductManifold
+    join_product(base, r) 
 
-Construct rank-`r` join parameter manifold as a plain `ProductManifold`.
-For `Manifolds.Segre`, uses flattened `(Euclidean(1), Sphere, ..., Sphere)` factors
-per component to preserve current CP parameter layout.
+Decides how to expand base into r components:
+* Manifolds.Segre → flattened (Euclidean(1), Sphere, ...) × r (one λ + spheres per rank-1).
+* Manifolds.Tucker / ProductManifold → repeat each factor r times.
+* Generic manifold → ProductManifold(base, base, ..., base).
 """
 function join_product(base::T, r::Int) where {T<:AbstractManifold}
     r >= 2 || throw(ArgumentError("Join rank must be at least 2, got r=$r."))
