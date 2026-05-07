@@ -69,7 +69,7 @@ end
     target = randn(2, 3)
     M = ProductManifold(Manifolds.Segre((2, 3)), Manifolds.Segre((2, 3)))
     approx(M, target; verbose = false)
-    # returns an CPDResult
+    # returns CPDResult
     ```
     - Another example:
     ```julia
@@ -79,7 +79,7 @@ end
         Manifolds.Tucker((4, 3, 2), (2, 2, 2)),
     )
     approx(M, target; verbose = false)
-    # returns an BTDResult
+    # returns BTDResult
     ```
 * `approx(base, r, target; kwargs...)` : builds a rank-r Segre join and routes to CPD when base isa Manifolds.Segre and BTD when base isa Manifolds.Tucker unless generic
 dispatch is explicitly requested. 
@@ -91,14 +91,14 @@ dispatch is explicitly requested.
         ```julia
         target = randn(2, 3)
         approx(Manifolds.Segre((2, 3)), 2, target; verbose = false)
-        # returns an CPDResult
+        # returns CPDResult
         ```
 * `approx(base, target; kwargs...)` : Builds a single-component generic join and route to the generic join solver.
     - Example:
         ```julia
         target = [1.2, 0.4, -0.3]   
         approx(Manifolds.Sphere(2), target; verbose = false)
-        # returns an ApproxResult
+        # returns ApproxResult
         ```
 * By default, `approx` auto-routes by manifold family:
     - uniform `Manifolds.Segre` summands calls `cpd(...)`
@@ -124,7 +124,7 @@ For the generic join path:
 
 ##Notes##
 * `:als` is not a solver option for `approx(...)`. However, if `approx(...)` auto-routes to `cpd(...)` or `btd(...)`, then those specialized pipelines may support ALS separately.
-* `warm_steps` and `warm_init` are not part of the generic `approx(...)` path. Generic joins start from the selected initializer and then use manifold solvers for refinement.
+* `warm_steps` and `warm_init` are not part of the generic `approx(...)` path. Generic joins start from random initial point and then use manifold solvers for refinement.
 * For generic mixed joins, use manifold solvers such as `:rgd`, `:rcg`, or `:lbfgs`.
 """
 function approx(
