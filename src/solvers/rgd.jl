@@ -373,7 +373,7 @@ function _solver_debug_actions(verbose::Bool, callbacks...)
         )
         iteration_actions = Any[iter_group]
         append!(iteration_actions, callback_actions)
-        return Any[:Start => Any[init_group], :Iteration => iteration_actions]
+        return Any[:Start=>Any[init_group], :Iteration=>iteration_actions]
     end
     return callback_actions
 end
