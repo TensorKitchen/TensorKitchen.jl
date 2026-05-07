@@ -12,7 +12,7 @@
 
 ---
 
-The package is currently at a pre-alpha stage. 
+The package is currently an early version and will be updated frequently in the near future.
 
 The implementation is based on combining algebraic algorithms like ALS (see, e.g., the [textbook by Kolda and Ballard](https://users.wfu.edu/ballard/pdfs/tensor_textbook.pdf)) and Riemannian optimization from [Manopt.jl](https://manoptjl.org/stable/).
 
@@ -76,6 +76,12 @@ We get the whole reconstructed tensor by
 ```julia
 Â = reconstruct(res)
 ```
+
+Per default, `cpd` finds the initial point by running ALS and then refines it using Riemannian optimization. To use ALS-only one can set the `:solver` flag:
+```julia
+cpd(A, r; solver = :als)
+````
+For a detailed overview on all the options see the documentation.
 
 <br>
 

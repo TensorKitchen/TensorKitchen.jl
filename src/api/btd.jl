@@ -262,44 +262,51 @@ function btd(
     solve_init = init_eff
     solve_p0 = nothing
     warm_info = (;)
-    if solver ∉ (:als,) && init_eff isa BTDALSWarmStartInit
-        warm = _btd_warm_start_result(
-            model,
-            b,
-            init_eff,
-            solver;
-            verbose = verbose,
-            warm_rel_error_gate,
-        )
-        solve_init = warm.init
-        solve_p0 = warm.p0
-        warm_info = warm.warm_info
-        if !isnothing(warm.short_circuit)
-            return _to_btd_result(model, warm.short_circuit)
+    short_circuited = Ref(false)
+    result = with_phase_progress() do
+        if solver ∉ (:als,) && init_eff isa BTDALSWarmStartInit
+            warm = _btd_warm_start_result(
+                model,
+                b,
+                init_eff,
+                solver;
+                verbose = verbose,
+                warm_rel_error_gate,
+            )
+            solve_init = warm.init
+            solve_p0 = warm.p0
+            warm_info = warm.warm_info
+            if !isnothing(warm.short_circuit)
+                short_circuited[] = true
+                return warm.short_circuit
+            end
         end
+        _solve_model(
+            model;
+            init = solve_init,
+            p0 = solve_p0,
+            solver = solver,
+            maxiter = maxiter,
+            stepsize = stepsize,
+            tol = tol,
+            gradient_mode = gradient_mode,
+            normalization = NoNormalization(),
+            verbose = verbose,
+            vector_transport_method = vector_transport_method,
+            block_method = block_method,
+            block_maxiter = block_maxiter,
+            max_stagnation_restarts = max_stagnation_restarts,
+            stagnation_rel_error = stagnation_rel_error,
+            restart_candidates = restart_candidates,
+            restart_screening_steps = restart_screening_steps,
+            restart_block_maxiter = restart_block_maxiter,
+            restart_seed = restart_seed,
+            kwargs...,
+        )
     end
-    result = _solve_model(
-        model;
-        init = solve_init,
-        p0 = solve_p0,
-        solver = solver,
-        maxiter = maxiter,
-        stepsize = stepsize,
-        tol = tol,
-        gradient_mode = gradient_mode,
-        normalization = NoNormalization(),
-        verbose = verbose,
-        vector_transport_method = vector_transport_method,
-        block_method = block_method,
-        block_maxiter = block_maxiter,
-        max_stagnation_restarts = max_stagnation_restarts,
-        stagnation_rel_error = stagnation_rel_error,
-        restart_candidates = restart_candidates,
-        restart_screening_steps = restart_screening_steps,
-        restart_block_maxiter = restart_block_maxiter,
-        restart_seed = restart_seed,
-        kwargs...,
-    )
+    if short_circuited[]
+        return _to_btd_result(model, result)
+    end
     result =
         isempty(propertynames(warm_info)) ? result :
         _merge_btd_solver_info(result, warm_info)

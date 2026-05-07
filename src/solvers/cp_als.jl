@@ -478,6 +478,7 @@ function solve(
     nonnegative::Bool = false,
     verbose::Bool = true,
     return_stats::Bool = false,
+    progress_phase::Symbol = :refinement,
     kwargs...,
 ) where {T<:AbstractFloat}
     A, r = cp_als_data(model)
@@ -497,7 +498,7 @@ function solve(
         normalization = normalization,
         verbose = verbose,
         return_stats = true,
-        progress_phase = :refinement,
+        progress_phase = progress_phase,
         mttkrp_method = get(kwargs, :mttkrp_method, :auto),
         nonnegative,
     )
