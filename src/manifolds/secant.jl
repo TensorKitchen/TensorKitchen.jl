@@ -36,7 +36,7 @@ function CanonicalCP(dims::NTuple{N,Int}, r::Int) where {N}
     r >= 2 || throw(ArgumentError("Canonical rank-r CP manifold needs r>=2, got r=$r"))
     mode_factors = ntuple(m -> ProductManifold(ntuple(_ -> Sphere(dims[m] - 1), r)...), N)
     return ProductManifold(Euclidean(r), mode_factors...)
-end   
+end
 
 CPJoin(M::Manifolds.Segre, r::Int) = join_product(M, r)
 CPJoin(dims::NTuple{N,T}, r::Int) where {N,T<:Int} = CPJoin(Manifolds.Segre(dims), r)
