@@ -483,7 +483,7 @@ function cp_inner_AX(
     )
 end
 
-@inline function _cp_residual_sq_from_gram_unreliable(
+@inline function _cp_residual_sq_from_G_unreliable(
     n2::T,
     normA2::T,
     normX2::T,
@@ -503,7 +503,7 @@ function cp_residual_stats(
     normX2 = cp_reconstruction_norm2(components)
     innerAX = cp_inner_AX(A, components)
     n2 = normA2 + normX2 - 2 * innerAX
-    if _cp_residual_sq_from_gram_unreliable(n2, normA2, normX2, innerAX)
+    if _cp_residual_sq_from_G_unreliable(n2, normA2, normX2, innerAX)
         return cp_residual_stats_explicit(A, normA2, components)
     end
     return (n2, T(0.5) * n2, _relative_error_frob_sq(n2, normA2))
