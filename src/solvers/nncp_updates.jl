@@ -47,17 +47,17 @@ end
 
 function _nncp_mu_mode_update!(
     U::AbstractMatrix{T},
-    G::AbstractMatrix{T},
+    M_mttkrp::AbstractMatrix{T},
     denom::AbstractMatrix{T},
 ) where {T<:AbstractFloat}
     floor = sqrt(eps(T))
-    U .= max.(U .* G ./ (denom .+ floor), floor)
+    U .= max.(U .* M_mttkrp ./ (denom .+ floor), floor)
     return U
 end
 
 function _nncp_hals_mode_update!(
     U::StridedMatrix{T},
-    G::StridedMatrix{T},
+    M_mttkrp::StridedMatrix{T},
     V::StridedMatrix{T},
     work::StridedMatrix{T},
 ) where {T<:AbstractFloat}
@@ -67,7 +67,7 @@ function _nncp_hals_mode_update!(
         vkk = max(V[k, k], floor)
         for i in axes(U, 1)
             old = U[i, k]
-            new = max((G[i, k] - work[i, k] + old * vkk) / vkk, floor)
+            new = max((M_mttkrp[i, k] - work[i, k] + old * vkk) / vkk, floor)
             Δ = new - old
             U[i, k] = new
             if !iszero(Δ)
@@ -82,7 +82,7 @@ end
 
 function _nncp_hals_mode_update!(
     U::AbstractMatrix{T},
-    G::AbstractMatrix{T},
+    M_mttkrp::AbstractMatrix{T},
     V::AbstractMatrix{T},
     work::AbstractMatrix{T},
 ) where {T<:AbstractFloat}
@@ -90,7 +90,7 @@ function _nncp_hals_mode_update!(
     d = max.(diag(V), floor)
     d_row = reshape(d, 1, :)
     mul!(work, U, V)
-    U .= max.((G .- work .+ U .* d_row) ./ d_row, floor)
+    U .= max.((M_mttkrp .- work .+ U .* d_row) ./ d_row, floor)
     return U
 end
 
@@ -147,7 +147,7 @@ end
 
 function _nncp_nnls_mode_update!(
     U::StridedMatrix{T},
-    G::StridedMatrix{T},
+    M_mttkrp::StridedMatrix{T},
     V::StridedMatrix{T},
     work::StridedMatrix{T};
     max_cd_sweeps::Int = 10,
@@ -156,7 +156,7 @@ function _nncp_nnls_mode_update!(
     @inbounds for i in axes(U, 1)
         _nncp_nnls_row_update!(
             view(U, i, :),
-            view(G, i, :),
+            view(M_mttkrp, i, :),
             V,
             view(work, i, :);
             max_cd_sweeps,
@@ -168,7 +168,7 @@ end
 
 function _nncp_nnls_mode_update!(
     U::AbstractMatrix{T},
-    G::AbstractMatrix{T},
+    M_mttkrp::AbstractMatrix{T},
     V::AbstractMatrix{T},
     work::AbstractMatrix{T};
     max_cd_sweeps::Int = 10,
@@ -179,7 +179,7 @@ function _nncp_nnls_mode_update!(
     d_row = reshape(d, 1, :)
     @inbounds for _ = 1:max_cd_sweeps
         mul!(work, U, V)
-        U_new = max.(U .- (work .- G) ./ d_row, floor)
+        U_new = max.(U .- (work .- M_mttkrp) ./ d_row, floor)
         max_delta = maximum(abs.(U_new .- U))
         copyto!(U, U_new)
         max_delta <= row_tol * max(maximum(U), one(T)) && break
@@ -189,7 +189,7 @@ end
 
 function _nncp_mode_update!(
     U::AbstractMatrix{T},
-    G::AbstractMatrix{T},
+    M_mttkrp::AbstractMatrix{T},
     V::AbstractMatrix{T},
     denom::AbstractMatrix{T};
     nn_update,
@@ -198,7 +198,7 @@ function _nncp_mode_update!(
 ) where {T<:AbstractFloat}
     return _nncp_mode_update!(
         U,
-        G,
+        M_mttkrp,
         V,
         denom,
         nn_update_policy(nn_update);
@@ -209,7 +209,7 @@ end
 
 @inline function _nncp_mode_update!(
     U::AbstractMatrix{T},
-    G::AbstractMatrix{T},
+    M_mttkrp::AbstractMatrix{T},
     V::AbstractMatrix{T},
     denom::AbstractMatrix{T},
     ::MultiplicativeNNUpdate;
@@ -217,25 +217,25 @@ end
     nnls_row_tol::T = sqrt(eps(T)),
 ) where {T<:AbstractFloat}
     mul!(denom, U, V)
-    return _nncp_mu_mode_update!(U, G, denom)
+    return _nncp_mu_mode_update!(U, M_mttkrp, denom)
 end
 
 
 @inline function _nncp_mode_update!(
     U::AbstractMatrix{T},
-    G::AbstractMatrix{T},
+    M_mttkrp::AbstractMatrix{T},
     V::AbstractMatrix{T},
     denom::AbstractMatrix{T},
     ::HALSNNUpdate;
     nnls_max_cd_sweeps::Int = 10,
     nnls_row_tol::T = sqrt(eps(T)),
 ) where {T<:AbstractFloat}
-    return _nncp_hals_mode_update!(U, G, V, denom)
+    return _nncp_hals_mode_update!(U, M_mttkrp, V, denom)
 end
 
 @inline function _nncp_mode_update!(
     U::AbstractMatrix{T},
-    G::AbstractMatrix{T},
+    M_mttkrp::AbstractMatrix{T},
     V::AbstractMatrix{T},
     denom::AbstractMatrix{T},
     ::NNLSUpdate;
@@ -244,7 +244,7 @@ end
 ) where {T<:AbstractFloat}
     return _nncp_nnls_mode_update!(
         U,
-        G,
+        M_mttkrp,
         V,
         denom;
         max_cd_sweeps = nnls_max_cd_sweeps,
@@ -254,12 +254,12 @@ end
 
 @inline function _projected_grad_sq_nonnegative(
     U::AbstractMatrix{T},
-    G::AbstractMatrix{T},
+    M_mttkrp::AbstractMatrix{T},
     denom::AbstractMatrix{T},
 ) where {T<:AbstractFloat}
     floor = sqrt(eps(T))
     active_floor = 10 * floor
-    grad = denom .- G
+    grad = denom .- M_mttkrp
     pg = ifelse.(U .<= active_floor, min.(grad, zero(T)), grad)
     return sum(abs2, pg)
 end
@@ -271,16 +271,16 @@ function _projected_grad_norm_nonnegative!(
     V::AbstractMatrix{T},
     denom_work::AbstractVector{<:AbstractMatrix{T}},
     mttkrp_bufs::AbstractVector{<:AbstractMatrix{T}},
-    mttkrp_tmp_work::AbstractVector{<:AbstractMatrix{T}},
-    mttkrp_kr_work::AbstractVector{<:AbstractMatrix{T}},
-    mttkrp_kr_work2::AbstractVector{<:AbstractMatrix{T}};
+    mttkrp_tmp_work::AbstractVector,
+    mttkrp_kr_work::AbstractVector,
+    mttkrp_kr_work2::AbstractVector;
     mttkrp_method::Symbol = :auto,
 ) where {T<:AbstractFloat,N}
     sq = zero(T)
     u_sq = zero(T)
     for n = 1:N
-        _hadamard_gram_except!(V, grams, n)
-        G = mttkrp!(
+        _hadamard_G_except!(V, grams, n)
+        M_mttkrp = mttkrp!(
             mttkrp_bufs[n],
             A,
             U,
@@ -290,9 +290,9 @@ function _projected_grad_norm_nonnegative!(
             kr_buf = mttkrp_kr_work[n],
             kr_work = mttkrp_kr_work2[n],
         )
-        _clamp_nonnegative!(G)
+        _clamp_nonnegative!(M_mttkrp)
         mul!(denom_work[n], U[n], V)
-        sq += _projected_grad_sq_nonnegative(U[n], G, denom_work[n])
+        sq += _projected_grad_sq_nonnegative(U[n], M_mttkrp, denom_work[n])
         u_sq += sum(abs2, U[n])
     end
     return sqrt(sq / max(u_sq, one(T)))

@@ -4,6 +4,9 @@ export mttkrp, khatri_rao
 # Auto policy
 # ---------------------------------------------------------------------------
 
+@inline _mttkrp_needs_kr_workspace(method::Symbol) = method == :khatri_rao
+@inline _mttkrp_needs_tmp_workspace(method::Symbol) = method in (:direct3, :direct4)
+
 @inline function _mttkrp_auto_method_3way(kr_rows::Int, r::Int, mode::Int)
     # Benchmark-guided 3-way table:
     # - mode 3 consistently favored explicit KR
@@ -29,6 +32,31 @@ end
         return kr_rows * r > 400_000 ? :contract : :khatri_rao
     else
         return kr_rows * r > 200_000 ? :contract : :khatri_rao
+    end
+end
+
+@inline function _mttkrp_resolve_method(
+    method::Symbol,
+    dims::NTuple{N,Int},
+    r::Int,
+    mode::Int,
+) where {N}
+    method == :auto && return _mttkrp_auto_method(dims, r, mode)
+    method in (:khatri_rao, :materialized_kr, :kr) && return :khatri_rao
+    if method == :slice_gemm
+        N == 3 && return :direct3
+        N == 4 && return :direct4
+        throw(
+            ArgumentError(
+                "method=:slice_gemm is only supported for 3-way and 4-way tensors",
+            ),
+        )
+    elseif method == :direct
+        N == 3 && return :direct3
+        N == 4 && return :direct4
+        return :contract
+    else
+        return method
     end
 end
 
@@ -361,7 +389,7 @@ function mttkrp(
             throw(DimensionMismatch("mttkrp: all factors must have same column count"))
     end
 
-    method_eff = method == :auto ? _mttkrp_auto_method(dims, r, mode) : method
+    method_eff = _mttkrp_resolve_method(method, dims, r, mode)
 
     if method_eff == :khatri_rao
         return _mttkrp_khatri_rao(A, U, mode)
@@ -378,7 +406,7 @@ function mttkrp(
     else
         throw(
             ArgumentError(
-                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, :direct3, :direct4, or :contract.",
+                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, :materialized_kr, :direct, :slice_gemm, :direct3, :direct4, or :contract.",
             ),
         )
     end
@@ -402,7 +430,7 @@ function mttkrp!(
     size(out, 2) == r ||
         throw(DimensionMismatch("mttkrp!: out has $(size(out,2)) columns, expected $r"))
 
-    method_eff = method == :auto ? _mttkrp_auto_method(dims, r, mode) : method
+    method_eff = _mttkrp_resolve_method(method, dims, r, mode)
     if method_eff == :khatri_rao
         isnothing(kr_buf) && throw(
             ArgumentError("mttkrp!: method=:khatri_rao requires a KR workspace buffer"),
@@ -440,7 +468,7 @@ function mttkrp!(
     else
         throw(
             ArgumentError(
-                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, :direct3, :direct4, or :contract.",
+                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, :materialized_kr, :direct, :slice_gemm, :direct3, :direct4, or :contract.",
             ),
         )
     end

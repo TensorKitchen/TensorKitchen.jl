@@ -407,6 +407,12 @@ If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
     - `:squaring_metric`: Nonnegative geometry based on squared latent coordinates. Enforces nonnegativity indirectly, but can become ill-conditioned near zero.
     - `:softplus_metric`: Nonnegative geometry uses a regularized pullback-inspired geometry induced by the softplus chart. Smoother and usually more stable near zero than `:squaring_metric`.
     - `:native`: Native CP manifold geometry using the model’s intrinsic CP/Segre representation not for nonnegative=true. Best for structured join layouts with `Manifolds.Segre` summands.
+* `mttkrp_method = :auto`: MTTKRP kernel used by CP-ALS and ALS warm starts.
+    - `:auto`: Chooses a method from tensor order, rank, and workspace size heuristics.
+    - `:materialized_kr` or `:khatri_rao`: Forms the Khatri-Rao product explicitly. Often fast, but allocates KR-sized workspace.
+    - `:slice_gemm`: Uses slice-wise matrix multiplications without materializing the full Khatri-Rao product. Supported for 3-way and 4-way tensors.
+    - `:direct`: Uses a no-Khatri-Rao path. This resolves to `:slice_gemm` for 3-way and 4-way tensors and to `:contract` for higher-order tensors.
+    - `:contract`: Uses repeated rank-1 contractions without Khatri-Rao workspace. Most memory-efficient, usually slower.
 * `verbose = true`: Enables progress output.
 * `nonnegative::Bool = false`: Nonnegative CPD option to be selected by the user. (same as `nncpd`)
 * `pullback_eps = 1e-8`: Regularization parameter for pullback-style nonnegative geometries.
