@@ -3,15 +3,15 @@ export ALSSolver, fit_cp_als
 
 
 struct CPALSWorkspace
-    Gs::Any
-    V::Any
-    transposed_work::Any
-    denom_work::Any
-    mttkrp_bufs::Any
-    mttkrp_tmp_work::Any
-    mttkrp_kr_work::Any
+    Gs::Any # Unpacked G matrices (U[n] * U[n]')
+    V::Any # V matrix (U[1] * U[1]') - cached MTTKRP result
+    transposed_work::Any 
+    denom_work::Any # Denominator matrix for non-LS updates
+    mttkrp_bufs::Any 
+    mttkrp_tmp_work::Any 
+    mttkrp_kr_work::Any # MTTKRP kernel result buffer
     mttkrp_kr_work2::Any
-    cross_buf::Any
+    cross_buf::Any 
 end
 
 # --- backend-adaptive allocation helpers ------------------------------------

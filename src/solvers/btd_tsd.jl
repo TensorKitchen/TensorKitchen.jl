@@ -1,4 +1,16 @@
 # solvers/btd_tsd.jl — blockwise tangent-subspace descent for BTD
+
+# This solver is inspired by tangent-subspace descent (TSD) in
+# Gutman and Ho-Nguyen, "Coordinate Descent Without Coordinates:
+# Tangent Subspace Descent on Riemannian Manifolds",
+# Mathematics of Operations Research, 48(1):127–159, 2023.
+#
+# In the present implementation, the selected tangent subspace is the
+# tangent space of one Tucker block inside the BTD join/product model.
+# Thus this is a BTD-specialized blockwise TSD / Riemannian block-coordinate 
+# descent method, rather than the exact algorithm studied for Stiefel/orthogonal 
+# examples in the original TSD paper.
+
 export BTDTSDSolver, TSDSolver
 
 """
@@ -8,6 +20,11 @@ export BTDTSDSolver, TSDSolver
 Blockwise tangent-subspace descent specialized to BTD. Each block update uses
 the projected Tucker-block tangent direction and accepts it only when a block
 Armijo decrease condition is satisfied.
+
+This solver is inspired by tangent-subspace descent (TSD) in
+Gutman and Ho-Nguyen, "Coordinate Descent Without Coordinates:
+Tangent Subspace Descent on Riemannian Manifolds",
+Mathematics of Operations Research, 48(1):127–159, 2023.
 """
 struct BTDTSDSolver <: AbstractFirstOrderSolver
     stepsize::Float64
@@ -18,12 +35,27 @@ struct BTDTSDSolver <: AbstractFirstOrderSolver
     armijo_alpha_min::Float64
 end
 
-const TSDSolver = BTDTSDSolver
+"""
+    BTDTSDSolver(; schedule=:cyclic, block_repeats=1, ...)
 
+Blockwise tangent-subspace descent for BTD.
+
+The `schedule` keyword controls the order in which Tucker blocks are updated.
+
+- `schedule = :cyclic`: updates blocks in the deterministic order
+  `1, 2, ..., R` at every sweep.
+
+- `schedule = :random`: updates all blocks once per sweep, but in a fresh
+  random permutation. This is random reshuffling, not sampling with replacement.
+
+The cyclic schedule is the default because it is deterministic and easiest to
+analyze. The random schedule can be useful experimentally when different BTD
+blocks compete strongly for the same residual structure.
+"""
 function BTDTSDSolver(;
     stepsize::Real = 1.0,
-    schedule::Symbol = :cyclic,
-    block_repeats::Int = 1,
+    schedule::Symbol = :cyclic, 
+    block_repeats::Int = 1, # number of times to repeat the block update sequence at each iteration
     armijo_contraction::Real = 0.5,
     armijo_sufficient_decrease::Real = 1e-4,
     armijo_alpha_min::Real = 1e-12,

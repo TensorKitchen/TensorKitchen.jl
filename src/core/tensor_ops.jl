@@ -325,7 +325,7 @@ function rank1_mode_contract_column!(
     end
     return out
 end
-
+# 3D version
 function rank1_mode_contract_column(
     A::AbstractArray{T,3},
     U::AbstractVector{<:AbstractMatrix{T}},
@@ -347,7 +347,7 @@ function rank1_mode_contract_column(
     end
     return out
 end
-
+# 4D version
 function rank1_mode_contract_column(
     A::AbstractArray{T,4},
     U::AbstractVector{<:AbstractMatrix{T}},
