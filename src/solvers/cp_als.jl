@@ -5,13 +5,13 @@ export ALSSolver, fit_cp_als
 struct CPALSWorkspace
     Gs::Any # Unpacked G matrices (U[n] * U[n]')
     V::Any # V matrix (U[1] * U[1]') - cached MTTKRP result
-    transposed_work::Any 
+    transposed_work::Any
     denom_work::Any # Denominator matrix for non-LS updates
-    mttkrp_bufs::Any 
-    mttkrp_tmp_work::Any 
+    mttkrp_bufs::Any
+    mttkrp_tmp_work::Any
     mttkrp_kr_work::Any # MTTKRP kernel result buffer
     mttkrp_kr_work2::Any
-    cross_buf::Any 
+    cross_buf::Any
 end
 
 # --- backend-adaptive allocation helpers ------------------------------------
@@ -68,20 +68,21 @@ function CPALSWorkspace(
     denom_work = [_cp_als_matrix_workspace_like(A, dims[n], r) for n = 1:N]
     mttkrp_bufs = [_cp_als_matrix_workspace_like(A, dims[n], r) for n = 1:N]
     total_dim_prod = prod(dims)
-    resolved_mttkrp_methods = [_mttkrp_resolve_method(mttkrp_method, dims, r, n) for n = 1:N]
+    resolved_mttkrp_methods =
+        [_mttkrp_resolve_method(mttkrp_method, dims, r, n) for n = 1:N]
     mttkrp_tmp_work = Any[
         _mttkrp_needs_tmp_workspace(resolved_mttkrp_methods[n]) ?
         _cp_als_matrix_workspace_like(A, dims[n], r) : nothing for n = 1:N
     ]
     mttkrp_kr_work = Any[
         _mttkrp_needs_kr_workspace(resolved_mttkrp_methods[n]) ?
-        _cp_als_matrix_workspace_like(A, div(total_dim_prod, dims[n]), r) :
-        nothing for n = 1:N
+        _cp_als_matrix_workspace_like(A, div(total_dim_prod, dims[n]), r) : nothing for
+        n = 1:N
     ]
     mttkrp_kr_work2 = Any[
         _mttkrp_needs_kr_workspace(resolved_mttkrp_methods[n]) ?
-        _cp_als_matrix_workspace_like(A, div(total_dim_prod, dims[n]), r) :
-        nothing for n = 1:N
+        _cp_als_matrix_workspace_like(A, div(total_dim_prod, dims[n]), r) : nothing for
+        n = 1:N
     ]
     cross_buf = _cp_als_matrix_workspace_like(A, r, r)
     return CPALSWorkspace(
@@ -338,13 +339,7 @@ function fit_cp_als(
             _update_G!(Gs[n], U[n])
         end
 
-        _cp_als_normalize_weights_and_Gs!(
-            λ,
-            U,
-            Gs,
-            normalization_policy,
-            update_policy,
-        )
+        _cp_als_normalize_weights_and_Gs!(λ, U, Gs, normalization_policy, update_policy)
 
         _, _, rel_error = _cp_als_stats(
             A,

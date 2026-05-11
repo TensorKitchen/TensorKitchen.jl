@@ -54,7 +54,7 @@ blocks compete strongly for the same residual structure.
 """
 function BTDTSDSolver(;
     stepsize::Real = 1.0,
-    schedule::Symbol = :cyclic, 
+    schedule::Symbol = :cyclic,
     block_repeats::Int = 1, # number of times to repeat the block update sequence at each iteration
     armijo_contraction::Real = 0.5,
     armijo_sufficient_decrease::Real = 1e-4,
