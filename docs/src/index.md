@@ -1,5 +1,6 @@
-# TensorKitchen.jl Documentation
+# TensorKitchen.jl: tensor decompositions in Julia
 
+<img src="logo_text_transparent.png" width="450px">
 
 **TensorKitchen.jl** is a Julia package for tensor decompositions.
 
@@ -13,7 +14,7 @@
 
 ## Notes 
 
-The package is currently at a pre-alpha stage. 
+The package is currently an early version and will be updated frequently in the near future.
 
 The implementation is based on combining algebraic algorithms like ALS (see, e.g., the [textbook by Kolda and Ballard](https://users.wfu.edu/ballard/pdfs/tensor_textbook.pdf)) and Riemannian optimization from [Manopt.jl](https://manoptjl.org/stable/).
 

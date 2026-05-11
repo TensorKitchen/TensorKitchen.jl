@@ -1,8 +1,8 @@
 # cpd/core/mttkrp.jl — CPD-specific MTTKRP kernels and dispatch
-export mttkrp, khatri_rao
-# ---------------------------------------------------------------------------
-# Auto policy
-# ---------------------------------------------------------------------------
+# Improvement of resolving mttkrp bottleneck still in progress
+export mttkrp, mttkrp!, khatri_rao, khatri_rao!
+@inline _mttkrp_needs_kr_workspace(method::Symbol) = method == :khatri_rao
+@inline _mttkrp_needs_tmp_workspace(method::Symbol) = method in (:direct3, :direct4)
 
 @inline function _mttkrp_auto_method_3way(kr_rows::Int, r::Int, mode::Int)
     # Benchmark-guided 3-way table:
@@ -32,10 +32,28 @@ end
     end
 end
 
-# ---------------------------------------------------------------------------
-# Khatri-Rao helpers
-# ---------------------------------------------------------------------------
+@inline function _mttkrp_resolve_method(
+    method::Symbol,
+    dims::NTuple{N,Int},
+    r::Int,
+    mode::Int,
+) where {N}
+    method == :auto && return _mttkrp_auto_method(dims, r, mode)
+    method == :khatri_rao && return :khatri_rao
+    if method == :direct
+        N == 3 && return :direct3
+        N == 4 && return :direct4
+        return :contract
+    else
+        throw(
+            ArgumentError(
+                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, or :direct.",
+            ),
+        )
+    end
+end
 
+# forming Khatri-Rao product helper, the loop is costly.
 function khatri_rao(mats::AbstractVector{<:AbstractMatrix{T}}) where {T<:AbstractFloat}
     if isempty(mats)
         throw(ArgumentError("khatri_rao: empty matrix list"))
@@ -142,10 +160,7 @@ function _mttkrp_khatri_rao!(
     return out
 end
 
-# ---------------------------------------------------------------------------
 # Direct and contraction kernels
-# ---------------------------------------------------------------------------
-
 @inline function _accumulate_scaled_columns!(
     out::AbstractMatrix{T},
     tmp::AbstractMatrix{T},
@@ -324,10 +339,7 @@ function _mttkrp_contract(
     return out
 end
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
+#Public API
 function mttkrp(
     A::AbstractArray{T,N},
     components::Vector{RankOneTensor{T}},
@@ -361,7 +373,7 @@ function mttkrp(
             throw(DimensionMismatch("mttkrp: all factors must have same column count"))
     end
 
-    method_eff = method == :auto ? _mttkrp_auto_method(dims, r, mode) : method
+    method_eff = _mttkrp_resolve_method(method, dims, r, mode)
 
     if method_eff == :khatri_rao
         return _mttkrp_khatri_rao(A, U, mode)
@@ -378,7 +390,7 @@ function mttkrp(
     else
         throw(
             ArgumentError(
-                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, :direct3, :direct4, or :contract.",
+                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, or :direct.",
             ),
         )
     end
@@ -395,14 +407,30 @@ function mttkrp!(
     kr_work = nothing,
 ) where {T<:AbstractFloat,N}
     dims = size(A)
+    mode < 1 && throw(ArgumentError("mode must be >= 1"))
+    mode > N && throw(ArgumentError("mode must be <= ndims(A)"))
+    isempty(U) && throw(ArgumentError("mttkrp: factor list is empty"))
+    length(U) == N ||
+        throw(DimensionMismatch("mttkrp: expected $N factor matrices, got $(length(U))"))
+
+    r = size(U[1], 2)
+    @inbounds for m = 1:N
+        size(U[m], 1) == dims[m] || throw(
+            DimensionMismatch(
+                "mttkrp: U[$m] has $(size(U[m], 1)) rows, expected $(dims[m])",
+            ),
+        )
+        size(U[m], 2) == r ||
+            throw(DimensionMismatch("mttkrp: all factors must have same column count"))
+    end
+
     size(out, 1) == dims[mode] || throw(
         DimensionMismatch("mttkrp!: out has $(size(out,1)) rows, expected $(dims[mode])"),
     )
-    r = size(U[1], 2)
     size(out, 2) == r ||
         throw(DimensionMismatch("mttkrp!: out has $(size(out,2)) columns, expected $r"))
 
-    method_eff = method == :auto ? _mttkrp_auto_method(dims, r, mode) : method
+    method_eff = _mttkrp_resolve_method(method, dims, r, mode)
     if method_eff == :khatri_rao
         isnothing(kr_buf) && throw(
             ArgumentError("mttkrp!: method=:khatri_rao requires a KR workspace buffer"),
@@ -440,7 +468,7 @@ function mttkrp!(
     else
         throw(
             ArgumentError(
-                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, :direct3, :direct4, or :contract.",
+                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, or :direct.",
             ),
         )
     end

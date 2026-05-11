@@ -3,13 +3,13 @@ export ALSSolver, fit_cp_als
 
 
 struct CPALSWorkspace
-    grams::Any
-    V::Any
+    Gs::Any # Unpacked G matrices (U[n] * U[n]')
+    V::Any # V matrix (U[1] * U[1]') - cached MTTKRP result
     transposed_work::Any
-    denom_work::Any
+    denom_work::Any # Denominator matrix for non-LS updates
     mttkrp_bufs::Any
     mttkrp_tmp_work::Any
-    mttkrp_kr_work::Any
+    mttkrp_kr_work::Any # MTTKRP kernel result buffer
     mttkrp_kr_work2::Any
     cross_buf::Any
 end
@@ -59,20 +59,34 @@ end
 function CPALSWorkspace(
     A::AbstractArray{T},
     dims::NTuple{N,Int},
-    r::Int,
+    r::Int;
+    mttkrp_method::Symbol = :auto,
 ) where {T<:AbstractFloat,N}
-    grams = [_cp_als_matrix_workspace_like(A, r, r) for _ = 1:N]
+    Gs = [_cp_als_matrix_workspace_like(A, r, r) for _ = 1:N]
     V = _cp_als_matrix_workspace_like(A, r, r)
     transposed_work = [_cp_als_matrix_workspace_like(A, r, dims[n]) for n = 1:N]
     denom_work = [_cp_als_matrix_workspace_like(A, dims[n], r) for n = 1:N]
     mttkrp_bufs = [_cp_als_matrix_workspace_like(A, dims[n], r) for n = 1:N]
-    mttkrp_tmp_work = [_cp_als_matrix_workspace_like(A, dims[n], r) for n = 1:N]
-    kr_rows = [div(prod(dims), dims[n]) for n = 1:N]
-    mttkrp_kr_work = [_cp_als_matrix_workspace_like(A, kr_rows[n], r) for n = 1:N]
-    mttkrp_kr_work2 = [_cp_als_matrix_workspace_like(A, kr_rows[n], r) for n = 1:N]
+    total_dim_prod = prod(dims)
+    resolved_mttkrp_methods =
+        [_mttkrp_resolve_method(mttkrp_method, dims, r, n) for n = 1:N]
+    mttkrp_tmp_work = Any[
+        _mttkrp_needs_tmp_workspace(resolved_mttkrp_methods[n]) ?
+        _cp_als_matrix_workspace_like(A, dims[n], r) : nothing for n = 1:N
+    ]
+    mttkrp_kr_work = Any[
+        _mttkrp_needs_kr_workspace(resolved_mttkrp_methods[n]) ?
+        _cp_als_matrix_workspace_like(A, div(total_dim_prod, dims[n]), r) : nothing for
+        n = 1:N
+    ]
+    mttkrp_kr_work2 = Any[
+        _mttkrp_needs_kr_workspace(resolved_mttkrp_methods[n]) ?
+        _cp_als_matrix_workspace_like(A, div(total_dim_prod, dims[n]), r) : nothing for
+        n = 1:N
+    ]
     cross_buf = _cp_als_matrix_workspace_like(A, r, r)
     return CPALSWorkspace(
-        grams,
+        Gs,
         V,
         transposed_work,
         denom_work,
@@ -85,7 +99,7 @@ function CPALSWorkspace(
 end
 
 
-@inline function _update_gram!(
+@inline function _update_G!(
     G::AbstractMatrix{T},
     U::AbstractMatrix{T},
 ) where {T<:AbstractFloat}
@@ -93,15 +107,15 @@ end
     return G
 end
 
-@inline function _hadamard_gram_except!(
+@inline function _hadamard_G_except!(
     V::AbstractMatrix{T},
-    grams::AbstractVector{<:AbstractMatrix{T}},
+    Gs::AbstractVector{<:AbstractMatrix{T}},
     skip::Int,
 ) where {T<:AbstractFloat}
     fill!(V, one(T))
-    @inbounds for m in eachindex(grams)
+    @inbounds for m in eachindex(Gs)
         m == skip && continue
-        V .*= grams[m]
+        V .*= Gs[m]
     end
     @inbounds for i in axes(V, 1)
         V[i, i] += eps(T)
@@ -111,11 +125,11 @@ end
 
 function _solve_right_spd!(
     Udest::AbstractMatrix{T},
-    G::AbstractMatrix{T},
+    M_mttkrp::AbstractMatrix{T},
     V::AbstractMatrix{T},
     workT::AbstractMatrix{T},
 ) where {T<:AbstractFloat}
-    copyto!(workT, transpose(G))
+    copyto!(workT, transpose(M_mttkrp))
     F = cholesky!(Hermitian(V))
     ldiv!(F, workT)
     copyto!(Udest, transpose(workT))
@@ -124,24 +138,24 @@ end
 
 @inline function _als_mode_update!(
     Udest::AbstractMatrix{T},
-    G::AbstractMatrix{T},
+    M_mttkrp::AbstractMatrix{T},
     V::AbstractMatrix{T},
     workT::AbstractMatrix{T},
 ) where {T<:AbstractFloat}
-    return _solve_right_spd!(Udest, G, V, workT)
+    return _solve_right_spd!(Udest, M_mttkrp, V, workT)
 end
 
 """
-    _cp_als_normalize_weights_and_grams!(λ, U, grams, normalization_policy, update_policy)
+    _cp_als_normalize_weights_and_Gs!(λ, U, Gs, normalization_policy, update_policy)
 
 Post-sweep step: reset `λ` to one, apply the normalization policy, clamp to
-nonnegative if required, and refresh Gram matrices. Single pass — see the
+nonnegative if required, and refresh G matrices. Single pass — see the
 module-level design note.
 """
-@inline function _cp_als_normalize_weights_and_grams!(
+@inline function _cp_als_normalize_weights_and_Gs!(
     λ,
     U,
-    grams,
+    Gs,
     normalization_policy,
     update_policy,
 )
@@ -149,8 +163,8 @@ module-level design note.
     fill!(λ, one(T))
     normalize_components!(U, λ, normalization_policy)
     update_policy != :ls && _clamp_nonnegative!(λ, U)
-    @inbounds for n in eachindex(grams)
-        _update_gram!(grams[n], U[n])
+    @inbounds for n in eachindex(Gs)
+        _update_G!(Gs[n], U[n])
     end
     return nothing
 end
@@ -160,7 +174,7 @@ function _cp_als_stats(
     normA2::T,
     λ::AbstractVector{T},
     U::AbstractVector{<:AbstractMatrix{T}},
-    grams::AbstractVector{<:AbstractMatrix{T}};
+    Gs::AbstractVector{<:AbstractMatrix{T}};
     mttkrp_method::Symbol = :auto,
     mttkrp_buf::Union{Nothing,AbstractMatrix{T}} = nothing,
     mttkrp_work::Union{Nothing,AbstractMatrix{T}} = nothing,
@@ -169,14 +183,14 @@ function _cp_als_stats(
     cross_buf::Union{Nothing,AbstractMatrix{T}} = nothing,
 ) where {T<:AbstractFloat,N}
     if isnothing(cross_buf)
-        cross = copy(grams[1])
+        cross = copy(Gs[1])
     else
         cross = cross_buf
-        copyto!(cross, grams[1])
+        copyto!(cross, Gs[1])
     end
 
-    @inbounds for m = 2:length(grams)
-        cross .*= grams[m]
+    @inbounds for m = 2:length(Gs)
+        cross .*= Gs[m]
     end
     normX2 = zero(T)
     @inbounds for j in axes(cross, 2)
@@ -205,7 +219,7 @@ function _cp_als_stats(
         innerAX += λ[k] * dot(@view(U[1][:, k]), @view(M1[:, k]))
     end
     n2 = normA2 + normX2 - 2 * innerAX
-    if _cp_residual_sq_from_gram_unreliable(n2, normA2, normX2, innerAX)
+    if _cp_residual_sq_from_G_unreliable(n2, normA2, normX2, innerAX)
         return cp_residual_stats_explicit(A, normA2, λ, U)
     end
     return (n2, T(0.5) * n2, _relative_error_frob_sq(n2, normA2))
@@ -271,10 +285,10 @@ function fit_cp_als(
     nnls_row_tol = sqrt(eps(T))
     nnls_row_tol_min = nnls_row_tol / 10
 
-    workspace = CPALSWorkspace(A, dims, r)
-    grams = workspace.grams
+    workspace = CPALSWorkspace(A, dims, r; mttkrp_method = mttkrp_method)
+    Gs = workspace.Gs
     @inbounds for n = 1:N
-        _update_gram!(grams[n], U[n])
+        _update_G!(Gs[n], U[n])
     end
     V = workspace.V
     transposed_work = workspace.transposed_work
@@ -294,8 +308,8 @@ function fit_cp_als(
         pg_sq = zero(T)
         u_sq = zero(T)
         for n = 1:N
-            _hadamard_gram_except!(V, grams, n)
-            G = mttkrp!(
+            _hadamard_G_except!(V, Gs, n)
+            M_mttkrp = mttkrp!(
                 mttkrp_bufs[n],
                 A,
                 U,
@@ -306,10 +320,10 @@ function fit_cp_als(
                 kr_work = mttkrp_kr_work2[n],
             )
             if update_policy != :ls
-                _clamp_nonnegative!(G)
+                _clamp_nonnegative!(M_mttkrp)
                 _nncp_mode_update!(
                     U[n],
-                    G,
+                    M_mttkrp,
                     V,
                     denom_work[n];
                     nn_update = update_policy,
@@ -317,28 +331,22 @@ function fit_cp_als(
                     nnls_row_tol = nnls_row_tol,
                 )
                 mul!(denom_work[n], U[n], V)
-                pg_sq += _projected_grad_sq_nonnegative(U[n], G, denom_work[n])
+                pg_sq += _projected_grad_sq_nonnegative(U[n], M_mttkrp, denom_work[n])
                 u_sq += sum(abs2, U[n])
             else
-                _als_mode_update!(U[n], G, V, transposed_work[n])
+                _als_mode_update!(U[n], M_mttkrp, V, transposed_work[n])
             end
-            _update_gram!(grams[n], U[n])
+            _update_G!(Gs[n], U[n])
         end
 
-        _cp_als_normalize_weights_and_grams!(
-            λ,
-            U,
-            grams,
-            normalization_policy,
-            update_policy,
-        )
+        _cp_als_normalize_weights_and_Gs!(λ, U, Gs, normalization_policy, update_policy)
 
         _, _, rel_error = _cp_als_stats(
             A,
             normA2,
             λ,
             U,
-            grams;
+            Gs;
             mttkrp_method,
             mttkrp_buf = mttkrp_bufs[1],
             mttkrp_work = mttkrp_tmp_work[1],
@@ -391,7 +399,7 @@ function fit_cp_als(
             pg_norm = _projected_grad_norm_nonnegative!(
                 A,
                 U,
-                grams,
+                Gs,
                 V,
                 denom_work,
                 mttkrp_bufs,
@@ -407,7 +415,7 @@ function fit_cp_als(
             normA2,
             λ,
             U,
-            grams;
+            Gs;
             mttkrp_method,
             mttkrp_buf = mttkrp_bufs[1],
             mttkrp_work = mttkrp_tmp_work[1],

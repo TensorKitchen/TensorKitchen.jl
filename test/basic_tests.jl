@@ -2139,13 +2139,73 @@ end
     )
     @test err_tuck_model <= err_diag_model + 1e-8
 
-    # mttkrp: contract path should match explicit Khatri-Rao path
+    # mttkrp: direct path should match explicit Khatri-Rao path
     U3 = [randn(8, 3), randn(6, 3), randn(5, 3)]
     for mode = 1:3
         G_kr = mttkrp(A, U3, mode; method = :khatri_rao)
-        G_ct = mttkrp(A, U3, mode; method = :contract)
-        @test G_ct ≈ G_kr atol = 1e-10
+        G_dir = mttkrp(A, U3, mode; method = :direct)
+        @test G_dir ≈ G_kr atol = 1e-10
     end
+
+    A4 = randn(7, 5, 4, 3)
+    U4 = [randn(7, 2), randn(5, 2), randn(4, 2), randn(3, 2)]
+    for mode = 1:4
+        G_kr = mttkrp(A4, U4, mode; method = :khatri_rao)
+        G_dir = mttkrp(A4, U4, mode; method = :direct)
+        @test G_dir ≈ G_kr atol = 1e-10
+    end
+
+    A5 = randn(4, 3, 2, 3, 2)
+    U5 = [randn(4, 2), randn(3, 2), randn(2, 2), randn(3, 2), randn(2, 2)]
+    for mode = 1:5
+        G_kr = mttkrp(A5, U5, mode; method = :khatri_rao)
+        G_dir = mttkrp(A5, U5, mode; method = :direct)
+        @test G_dir ≈ G_kr atol = 1e-10
+    end
+
+    ws_direct3 = TensorKitchen.CPALSWorkspace(A, size(A), 3; mttkrp_method = :direct)
+    @test all(isnothing, ws_direct3.mttkrp_kr_work)
+    @test all(isnothing, ws_direct3.mttkrp_kr_work2)
+    @test all(x -> !isnothing(x), ws_direct3.mttkrp_tmp_work)
+
+    ws_kr = TensorKitchen.CPALSWorkspace(A, size(A), 3; mttkrp_method = :khatri_rao)
+    @test all(x -> !isnothing(x), ws_kr.mttkrp_kr_work)
+    @test all(x -> !isnothing(x), ws_kr.mttkrp_kr_work2)
+
+    ws_direct5 = TensorKitchen.CPALSWorkspace(A5, size(A5), 2; mttkrp_method = :direct)
+    @test all(isnothing, ws_direct5.mttkrp_kr_work)
+    @test all(isnothing, ws_direct5.mttkrp_kr_work2)
+    @test all(isnothing, ws_direct5.mttkrp_tmp_work)
+
+    out_buf = zeros(size(A, 1), size(U3[1], 2))
+    @test_throws ArgumentError TensorKitchen.mttkrp!(
+        out_buf,
+        A,
+        Matrix{Float64}[],
+        1;
+        method = :direct,
+    )
+    @test_throws DimensionMismatch TensorKitchen.mttkrp!(
+        out_buf,
+        A,
+        [U3[1], U3[2]],
+        1;
+        method = :direct,
+    )
+    @test_throws DimensionMismatch TensorKitchen.mttkrp!(
+        out_buf,
+        A,
+        [randn(7, 3), U3[2], U3[3]],
+        1;
+        method = :direct,
+    )
+    @test_throws DimensionMismatch TensorKitchen.mttkrp!(
+        out_buf,
+        A,
+        [U3[1], randn(6, 2), U3[3]],
+        1;
+        method = :direct,
+    )
 end
 
 @testset "utils: cross_component, build_cross_matrix, grad_lambda_cp, cp_rankr_cost_value, cross_term_gradU, gradU_column_cp" begin

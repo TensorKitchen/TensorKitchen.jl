@@ -24,9 +24,6 @@ What currently works is
 - Block Term Decomposition (BTD)
 - Join Decompositions
 
-See [PIPELINE.md](docs/src/PIPELINE.md) for the current execution flow.
-
----
 
 The next updates will include 
 
@@ -39,9 +36,21 @@ The next updates will include
 - Partially Symmetric CP
 - Tensor Trains
 
-
 <br>
 
+See [PIPELINE.md](docs/src/PIPELINE.md) for the current execution flow.
+
+---
+
+## Installation
+
+Install the current development version through the Julia package manager:
+
+```julia
+add TensorKitchen
+```
+
+---
 ## Canonical Polyadic Decomposition (CPD)
 
 Here is how to approximate a tensor `A` by a CPD of rank `r`.

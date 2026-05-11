@@ -5,11 +5,11 @@ converters.
 
 ## Public entry points
 
-- `cpd(A, r; ...)` -> `CPDResult`
-- `nncpd(A, r; ...)` -> `CPDResult`
-- `btd(A, blocks, ranks; ...)` -> `BTDResult`
-- `tucker(A, ranks; method=...)` -> `TuckerResult`
-- `approx(...)` -> `ApproxResult` or auto-routed `CPDResult`/`BTDResult`
+- CP Decomposition `cpd(A, r; ...)` 
+- Nonnegative CP Decomposition `nncpd(A, r; ...)` 
+- Block Term Decomposition `btd(A, blocks, ranks; ...)` 
+- Tucker Decomposition `tucker(A, ranks; method=...)` 
+- Join Decomposition `approx(...)` 
 
 ## Default behavior (quick reference)
 
@@ -30,8 +30,7 @@ converters.
 - `tucker(A, ranks)`:
   - `method = :sthosvd`
 - `approx(model::JoinModel)`:
-  - `init = :alswarm`
-  - `warm_steps = 500`
+  - `init = :random`
   - `solver = :rgd`
 
 ## Core execution architecture
@@ -54,13 +53,14 @@ symbol-to-solver dispatch layer (`:rgd`, `:rcg`, `:lbfgs`, `:als`, `:btd_tsd`).
 1. Build `JoinModel(A, r; geometry=...)` with `CPDBackend`
 2. Normalize/validate options (`solver`, `geometry`, `gradient_mode`, normalization policy)
 3. Solve through `_solve_model(...)`
-4. Optionally run nonnegative ALS polishing (for selected nonnegative paths)
-5. Convert to `CPDResult`
+4. Convert to `CPDResult`
 
 Notes:
 
 - `:als` means CP-ALS.
 - Manifold solvers (`:rgd`, `:rgd_fixed`, `:rcg`, `:lbfgs`) share dispatch with other pipelines.
+- For `solver != :als`, `init = :auto` resolves to `:alswarm`, so CPD and NNCPD start from an ALS warm point before manifold refinement.
+- Generic `approx(...)` does not use CPD's ALS warm-start path unless it auto-routes to `cpd(...)`.
 
 ### BTD (`btd`)
 
@@ -76,7 +76,7 @@ Notes:
 6. If `solver != :als`, optionally polish with BTD-ALS (`btd_als_polish_maxiter`)
 7. Convert to `BTDResult`
 
-Polish step usefulness (brief):
+Polish step usefulness:
 
 - Usually helpful for a small final `rel_error` reduction after RGD converges near a good basin.
 - Most useful for quality-focused runs (benchmarks, final fits).
@@ -93,7 +93,7 @@ BTD-ALS stabilization behavior:
 - Tracks per-iteration fit change (`|rel_t - rel_{t-1}|`)
 - Detects stagnation when fit change is tiny but `rel_error` remains high
 - Can restart from fresh multistart pool (`max_stagnation_restarts`)
-- Reports true final Riemannian gradient norm (`grad_norm`) instead of a placeholder
+- Reports true final Riemannian gradient norm (`grad_norm`) 
 
 ### Tucker (`tucker`)
 
@@ -113,6 +113,11 @@ It dispatches directly to decomposition routines:
 
 `dispatch=:cpd`, `:btd`, and `:generic` force behavior.
 
+For the generic `JoinModel` path, `approx(...)` starts from `init = :random`
+by default and then runs the selected manifold solver. It does not run an ALS
+warm-start stage, because a general join component does not necessarily expose
+factor matrices or least-squares block updates.
+
 ## Result types and post-processing
 
 - `CPDResult`
@@ -127,7 +132,4 @@ Common utilities:
 
 ## File map
 
-- API entry points: `src/api/approx.jl`, `src/api/cpd.jl`, `src/api/nncpd.jl`, `src/api/btd.jl`
-- Routing helpers: `src/dispatch/approx_routing.jl`
-- Solver dispatch core: `src/solvers/solve_dispatch.jl`
-- BTD backend/init details: `src/btd/model.jl`, `src/solvers/btd_als.jl`
+- API entry points: `src/api/approx.jl`, `src/api/cpd.jl`, `src/api/nncpd.jl`, `src/api/btd.jl`, `src/api/tucker.jl`

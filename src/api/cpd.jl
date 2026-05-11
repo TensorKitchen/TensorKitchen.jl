@@ -399,9 +399,9 @@ If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
 * `stepsize = 1.0`: Initial step size for line search in Riemannian gradient descent.
 * `tol = 1e-6`: Convergence tolerance.
 * `gradient_mode = :riemannian`: Gradient rule for manifold solvers. 
-  - If the model has a direct rgrad, it uses that.
-  - Otherwise it computes egrad and projects it to the tangent space.
-  - This behavior is in src/solvers/abstract.jl (line 289).
+    - If the model has a direct rgrad, it uses that.
+    - Otherwise it computes egrad and projects it to the tangent space.
+    - This behavior is in src/solvers/abstract.jl (line 289).
 * `geometry = :canonical`: Sets the geometry of the manifold. Possible options are:
     - `:canonical`: Standard CPD parameterization with the usual Euclidean factors and canonical Riemannian gradient handling. Best default for general unconstrained CPD.
     - `:squaring_metric`: Nonnegative geometry based on squared latent coordinates. Enforces nonnegativity indirectly, but can become ill-conditioned near zero.

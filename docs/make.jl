@@ -1,7 +1,7 @@
 using Documenter, TensorKitchen
 
 makedocs(
-    sitename = "Documentation",
+    sitename = "TensorKitchen.jl",
     warnonly = true,
     pages = [
         "Home" => "index.md",
