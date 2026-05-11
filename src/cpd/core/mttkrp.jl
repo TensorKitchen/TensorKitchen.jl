@@ -1,7 +1,6 @@
 # cpd/core/mttkrp.jl — CPD-specific MTTKRP kernels and dispatch
-# Improvement of resolving mttkrp bottleneck still in progress 
-export mttkrp, khatri_rao
-
+# Improvement of resolving mttkrp bottleneck still in progress
+export mttkrp, mttkrp!, khatri_rao, khatri_rao!
 @inline _mttkrp_needs_kr_workspace(method::Symbol) = method == :khatri_rao
 @inline _mttkrp_needs_tmp_workspace(method::Symbol) = method in (:direct3, :direct4)
 
@@ -408,10 +407,26 @@ function mttkrp!(
     kr_work = nothing,
 ) where {T<:AbstractFloat,N}
     dims = size(A)
+    mode < 1 && throw(ArgumentError("mode must be >= 1"))
+    mode > N && throw(ArgumentError("mode must be <= ndims(A)"))
+    isempty(U) && throw(ArgumentError("mttkrp: factor list is empty"))
+    length(U) == N ||
+        throw(DimensionMismatch("mttkrp: expected $N factor matrices, got $(length(U))"))
+
+    r = size(U[1], 2)
+    @inbounds for m = 1:N
+        size(U[m], 1) == dims[m] || throw(
+            DimensionMismatch(
+                "mttkrp: U[$m] has $(size(U[m], 1)) rows, expected $(dims[m])",
+            ),
+        )
+        size(U[m], 2) == r ||
+            throw(DimensionMismatch("mttkrp: all factors must have same column count"))
+    end
+
     size(out, 1) == dims[mode] || throw(
         DimensionMismatch("mttkrp!: out has $(size(out,1)) rows, expected $(dims[mode])"),
     )
-    r = size(U[1], 2)
     size(out, 2) == r ||
         throw(DimensionMismatch("mttkrp!: out has $(size(out,2)) columns, expected $r"))
 
