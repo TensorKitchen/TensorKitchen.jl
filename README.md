@@ -24,6 +24,20 @@ What currently works is
 - Block Term Decomposition (BTD)
 - Join Decompositions
 
+
+The next updates will include 
+
+- Handling of swamps/plateaus in the optimization step
+- Documentation
+- Improved User Interface
+- GPU Support 
+- LL1 Decomposition (3-way specialized BTD)
+- Symmetric CP / Waring Decomposition
+- Partially Symmetric CP
+- Tensor Trains
+
+<br>
+
 See [PIPELINE.md](docs/src/PIPELINE.md) for the current execution flow.
 
 ---
@@ -52,23 +66,9 @@ git clone https://github.com/TensorKitchen/TensorKitchen.jl.git
 cd TensorKitchen.jl
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
-
----
-
-The next updates will include 
-
-- Handling of swamps/plateaus in the optimization step
-- Documentation
-- Improved User Interface
-- GPU Support 
-- LL1 Decomposition (3-way specialized BTD)
-- Symmetric CP / Waring Decomposition
-- Partially Symmetric CP
-- Tensor Trains
-
-
 <br>
 
+---
 ## Canonical Polyadic Decomposition (CPD)
 
 Here is how to approximate a tensor `A` by a CPD of rank `r`.
