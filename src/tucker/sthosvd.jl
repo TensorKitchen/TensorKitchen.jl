@@ -18,9 +18,12 @@ by sequentially computing truncated SVDs mode by mode, projecting (shrinking) th
 # TuckerResult struct and show live in core/types.jl. Uses unfold_mode, mode_n_product from core/tensor_ops.
 
 """
-    reconstruct(td::TuckerResult) reconstructs the tensor from Tucker decomposition
+    reconstruct(td::TuckerResult)
 
-    A = S ×₁ U₁ ×₂ U₂ ⋯ ×_d U_d
+Reconstruct the dense tensor represented by a Tucker decomposition result.
+
+For a Tucker result with core `S` and factors `U_1, ..., U_d`, this returns
+`S ×_1 U_1 ×_2 U_2 ... ×_d U_d`.
 """
 function reconstruct(td::TuckerResult{T,N}) where {T,N}
     A = td.core
