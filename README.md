@@ -53,12 +53,6 @@ cd TensorKitchen.jl
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
-Run the test suite with:
-
-```bash
-julia --project=. test/runtests.jl
-```
-
 ---
 
 The next updates will include 
