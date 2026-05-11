@@ -1,8 +1,6 @@
 # cpd/core/mttkrp.jl — CPD-specific MTTKRP kernels and dispatch
+# Improvement of resolving mttkrp bottleneck still in progress 
 export mttkrp, khatri_rao
-# ---------------------------------------------------------------------------
-# Auto policy
-# ---------------------------------------------------------------------------
 
 @inline _mttkrp_needs_kr_workspace(method::Symbol) = method == :khatri_rao
 @inline _mttkrp_needs_tmp_workspace(method::Symbol) = method in (:direct3, :direct4)
@@ -42,28 +40,21 @@ end
     mode::Int,
 ) where {N}
     method == :auto && return _mttkrp_auto_method(dims, r, mode)
-    method in (:khatri_rao, :materialized_kr, :kr) && return :khatri_rao
-    if method == :slice_gemm
-        N == 3 && return :direct3
-        N == 4 && return :direct4
-        throw(
-            ArgumentError(
-                "method=:slice_gemm is only supported for 3-way and 4-way tensors",
-            ),
-        )
-    elseif method == :direct
+    method == :khatri_rao && return :khatri_rao
+    if method == :direct
         N == 3 && return :direct3
         N == 4 && return :direct4
         return :contract
     else
-        return method
+        throw(
+            ArgumentError(
+                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, or :direct.",
+            ),
+        )
     end
 end
 
-# ---------------------------------------------------------------------------
-# Khatri-Rao helpers
-# ---------------------------------------------------------------------------
-
+# forming Khatri-Rao product helper, the loop is costly.
 function khatri_rao(mats::AbstractVector{<:AbstractMatrix{T}}) where {T<:AbstractFloat}
     if isempty(mats)
         throw(ArgumentError("khatri_rao: empty matrix list"))
@@ -170,10 +161,7 @@ function _mttkrp_khatri_rao!(
     return out
 end
 
-# ---------------------------------------------------------------------------
 # Direct and contraction kernels
-# ---------------------------------------------------------------------------
-
 @inline function _accumulate_scaled_columns!(
     out::AbstractMatrix{T},
     tmp::AbstractMatrix{T},
@@ -352,10 +340,7 @@ function _mttkrp_contract(
     return out
 end
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
+#Public API
 function mttkrp(
     A::AbstractArray{T,N},
     components::Vector{RankOneTensor{T}},
@@ -406,7 +391,7 @@ function mttkrp(
     else
         throw(
             ArgumentError(
-                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, :materialized_kr, :direct, :slice_gemm, :direct3, :direct4, or :contract.",
+                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, or :direct.",
             ),
         )
     end
@@ -468,7 +453,7 @@ function mttkrp!(
     else
         throw(
             ArgumentError(
-                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, :materialized_kr, :direct, :slice_gemm, :direct3, :direct4, or :contract.",
+                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, or :direct.",
             ),
         )
     end
