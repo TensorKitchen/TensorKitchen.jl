@@ -44,29 +44,11 @@ See [PIPELINE.md](docs/src/PIPELINE.md) for the current execution flow.
 
 ## Installation
 
-TensorKitchen.jl requires Julia `1.10` or newer.
-
-Install the current development version from GitHub:
+Install the current development version through the Julia package manager:
 
 ```julia
-using Pkg
-Pkg.add(url = "https://github.com/TensorKitchen/TensorKitchen.jl")
+add TensorKitchen
 ```
-
-Then load the package:
-
-```julia
-using TensorKitchen
-```
-
-For local development, clone the repository and instantiate the project:
-
-```bash
-git clone https://github.com/TensorKitchen/TensorKitchen.jl.git
-cd TensorKitchen.jl
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
-```
-<br>
 
 ---
 ## Canonical Polyadic Decomposition (CPD)
