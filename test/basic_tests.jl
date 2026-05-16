@@ -235,6 +235,43 @@ end
     @test nncpd_res isa CPDResult
     @test nncpd_res.solver == :rgd
 
+    cpd_rgd_object = cpd(
+        A,
+        2;
+        solver = RGDSolver(),
+        init = :alswarm,
+        warm_steps = 2,
+        maxiter = 1,
+        verbose = false,
+    )
+    @test cpd_rgd_object isa CPDResult
+    @test cpd_rgd_object.solver == :rgd
+
+    cpd_als_object =
+        cpd(A, 2; solver = ALSSolver(), init = :tucker, maxiter = 1, verbose = false)
+    @test cpd_als_object isa CPDResult
+    @test cpd_als_object.solver == :cp_als
+    @test_throws ArgumentError cpd(
+        A,
+        2;
+        solver = ALSSolver(),
+        gradient_mode = :egrad_project,
+        maxiter = 1,
+        verbose = false,
+    )
+    @test_throws ArgumentError cpd(A, 2; solver = "rgd", maxiter = 1, verbose = false)
+
+    nncpd_als_object = nncpd(
+        abs.(A),
+        2;
+        solver = ALSSolver(),
+        init = :tucker,
+        maxiter = 1,
+        verbose = false,
+    )
+    @test nncpd_als_object isa CPDResult
+    @test nncpd_als_object.solver == :cp_als
+
     btd_res = btd(A, 2, (3, 2, 2); maxiter = 1, verbose = false)
     @test btd_res isa BTDResult
     @test btd_res.solver == :rgd

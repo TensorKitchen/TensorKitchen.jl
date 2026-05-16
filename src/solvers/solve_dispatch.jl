@@ -1,4 +1,12 @@
-# solvers/solve_dispatch.jl — shared symbol-based solver dispatch
+# solvers/solve_dispatch.jl — shared solver normalization and dispatch
+
+function _solver_object(solver, ::Real; kwargs...)
+    throw(
+        ArgumentError(
+            "Unsupported solver specification $(typeof(solver)). Use a solver symbol such as :als, :rgd, :rgd_fixed, :rcg, :lbfgs, or :btd_tsd, or pass an AbstractSolver object.",
+        ),
+    )
+end
 
 function _solver_object(solver::Symbol, stepsize::Real; kwargs...)
     solvers = (
@@ -26,14 +34,6 @@ function _solver_object(solver::Symbol, stepsize::Real; kwargs...)
             armijo_sufficient_decrease = get(kwargs, :armijo_sufficient_decrease, 1e-4),
             armijo_alpha_min = get(kwargs, :armijo_alpha_min, 1e-12),
         ),
-        tsd = () -> BTDTSDSolver(;
-            stepsize,
-            schedule = get(kwargs, :schedule, :cyclic),
-            block_repeats = get(kwargs, :block_repeats, 1),
-            armijo_contraction = get(kwargs, :armijo_contraction, 0.5),
-            armijo_sufficient_decrease = get(kwargs, :armijo_sufficient_decrease, 1e-4),
-            armijo_alpha_min = get(kwargs, :armijo_alpha_min, 1e-12),
-        ),
     )
     f = get(solvers, solver) do
         throw(
@@ -44,6 +44,8 @@ function _solver_object(solver::Symbol, stepsize::Real; kwargs...)
     end
     return f()
 end
+
+_solver_object(solver::AbstractSolver, ::Real; kwargs...) = solver
 
 function _solve_with_solver(
     solver_obj::AbstractROSolver,
@@ -80,10 +82,17 @@ function _solve_with_solver(
     p0 = nothing,
     maxiter::Int,
     tol::Real,
+    gradient_mode::Symbol = :riemannian,
     normalization = SeparateLambdaNormalization(),
     verbose::Bool,
     kwargs...,
 )
+    gradient_mode == :riemannian || throw(
+        ArgumentError(
+            "ALS solvers do not use gradient_mode. Use gradient_mode=:riemannian.",
+        ),
+    )
+
     return solve(
         solver_obj,
         model;
@@ -102,14 +111,14 @@ end
     _solve_model(model; solver, init, maxiter, stepsize, tol, kwargs...)
 
 Top-level internal solver dispatcher shared by CPD, BTD, NNCPD, and generic
-`approx`. Converts the public solver symbol into a concrete solver and returns
-a result-like `NamedTuple`.
+`approx`. Accepts either a public solver symbol or a concrete `AbstractSolver`
+object, normalizes it to a solver object, and returns a result-like `NamedTuple`.
 """
 function _solve_model(
     model::AbstractDecompositionModel;
     init,
     p0 = nothing,
-    solver::Symbol,
+    solver,
     maxiter::Int,
     stepsize::Real,
     tol::Real,

@@ -1,39 +1,6 @@
 # api/cpd.jl — user-facing CP decomposition entry points
 export cpd
 
-Base.@kwdef struct CPDOpts{T<:Real}
-    solver::Symbol = :rgd
-    geometry::Symbol = :canonical
-    init::Any = :auto
-    maxiter::Int = (solver in (:rgd, :rcg)) ? 2000 : 500
-    tol::T = 1e-6
-    gradient_mode::Symbol = :riemannian
-    nonnegative::Bool = false
-    stepsize::T = 1.0
-    normalization::Symbol = :separate
-    pullback_eps::T = 1e-8
-    verbose::Bool = true
-end
-
-function _validate_opts(opts::CPDOpts)
-    if opts.solver == :als && opts.geometry != :canonical
-        throw(
-            ArgumentError("ALS solver requires geometry=:canonical. Got: $(opts.geometry)"),
-        )
-    end
-    if opts.nonnegative &&
-       opts.solver in (:rgd, :rcg) &&
-       opts.geometry ∉ (:squaring_metric, :softplus_metric)
-        @warn "Nonnegative RGD/RCG usually requires geometry=:softplus_metric or :squaring_metric."
-    end
-    return opts
-end
-
-@inline function _resolve_cpd_init(init, solver::Symbol)
-    init == :auto || return init
-    return solver == :als ? :tucker : :alswarm
-end
-
 function _pullback_eps_value(::Type{T}, pullback_eps) where {T<:AbstractFloat}
     ε = T(pullback_eps)
     isfinite(ε) && ε > zero(T) ||
@@ -74,7 +41,7 @@ function _cpd_als_warm_then_pack(
     A = tensor(target)
     r = inner isa RankRCPDModel ? inner.r : 1
     T = eltype(A)
-    warm_init = _resolve_cpd_init(init.base_init, :als)
+    warm_init = init.base_init == :auto ? :tucker : init.base_init
     if r == 1
         warm_out = fit_cp_als(
             A,
@@ -104,7 +71,7 @@ function _cpd_als_warm_then_pack(
     warm_result = _solve_model(
         warm_model;
         init = warm_init,
-        solver = :als,
+        solver = ALSSolver(),
         maxiter = init.nsteps,
         stepsize = one(T),
         tol = tol,
@@ -178,6 +145,53 @@ function initial_point(
     )
 end
 
+function _run_cpd_solver(
+    model;
+    init_eff,
+    p0,
+    solver::AbstractSolver,
+    maxiter::Int,
+    stepsize,
+    tol,
+    gradient_mode,
+    normalization,
+    warm_normalization,
+    verbose::Bool,
+    vector_transport_method,
+    pullback_eps,
+    kwargs...,
+)
+    p_solve = if init_eff isa ALSWarmStartInit && isnothing(p0) && !(solver isa ALSSolver)
+        _cpd_als_warm_then_pack(
+            model,
+            init_eff;
+            tol,
+            normalization = warm_normalization,
+            verbose,
+            pullback_eps,
+            kwargs...,
+        )
+    else
+        _pack_cpd_explicit_p0(model, p0)
+    end
+
+    return _solve_model(
+        model;
+        init = init_eff,
+        p0 = p_solve,
+        solver = solver,
+        maxiter,
+        stepsize,
+        tol,
+        gradient_mode,
+        normalization,
+        verbose,
+        refinement_verbose = verbose,
+        vector_transport_method,
+        kwargs...,
+    )
+end
+
 function _cpd_impl(
     A::AbstractArray{T,N},
     r::Int;
@@ -205,58 +219,49 @@ function _cpd_impl(
             "softplus_beta has been removed. Use pullback_eps to tune softplus pullback regularization.",
         ),
     )
-    dims = size(A)
-    init_resolved = _resolve_cpd_init(init, solver)
+
+    solver_obj = _solver_object(solver, stepsize; kwargs...)
+    init_resolved = init == :auto ? (solver_obj isa ALSSolver ? :tucker : :alswarm) : init
     init_eff =
         init_resolved == :alswarm ? ALSWarmStartInit(warm_steps; base_init = warm_init) :
         init_resolved
     geometry_eff = _is_native_rankr_geometry(geometry) ? :native : geometry
-    manifold_solvers = (:rgd, :rgd_fixed, :rcg)
-    als_family = (:als,)
-    normalization_eff =
-        normalization == :auto ?
-        (
-            solver ∈ als_family ?
+    pullback_eps_eff = _pullback_eps_value(T, pullback_eps)
+    if normalization == :auto
+        normalization_eff =
+            solver_obj isa ALSSolver ?
             (nonnegative ? NoNormalization() : SeparateLambdaNormalization()) :
             NoNormalization()
-        ) : _normalization_policy(normalization)
-    als_normalization_eff =
-        normalization == :auto ?
-        (nonnegative ? NoNormalization() : SeparateLambdaNormalization()) :
-        _normalization_policy(normalization)
-    pullback_eps_eff = _pullback_eps_value(T, pullback_eps)
+        warm_normalization_eff =
+            nonnegative ? NoNormalization() : SeparateLambdaNormalization()
+    else
+        normalization_eff = _normalization_policy(normalization)
+        warm_normalization_eff = normalization_eff
+    end
 
     r >= 1 || throw(ArgumentError("rank r must be >= 1, got r=$r"))
-    nonnegative &&
-        solver ∉ (:als, :rgd, :rgd_fixed, :rcg) &&
-        throw(
-            ArgumentError(
-                "nonnegative=true requires solver=:als, :rgd, :rgd_fixed, or :rcg. Got solver=$solver.",
-            ),
-        )
-    geometry_eff ∈ (:native, :canonical, :squaring_metric, :softplus_metric) || throw(
+    solver_obj isa Union{ALSSolver,RGDSolver,RGDFixedSolver,RCGSolver} || throw(
         ArgumentError(
-            "Unknown geometry=$geometry. Use :native, :canonical, :squaring_metric, or :softplus_metric (regularized pullback-style geometries require nonnegative=true).",
+            "Unsupported CPD solver $(typeof(solver_obj)). Use :als, :rgd, :rgd_fixed, or :rcg.",
         ),
     )
-    (geometry_eff ∉ (:squaring_metric, :softplus_metric) || nonnegative) ||
+    geometry_eff in (:native, :canonical, :squaring_metric, :softplus_metric) || throw(
+        ArgumentError(
+            "Unknown geometry=$geometry. Use :native, :canonical, :squaring_metric, or :softplus_metric.",
+        ),
+    )
+    if geometry_eff in (:squaring_metric, :softplus_metric) && !nonnegative
         throw(ArgumentError("geometry=$geometry_eff requires nonnegative=true."))
-    solver ∈ manifold_solvers ||
-        solver ∈ als_family ||
-        throw(
-            ArgumentError(
-                "Unknown solver=$solver. Use a manifold solver (:rgd, :rgd_fixed, :rcg) or CP-ALS (:als).",
-            ),
-        )
-    if solver ∈ als_family
+    end
+    if solver_obj isa ALSSolver
         geometry_eff == :canonical || throw(
             ArgumentError(
-                "solver=$solver does not use manifold geometry. Pass geometry=:canonical (default) or switch to a manifold solver (:rgd, :rgd_fixed, :rcg) for geometry=:native/:squaring_metric/:softplus_metric.",
+                "solver=:als does not use manifold geometry. Use geometry=:canonical.",
             ),
         )
         gradient_mode == :riemannian || throw(
             ArgumentError(
-                "solver=$solver does not use gradient_mode. Pass gradient_mode=:riemannian (default) or switch to a manifold solver.",
+                "solver=:als does not use gradient_mode. Use gradient_mode=:riemannian.",
             ),
         )
     end
@@ -271,89 +276,35 @@ function _cpd_impl(
         use_pullback_metric = (geometry_eff == :squaring_metric),
         pullback_eps = pullback_eps_eff,
     )
-    result_rgd = with_phase_progress() do
-        p_solve =
-            if init_eff isa ALSWarmStartInit && isnothing(p0) && solver ∈ manifold_solvers
-                _cpd_als_warm_then_pack(
-                    model,
-                    init_eff;
-                    tol,
-                    normalization = als_normalization_eff,
-                    verbose,
-                    pullback_eps = pullback_eps_eff,
-                    kwargs...,
-                )
-            else
-                _pack_cpd_explicit_p0(model, p0)
-            end
-        _solve_model(
+
+    raw_result = with_phase_progress() do
+        _run_cpd_solver(
             model;
-            init = init_eff,
-            p0 = p_solve,
-            solver = solver,
-            maxiter = maxiter,
-            stepsize = stepsize,
-            tol = tol,
-            gradient_mode = gradient_mode,
+            init_eff,
+            p0,
+            solver = solver_obj,
+            maxiter,
+            stepsize,
+            tol,
+            gradient_mode,
             normalization = normalization_eff,
-            verbose = verbose,
-            refinement_verbose = verbose,
-            vector_transport_method = vector_transport_method,
+            warm_normalization = warm_normalization_eff,
+            verbose,
+            vector_transport_method,
+            pullback_eps = pullback_eps_eff,
             nonnegative,
             kwargs...,
         )
     end
-    result = result_rgd
-    if nonnegative && geometry_eff ∈ (:squaring_metric, :softplus_metric)
-        result = _merge_res_solver_info(result, (nncp_pullback_eps = pullback_eps_eff,))
-    end
-    return _to_cpd_result(model, result, dims, r)
+
+    result =
+        nonnegative && geometry_eff in (:squaring_metric, :softplus_metric) ?
+        _merge_res_solver_info(raw_result, (nncp_pullback_eps = pullback_eps_eff,)) :
+        raw_result
+    return _to_cpd_result(model, result, size(A), r)
 end
 
 #### MAIN CPD ####
-
-function cpd(A::AbstractArray{T,N}, r::Int, opts::CPDOpts) where {T,N}
-    _validate_opts(opts)
-
-    if opts.nonnegative
-        return nncpd(
-            A,
-            r;
-            solver = opts.solver,
-            init = opts.init,
-            geometry = opts.geometry,
-            maxiter = opts.maxiter,
-            stepsize = opts.stepsize,
-            tol = opts.tol,
-            gradient_mode = opts.gradient_mode,
-            normalization = opts.normalization,
-            pullback_eps = opts.pullback_eps,
-            verbose = opts.verbose,
-        )
-    end
-
-    return cpd(
-        A,
-        r;
-        init = opts.init,
-        solver = opts.solver,
-        geometry = opts.geometry,
-        maxiter = opts.maxiter,
-        tol = opts.tol,
-        gradient_mode = opts.gradient_mode,
-        pullback_eps = opts.pullback_eps,
-        verbose = opts.verbose,
-    )
-end
-
-function cpd(A::AbstractArray{T,N}, r::Int; kwargs...) where {T,N}
-    valid_keys = fieldnames(CPDOpts)
-    for k in keys(kwargs)
-        k in valid_keys || throw(ArgumentError("Unknown keyword argument: $k"))
-    end
-    opts = CPDOpts{eltype(A)}(; kwargs...)
-    return cpd(A, r, opts)
-end
 
 function cpd(
     A::AbstractArray{T,N};
@@ -455,11 +406,12 @@ function cpd(
     kwargs...,
 ) where {T<:AbstractFloat,N}
     if nonnegative
+        solver_obj = _solver_object(solver, stepsize; kwargs...)
         # Align effective defaults with nncpd() on the nonnegative route.
         # Explicitly passed non-default values are preserved.
         init_nn = init == :tucker ? :alswarm : init
         warm_steps_nn = warm_steps
-        geometry_nn = if solver ∈ (:als,)
+        geometry_nn = if solver_obj isa ALSSolver
             :canonical
         elseif geometry == :canonical
             :softplus_metric
@@ -474,7 +426,7 @@ function cpd(
             p0 = p0,
             warm_steps = warm_steps_nn,
             warm_init = warm_init,
-            solver = solver,
+            solver = solver_obj,
             geometry = geometry_nn,
             maxiter = maxiter,
             stepsize = stepsize_nn,
