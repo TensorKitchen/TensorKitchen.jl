@@ -56,7 +56,7 @@ function nncpd(
     warm_steps = 500,
     warm_init = TuckerInit(),
     solver = :rgd,
-    geometry = (solver == :als ? :canonical : :softplus_metric),
+    geometry = nothing,
     maxiter = 500,
     stepsize = 0.01,
     tol = 1e-6,
@@ -69,6 +69,10 @@ function nncpd(
     pullback_eps = 1e-8,
     kwargs...,
 ) where {T<:AbstractFloat,N}
+    solver_obj = _solver_object(solver, stepsize; kwargs...)
+    geometry_eff =
+        isnothing(geometry) ? (solver_obj isa ALSSolver ? :canonical : :softplus_metric) :
+        geometry
     return _cpd_impl(
         A,
         r;
@@ -76,8 +80,8 @@ function nncpd(
         p0 = p0,
         warm_steps = warm_steps,
         warm_init = warm_init,
-        solver = solver,
-        geometry = geometry,
+        solver = solver_obj,
+        geometry = geometry_eff,
         maxiter = maxiter,
         stepsize = stepsize,
         tol = tol,
