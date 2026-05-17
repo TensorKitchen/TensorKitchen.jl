@@ -1,6 +1,8 @@
 # TensorKitchen.jl: tensor decompositions in Julia
 
-<img src="logo_text_transparent.png" width="450px">
+```@raw html
+<img src="../logo_text_transparent.png" width="450" alt="TensorKitchen.jl"/>
+```
 
 **TensorKitchen.jl** is a Julia package for tensor decompositions.
 
