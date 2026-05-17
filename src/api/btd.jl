@@ -50,6 +50,9 @@ end
     return solver == :als ? BTDHOSVDMultistartInit() : :alswarm
 end
 
+@inline _btd_solver_symbol(solver::AbstractSolver) =
+    solver isa ALSSolver ? :als : solver_symbol(solver)
+
 function _btd_effective_init(
     solver::Symbol,
     init,
@@ -246,7 +249,9 @@ function btd(
     restart_seed = nothing,
     kwargs...,
 ) where {T<:AbstractFloat,N}
-    init_resolved = _resolve_btd_init(init, solver)
+    solver_obj = _solver_object(solver, stepsize; kwargs...)
+    solver_sym = _btd_solver_symbol(solver_obj)
+    init_resolved = _resolve_btd_init(init, solver_sym)
     init_eff =
         init_resolved == :alswarm ?
         BTDALSWarmStartInit(
@@ -264,12 +269,12 @@ function btd(
     warm_info = (;)
     short_circuited = Ref(false)
     result = with_phase_progress() do
-        if solver ∉ (:als,) && init_eff isa BTDALSWarmStartInit
+        if solver_sym ∉ (:als,) && init_eff isa BTDALSWarmStartInit
             warm = _btd_warm_start_result(
                 model,
                 b,
                 init_eff,
-                solver;
+                solver_sym;
                 verbose = verbose,
                 warm_rel_error_gate,
             )
@@ -285,7 +290,7 @@ function btd(
             model;
             init = solve_init,
             p0 = solve_p0,
-            solver = solver,
+            solver = solver_obj,
             maxiter = maxiter,
             stepsize = stepsize,
             tol = tol,
@@ -311,15 +316,15 @@ function btd(
         isempty(propertynames(warm_info)) ? result :
         _merge_btd_solver_info(result, warm_info)
     polish_n = if btd_als_polish_maxiter === nothing
-        solver == :als ? 0 : clamp(maxiter ÷ 2, 20, 500)
+        solver_sym == :als ? 0 : clamp(maxiter ÷ 2, 20, 500)
     else
         btd_als_polish_maxiter
     end
-    if polish_n > 0 && solver ∉ (:als,)
+    if polish_n > 0 && solver_sym ∉ (:als,)
         result = _polish_btd_with_als(
             b,
             result,
-            solver;
+            solver_sym;
             block_method = block_method,
             block_maxiter = block_maxiter,
             polish_maxiter = polish_n,

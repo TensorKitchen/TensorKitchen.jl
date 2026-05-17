@@ -223,6 +223,21 @@ end
     @test size(Ahat) == size(A)
     @test rel_error(A, res) == TensorKitchen.relative_frobenius_error(A, Ahat)
     @test rel_error(A, Ahat) == rel_error(A, res)
+
+    model = JoinModel(A, r; geometry = :canonical)
+    p = TensorKitchen.initial_point(model, :random)
+    comps = TensorKitchen.extract_components(model, p)
+    @test length(comps) == r
+    @test comps[1] isa TensorKitchen.CPDComponent
+    @test !(:tensor in fieldnames(typeof(comps[1])))
+    @test comps[1].point !== p
+    @test comps[1].kind == :Segre
+    @test size(comps[1].tensor) == size(A)
+    Xparts = zero(A)
+    for c in comps
+        Xparts .+= c.tensor
+    end
+    @test TensorKitchen.cost(model, p) ≈ 0.5 * sum(abs2, A .- Xparts)
 end
 
 @testset "frontend defaults through public APIs" begin
@@ -562,6 +577,10 @@ end
     @test all(
         isapprox(norm(q_sep.factors[m][:, k]), 1; atol = 1e-10) for m = 1:3 for k = 1:r
     )
+    U_sep, λ_sep = normalize_components(U, λ, SeparateLambdaNormalization())
+    @test U_sep isa Vector{Matrix{Float64}}
+    @test λ_sep isa Vector{Float64}
+    @test reconstruct_cpd_rankr(λ_sep, U_sep) ≈ A_ref
 
     q_last = normalize_components(CPDPoint(λ, U), :last_mode)
     @test reconstruct_cpd_rankr(q_last.lambda, q_last.factors) ≈ A_ref
@@ -886,6 +905,11 @@ end
     )
     @test TensorKitchen.manifold(model_sm) isa ProductManifold
     @test all(m -> m isa SqEuclidean, TensorKitchen.manifold(model_sm).manifolds)
+    join_model_sm = JoinModel(A, r; nonnegative = true, geometry = :squaring_metric)
+    @test all(
+        m -> m isa SqEuclidean,
+        TensorKitchen.manifold(TensorKitchen.cpd_model(join_model_sm)).manifolds,
+    )
     @test getproperty(model_sm, :scale_by_lambda) == false
     res_nn_sm = cpd(
         A,
@@ -1712,6 +1736,28 @@ end
           length(res_btd_tsd.solver_info.line_search_trial_history)
     @test isfinite(res_btd_tsd.rel_error)
     @test res_btd_tsd.rel_error ≈ norm(A - reconstruct(res_btd_tsd)) / norm(A)
+    res_btd_tsd_object = btd(
+        A,
+        2,
+        (2, 2, 2);
+        solver = BTDTSDSolver(stepsize = 1.0),
+        init = :hosvd_multistart,
+        maxiter = 1,
+        schedule = :cyclic,
+        btd_als_polish_maxiter = 0,
+        tol = 1e-6,
+        verbose = false,
+    )
+    @test res_btd_tsd_object isa BTDResult
+    @test res_btd_tsd_object.solver == :btd_tsd
+    @test_throws ArgumentError btd(
+        A,
+        2,
+        (2, 2, 2);
+        solver = :tsd,
+        maxiter = 1,
+        verbose = false,
+    )
 
     manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(size(A), (2, 2, 2), 2))
     backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)

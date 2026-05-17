@@ -29,7 +29,7 @@ function JoinModel(
             scale_by_lambda = scale_by_lambda,
             lambda_eps = lambda_eps,
             nonnegative = nonnegative,
-            use_pullback_metric = use_pullback_metric,
+            use_pullback_metric = (geometry_eff == :squaring_metric) || use_pullback_metric,
             pullback_eps = pullback_eps,
         )
     b = CPDBackend(inner)
@@ -172,15 +172,7 @@ function extract_components(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p)
                 λ, U = _decode_nonnegative_cpd(m, λ̃, Ũ)
                 components_from_factors(λ, U)
             end : unpack_point_rankr_components(p, m.dims, m.r)
-        return [
-            (
-                kind = :Segre,
-                point = p,
-                weights = [c.λ],
-                factors = [reshape(c.vectors[j], :, 1) for j = 1:length(c.vectors)],
-                tensor = reconstruct_cp_rank1(c.λ, c.vectors),
-            ) for c in comps
-        ]
+        return [CPDComponent(pack_point_rank1(c.λ, c.vectors), c) for c in comps]
     elseif m isa Rank1CPDModel
         λ, U = unpack_point_rank1(p, m.dims)
         if m.nonnegative
@@ -192,13 +184,8 @@ function extract_components(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p)
                 U = [u .^ 2 for u in U]
             end
         end
-        return [(
-            kind = :Segre,
-            point = p,
-            weights = [λ],
-            factors = [reshape(U[j], :, 1) for j = 1:length(U)],
-            tensor = reconstruct_cp_rank1(λ, U),
-        )]
+        c = RankOneTensor(λ, U)
+        return [CPDComponent(pack_point_rank1(λ, U), c)]
     end
     throw(
         ArgumentError(
