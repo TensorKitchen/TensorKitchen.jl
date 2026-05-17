@@ -1,6 +1,7 @@
 # core/types.jl — RankOneTensor, CPDResult, ApproxResult, TuckerResult
 export RankOneTensor,
     CPDResult,
+    CPDComponent,
     ApproxResult,
     BTDResult,
     TuckerResult,
@@ -35,6 +36,20 @@ Not a manifold object; used for CP representation and contractions.
 struct RankOneTensor{T<:AbstractFloat}
     λ::T
     vectors::Vector{Vector{T}}
+end
+
+"""
+    CPDComponent{T}
+
+Lazy public component wrapper for CPD-backed join results.
+
+Each component stores its component-specific rank-one point and decoded
+rank-one tensor data. Dense tensors are reconstructed on demand through
+`component.tensor` or [`tensor(component)`](@ref).
+"""
+struct CPDComponent{T<:AbstractFloat,P}
+    point::P
+    component::RankOneTensor{T}
 end
 
 """
@@ -244,7 +259,8 @@ end
 Return the factor vectors of a rank-one tensor component.
 """
 vectors(c::RankOneTensor) = c.vectors
-kind(c::DecompositionComponent) = c.kind
+kind(::CPDComponent) = :Segre
+kind(c::DecompositionComponent) = typeof(c.manifold)
 
 """
     point(x)
@@ -254,6 +270,7 @@ Return the optimization point stored in a result or component.
 Supported inputs include [`CPDResult`](@ref), [`ApproxResult`](@ref),
 [`BTDResult`](@ref), and [`DecompositionComponent`](@ref).
 """
+point(c::CPDComponent) = c.point
 point(c::DecompositionComponent) = c.point
 
 """
@@ -261,6 +278,8 @@ point(c::DecompositionComponent) = c.point
 
 Reconstruct a component into its ambient tensor representation.
 """
+reconstruct(c::CPDComponent) = reconstruct_cp_rank1(λ(c.component), vectors(c.component))
+tensor(c::CPDComponent) = reconstruct(c)
 tensor(c::DecompositionComponent) = c.tensor
 
 """
@@ -268,14 +287,25 @@ tensor(c::DecompositionComponent) = c.tensor
 
 Return the Tucker core stored in a Tucker component.
 """
-core(c::DecompositionComponent) = c.core
+core(c::DecompositionComponent) = _component_core(c.point)
 
 """
     factors(x)
 
 Return factor matrices for a CP or Tucker result/component.
 """
-factors(c::DecompositionComponent) = c.factors
+weights(c::CPDComponent) = [λ(c.component)]
+factors(c::CPDComponent) = [reshape(v, :, 1) for v in vectors(c.component)]
+factors(c::DecompositionComponent) = _component_factors(c.point)
+
+function Base.getproperty(c::CPDComponent, name::Symbol)
+    name === :kind && return kind(c)
+    name === :weights && return weights(c)
+    name === :factors && return factors(c)
+    name === :tensor && return reconstruct(c)
+    return getfield(c, name)
+end
+
 point(r::CPDResult) = cpd_point(r)
 point(r::ApproxResult) = r.point
 point(r::BTDResult) = r.point
