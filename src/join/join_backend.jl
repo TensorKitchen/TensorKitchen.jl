@@ -1,6 +1,7 @@
 # join/join_backend.jl — Generic join and BTD backend implementation
 
-@inline _is_manifold_like(x) = x isa AbstractManifold
+_is_manifold_like(::AbstractManifold) = true
+_is_manifold_like(_) = false
 
 function _as_join_manifold_tuple(manifolds::Tuple)
     all(_is_manifold_like, manifolds) || throw(
@@ -30,15 +31,14 @@ _as_join_manifold_tuple(M::ProductManifold) = Tuple(M.manifolds)
     )
 end
 
-function _manifold_init(M, target, init)
-    init_sym = _builtin_initializer_symbol(init)
-    if M isa Manifolds.Sphere
-        return _sphere_init(M, target, init_sym)
-    elseif M isa Manifolds.Segre
-        return _segre_init(M, target, init_sym)
-    elseif M isa Manifolds.Tucker
-        return _tucker_init(M, target, init_sym)
-    end
+_manifold_init(M, target, init) =
+    _manifold_init(M, target, _builtin_initializer_symbol(init))
+
+_manifold_init(M::Manifolds.Sphere, target, init::Symbol) = _sphere_init(M, target, init)
+_manifold_init(M::Manifolds.Segre, target, init::Symbol) = _segre_init(M, target, init)
+_manifold_init(M::Manifolds.Tucker, target, init::Symbol) = _tucker_init(M, target, init)
+
+function _manifold_init(M, target, init_sym::Symbol)
     init_sym == :random && return rand(M)
     throw(
         ArgumentError(
@@ -53,24 +53,22 @@ end
 Compute the component Euclidean gradient induced by a join residual. Tucker
 components use their native tensor gradient; other components copy the residual.
 """
-function _manifold_egrad(M, p, residual)
-    if M isa Manifolds.Tucker
-        return _tucker_egrad(M, p, residual)
-    elseif M isa Manifolds.Segre
-        dims = factor_dims(M)
-        R = reshape(residual, dims)
-        parts = point_parts(p)
-        λ = parts[1][1]
-        grad_λ = rank1_inner_parts(R, parts)
-        grad_U = Vector{Vector{eltype(R)}}(undef, length(dims))
-        @inbounds for m = 1:length(dims)
-            g = rank1_mode_contract_parts(R, parts, m)
-            rmul!(g, λ)
-            grad_U[m] = g
-        end
-        return pack_tangent_rank1_segre(grad_λ, grad_U)
+_manifold_egrad(M, p, residual) = copy(residual)
+_manifold_egrad(M::Manifolds.Tucker, p, residual) = _tucker_egrad(M, p, residual)
+
+function _manifold_egrad(M::Manifolds.Segre, p, residual)
+    dims = factor_dims(M)
+    R = reshape(residual, dims)
+    parts = point_parts(p)
+    λ = parts[1][1]
+    grad_λ = rank1_inner_parts(R, parts)
+    grad_U = Vector{Vector{eltype(R)}}(undef, length(dims))
+    @inbounds for m = 1:length(dims)
+        g = rank1_mode_contract_parts(R, parts, m)
+        rmul!(g, λ)
+        grad_U[m] = g
     end
-    return copy(residual)
+    return pack_tangent_rank1_segre(grad_λ, grad_U)
 end
 
 """
@@ -80,23 +78,6 @@ Embed a component point into the flattened ambient tensor space, checking that
 its length matches the target.
 """
 function _ambient_vector(M, p, target_len::Int)
-    if M isa Manifolds.Tucker
-        p isa Manifolds.TuckerPoint || throw(
-            ArgumentError(
-                "Expected native TuckerPoint for Manifolds.Tucker, got $(typeof(p)).",
-            ),
-        )
-        core = p.hosvd.core
-        factors = p.hosvd.U
-        X = reconstruct_tucker(core, factors)
-        length(X) == target_len || throw(
-            DimensionMismatch(
-                "Tucker reconstructed tensor length $(length(X)) != target length $target_len.",
-            ),
-        )
-        return vec(X)
-    end
-
     emb = ManifoldsBase.embed(M, p)
     length(emb) == target_len || throw(
         DimensionMismatch(
@@ -105,6 +86,26 @@ function _ambient_vector(M, p, target_len::Int)
         ),
     )
     return vec(emb)
+end
+
+function _ambient_vector(M::Manifolds.Tucker, p::Manifolds.TuckerPoint, target_len::Int)
+    core = p.hosvd.core
+    factors = p.hosvd.U
+    X = reconstruct_tucker(core, factors)
+    length(X) == target_len || throw(
+        DimensionMismatch(
+            "Tucker reconstructed tensor length $(length(X)) != target length $target_len.",
+        ),
+    )
+    return vec(X)
+end
+
+function _ambient_vector(M::Manifolds.Tucker, p, target_len::Int)
+    throw(
+        ArgumentError(
+            "Expected native TuckerPoint for Manifolds.Tucker, got $(typeof(p)).",
+        ),
+    )
 end
 
 """
@@ -448,15 +449,23 @@ function rgrad(model::JoinModel{<:AbstractFloat,<:JoinBackend}, p)
 end
 
 function _ambient_vector!(out::AbstractVector, M, p)
-    if M isa Manifolds.Tucker
-        core = p.hosvd.core
-        factors = p.hosvd.U
-        reconstruct_tucker!(reshape(out, factor_dims(M)), core, factors)
-        return out
-    end
-
     ManifoldsBase.embed!(M, out, p)
     return out
+end
+
+function _ambient_vector!(out::AbstractVector, M::Manifolds.Tucker, p::Manifolds.TuckerPoint)
+    core = p.hosvd.core
+    factors = p.hosvd.U
+    reconstruct_tucker!(reshape(out, factor_dims(M)), core, factors)
+    return out
+end
+
+function _ambient_vector!(out::AbstractVector, M::Manifolds.Tucker, p)
+    throw(
+        ArgumentError(
+            "Expected native TuckerPoint for Manifolds.Tucker, got $(typeof(p)).",
+        ),
+    )
 end
 
 function _subtract_ambient_tensor!(
