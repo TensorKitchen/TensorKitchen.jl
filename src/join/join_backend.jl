@@ -188,11 +188,7 @@ function _sum_backend_instance(
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
-    throw(
-        ArgumentError(
-            "Unsupported join backend type $B. Use JoinBackend or BTDBackend.",
-        ),
-    )
+    throw(ArgumentError("Unsupported join backend type $B. Use JoinBackend or BTDBackend."))
 end
 
 function _sum_backend_parts(
