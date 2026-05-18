@@ -108,7 +108,7 @@ end
 
 function _cpd_result(model::JoinModel{<:AbstractFloat,<:CPDBackend}, result, dims, r)
     m = cpd_model(model)
-    solver_sym = solver(result) isa Symbol ? solver(result) : :unknown
+    solver_sym = _result_solver_symbol(solver(result))
     si = hasproperty(result, :solver_info) ? solver_info(result) : (;)
     als_family = solver_sym in _CP_ALS_FAMILY_SOLVERS
 
@@ -164,29 +164,35 @@ function _cpd_result(model::JoinModel{<:AbstractFloat,<:CPDBackend}, result, dim
 end
 
 function extract_components(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p)
-    m = cpd_model(model)
-    if m isa RankRCPDModel
-        comps =
-            m.nonnegative ? begin
-                λ̃, Ũ = unpack_point_rankr(p, m.dims, m.r)
-                λ, U = _decode_nonnegative_cpd(m, λ̃, Ũ)
-                components_from_factors(λ, U)
-            end : unpack_point_rankr_components(p, m.dims, m.r)
-        return [CPDComponent(pack_point_rank1(c.λ, c.vectors), c) for c in comps]
-    elseif m isa Rank1CPDModel
-        λ, U = unpack_point_rank1(p, m.dims)
-        if m.nonnegative
-            if _rank1_uses_softplus_metric(m.M)
-                λ = _softplus_value(λ)
-                U = [_softplus_value.(u) for u in U]
-            else
-                λ = λ^2
-                U = [u .^ 2 for u in U]
-            end
+    return _extract_cpd_components(cpd_model(model), p)
+end
+
+function _extract_cpd_components(m::RankRCPDModel, p)
+    comps =
+        m.nonnegative ? begin
+            λ̃, Ũ = unpack_point_rankr(p, m.dims, m.r)
+            λ, U = _decode_nonnegative_cpd(m, λ̃, Ũ)
+            components_from_factors(λ, U)
+        end : unpack_point_rankr_components(p, m.dims, m.r)
+    return [CPDComponent(pack_point_rank1(c.λ, c.vectors), c) for c in comps]
+end
+
+function _extract_cpd_components(m::Rank1CPDModel, p)
+    λ, U = unpack_point_rank1(p, m.dims)
+    if m.nonnegative
+        if _rank1_uses_softplus_metric(m.M)
+            λ = _softplus_value(λ)
+            U = [_softplus_value.(u) for u in U]
+        else
+            λ = λ^2
+            U = [u .^ 2 for u in U]
         end
-        c = RankOneTensor(λ, U)
-        return [CPDComponent(pack_point_rank1(λ, U), c)]
     end
+    c = RankOneTensor(λ, U)
+    return [CPDComponent(pack_point_rank1(λ, U), c)]
+end
+
+function _extract_cpd_components(m, p)
     throw(
         ArgumentError(
             "Unsupported CPD backend model $(typeof(m)) for component extraction.",

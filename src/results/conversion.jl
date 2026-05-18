@@ -1,8 +1,11 @@
 # results/conversion.jl — optimization result wrappers
 
+_result_solver_symbol(solver::Symbol) = solver
+_result_solver_symbol(solver) = :unknown
+
 function _to_approx_result(model::JoinModel{T}, result) where {T<:AbstractFloat}
     comps = extract_components(model, result.point)
-    solver_sym = result.solver isa Symbol ? result.solver : :unknown
+    solver_sym = _result_solver_symbol(result.solver)
     solver_info = hasproperty(result, :solver_info) ? result.solver_info : (;)
     return ApproxResult(
         result.point,
@@ -19,7 +22,7 @@ end
 
 function _to_btd_result(model::JoinModel{T}, result) where {T<:AbstractFloat}
     comps = extract_components(model, result.point)
-    solver_sym = result.solver isa Symbol ? result.solver : :unknown
+    solver_sym = _result_solver_symbol(result.solver)
     solver_info = hasproperty(result, :solver_info) ? result.solver_info : (;)
     # Reuse solver-reported cost/error instead of reconstructing the full BTD residual again.
     return BTDResult(

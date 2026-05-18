@@ -15,6 +15,9 @@
     end
     Ahat = reconstruct_tucker(core, factors)
     @test size(Ahat) == size(A)
+    Ahat_inplace = similar(Ahat)
+    @test reconstruct_tucker!(Ahat_inplace, core, factors) === Ahat_inplace
+    @test Ahat_inplace ≈ Ahat
     @test reconstruction_error(A, core, factors) >= 0
     @test reconstruction_error(A, core, factors) <= 1 + 1e-10
 end
@@ -177,6 +180,13 @@ end
     Jt = TuckerJoin(dims, mlrank, 2)
     @test Jt isa ProductManifold
     @test length(Jt.manifolds) == 2
+    @test length(join_product(Mt, 1).manifolds) == 1
+
+    base_product = ProductManifold(Manifolds.Sphere(1), Manifolds.Sphere(2))
+    Jp = join_product(base_product, 2)
+    @test Jp isa ProductManifold
+    @test length(Jp.manifolds) == 4
+    @test_throws ArgumentError join_product(Mt, 0)
 
     Mt_vec = Manifolds.Tucker(collect(dims), collect(mlrank))
     @test factor_dims(Mt_vec) == dims
@@ -476,6 +486,37 @@ end
           res_init_sym.iterations
     @test res_init_sym.solver_info.function_evaluations >= 0
     @test res_init_sym.solver_info.gradient_evaluations >= 1
+
+    res_trace = cpd(
+        A,
+        r;
+        solver = :rgd,
+        init = :tucker,
+        maxiter = 5,
+        tol = 1e-6,
+        verbose = false,
+        component_trace = true,
+    )
+    trace_info = res_trace.solver_info
+    @test hasproperty(trace_info, :component_trace_iterations)
+    @test hasproperty(trace_info, :component_trace_max_delta_history)
+    @test hasproperty(trace_info, :component_trace_delta_history)
+    @test length(trace_info.component_trace_iterations) ==
+          length(trace_info.component_trace_max_delta_history)
+    @test length(trace_info.component_trace_delta_history) ==
+          length(trace_info.component_trace_max_delta_history)
+    @test all(length(deltas) == r for deltas in trace_info.component_trace_delta_history)
+    @test all(isfinite, trace_info.component_trace_max_delta_history)
+    @test_throws ArgumentError cpd(
+        A,
+        r;
+        solver = :als,
+        init = :tucker,
+        maxiter = 1,
+        tol = 1e-6,
+        verbose = false,
+        component_trace = true,
+    )
 
     res_alswarm_obj = cpd(
         A,

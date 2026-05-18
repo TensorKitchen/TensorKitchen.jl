@@ -3,7 +3,8 @@
 # Why join_product instead of "just ProductManifold"? ProductManifold is always the
 # result type; join_product(base, r) decides how to expand base into r components:
 # - Manifolds.Segre → flattened (Euclidean(1), Sphere, ...) × r (one λ + spheres per rank-1).
-# - Manifolds.Tucker / ProductManifold → repeat each factor r times.
+# - ProductManifold → repeat each existing product factor r times.
+# - Manifolds.Tucker → repeat the Tucker manifold r times.
 # - Generic manifold → ProductManifold(base, base, ..., base).
 # So we use join_product (via CPJoin/TuckerJoin) wherever we want this expansion;
 # the pipeline uses it for BTD (btd → TuckerJoin) and for the CPJoin/TuckerJoin APIs.
@@ -29,23 +30,27 @@ end
 
 Decides how to expand base into r components:
 * Manifolds.Segre → flattened (Euclidean(1), Sphere, ...) × r (one λ + spheres per rank-1).
-* Manifolds.Tucker / ProductManifold → repeat each factor r times.
+* ProductManifold → repeat each existing product factor r times.
+* Manifolds.Tucker → repeat the Tucker manifold r times.
 * Generic manifold → ProductManifold(base, base, ..., base).
 """
-function join_product(base::T, r::Int) where {T<:AbstractManifold}
-    r >= 2 || throw(ArgumentError("Join rank must be at least 2, got r=$r."))
+function join_product(base::AbstractManifold, r::Int)
+    r >= 1 || throw(ArgumentError("Join rank must be at least 1, got r=$r."))
+    return _join_product(base, r)
+end
 
-    M = if base isa Manifolds.Segre
-        factors = _segre_flat_factors(base)
-        ProductManifold([deepcopy(f) for _ = 1:r for f in factors]...)
-    elseif base isa ProductManifold
-        factors = base.manifolds
-        ProductManifold([deepcopy(f) for _ = 1:r for f in factors]...)
-    else
-        ProductManifold(ntuple(_ -> deepcopy(base), r)...)
-    end
+function _join_product(base::Manifolds.Segre, r::Int)
+    factors = _segre_flat_factors(base)
+    return ProductManifold([deepcopy(f) for _ = 1:r for f in factors]...)
+end
 
-    return M
+function _join_product(base::ProductManifold, r::Int)
+    factors = base.manifolds
+    return ProductManifold([deepcopy(f) for _ = 1:r for f in factors]...)
+end
+
+function _join_product(base::AbstractManifold, r::Int)
+    return ProductManifold(ntuple(_ -> deepcopy(base), r)...)
 end
 
 product(M::ProductManifold) = M

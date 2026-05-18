@@ -209,6 +209,7 @@ function solve(
     verbose::Bool = true,
     return_stats::Bool = false,
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
+    iteration_callbacks = (),
 ) where {T<:AbstractFloat}
     setup = _prepare_solver_problem(model; init, p0, gradient_mode, verbose)
     normalization_policy = _normalization_policy(normalization)
@@ -231,6 +232,7 @@ function solve(
         vector_transport_method,
         post_step_callback,
         diagnostics_recorder,
+        iteration_callbacks,
     )
 end
 
@@ -246,6 +248,7 @@ function solve(
     verbose::Bool = true,
     return_stats::Bool = false,
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
+    iteration_callbacks = (),
 ) where {T<:AbstractFloat}
     setup = _prepare_solver_problem(model; init, p0, gradient_mode)
     normalization_policy = _normalization_policy(normalization)
@@ -268,6 +271,7 @@ function solve(
         vector_transport_method,
         post_step_callback,
         diagnostics_recorder,
+        iteration_callbacks,
     )
 end
 
@@ -364,22 +368,24 @@ end
 end
 
 function _solver_retraction_method(M, p)
-    M2 = _unwrap_solver_manifold(M)
-    if M2 isa ProductManifold
-        pparts0 = point_parts(p)
-        pparts = pparts0 isa Tuple ? pparts0 : Tuple(pparts0)
-        n = length(M2.manifolds)
-        length(pparts) == n || throw(
-            ArgumentError(
-                "Cannot derive solver retraction method: ProductManifold has $n factors but point has $(length(pparts)) parts.",
-            ),
-        )
-        methods =
-            ntuple(i -> _default_component_retraction_method(M2.manifolds[i], pparts[i]), n)
-        return ManifoldsBase.ProductRetraction(methods)
-    end
-    return _default_component_retraction_method(M2, p)
+    return _solver_retraction_method_unwrapped(_unwrap_solver_manifold(M), p)
 end
+
+function _solver_retraction_method_unwrapped(M::ProductManifold, p)
+    pparts0 = point_parts(p)
+    pparts = pparts0 isa Tuple ? pparts0 : Tuple(pparts0)
+    n = length(M.manifolds)
+    length(pparts) == n || throw(
+        ArgumentError(
+            "Cannot derive solver retraction method: ProductManifold has $n factors but point has $(length(pparts)) parts.",
+        ),
+    )
+    methods =
+        ntuple(i -> _default_component_retraction_method(M.manifolds[i], pparts[i]), n)
+    return ManifoldsBase.ProductRetraction(methods)
+end
+
+_solver_retraction_method_unwrapped(M, p) = _default_component_retraction_method(M, p)
 
 """
     _prepare_solver_problem(model; init, gradient_mode)

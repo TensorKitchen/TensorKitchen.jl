@@ -50,8 +50,8 @@ end
     return solver == :als ? BTDHOSVDMultistartInit() : :alswarm
 end
 
-@inline _btd_solver_symbol(solver::AbstractSolver) =
-    solver isa ALSSolver ? :als : solver_symbol(solver)
+@inline _btd_solver_symbol(::ALSSolver) = :als
+@inline _btd_solver_symbol(solver::AbstractSolver) = solver_symbol(solver)
 
 function _btd_effective_init(
     solver::Symbol,

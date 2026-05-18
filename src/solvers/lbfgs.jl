@@ -67,6 +67,7 @@ function solve_lbfgs(
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
     post_step_callback = nothing,
     diagnostics_recorder = nothing,
+    iteration_callbacks = (),
     memory_size::Int = 1,
     cautious_update::Bool = true,
     initial_scale::Real = 1.0,
@@ -129,6 +130,7 @@ function solve_lbfgs(
             post_step_callback,
             diagnostics_callback,
             progress_callback,
+            iteration_callbacks...,
         ),
         count = [:Cost, :Gradient],
         return_state = true,
@@ -200,6 +202,7 @@ function run_second_order_solver(
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
     post_step_callback,
     diagnostics_recorder,
+    iteration_callbacks,
 )
     return solve_lbfgs(
         setup.model_cost,
@@ -215,6 +218,7 @@ function run_second_order_solver(
         vector_transport_method = vector_transport_method,
         post_step_callback,
         diagnostics_recorder,
+        iteration_callbacks,
         memory_size = solver.memory_size,
         cautious_update = solver.cautious_update,
         initial_scale = solver.initial_scale,

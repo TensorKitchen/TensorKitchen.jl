@@ -1,4 +1,4 @@
-export tucker_hosvd, reconstruct_tucker
+export tucker_hosvd, reconstruct_tucker, reconstruct_tucker!
 
 """
     tucker_hosvd(A, ranks) computes (core, factors)
@@ -44,6 +44,54 @@ function reconstruct_tucker(core::AbstractArray{T}, factors) where {T<:AbstractF
         A = mode_n_product(A, factors[mode], mode)
     end
     return A
+end
+
+"""
+    reconstruct_tucker!(out, core, factors)
+
+Reconstruct a Tucker tensor directly into `out`.
+
+This low-memory kernel avoids allocating the full reconstructed tensor before
+copying it into `out`. It is useful in workspace-based paths where avoiding
+large temporary tensors is more important than using BLAS-heavy mode products.
+"""
+function reconstruct_tucker!(
+    out::AbstractArray{T,N},
+    core::AbstractArray{T,N},
+    factors,
+) where {T<:AbstractFloat,N}
+    length(factors) == N || throw(
+        DimensionMismatch(
+            "reconstruct_tucker!: got $(length(factors)) factors for an order-$N core.",
+        ),
+    )
+    @inbounds for mode = 1:N
+        size(out, mode) == size(factors[mode], 1) || throw(
+            DimensionMismatch(
+                "reconstruct_tucker!: output mode $mode has size $(size(out, mode)), " *
+                "expected $(size(factors[mode], 1)).",
+            ),
+        )
+        size(core, mode) == size(factors[mode], 2) || throw(
+            DimensionMismatch(
+                "reconstruct_tucker!: core mode $mode has size $(size(core, mode)), " *
+                "expected $(size(factors[mode], 2)).",
+            ),
+        )
+    end
+
+    @inbounds for I in CartesianIndices(out)
+        acc = zero(T)
+        for J in CartesianIndices(core)
+            val = core[J]
+            for mode = 1:N
+                val *= factors[mode][I[mode], J[mode]]
+            end
+            acc += val
+        end
+        out[I] = acc
+    end
+    return out
 end
 
 # reconstruction_error(A, core, factors) — defined in results/rel_error.jl (alias of rel_error).

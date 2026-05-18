@@ -4,16 +4,15 @@ export RCGSolver
 struct SegreProjectionTransport <: ManifoldsBase.AbstractVectorTransportMethod end
 
 function _uses_segre_projection_transport(M)
-    M2 = _unwrap_solver_manifold(M)
-    if M2 isa Manifolds.Segre
-        return true
-    elseif M2 isa ProductManifold
-        return all(_uses_segre_projection_transport, M2.manifolds)
-    elseif hasproperty(M2, :native)
-        return _uses_segre_projection_transport(getproperty(M2, :native))
-    end
-    return false
+    return _uses_segre_projection_transport_unwrapped(_unwrap_solver_manifold(M))
 end
+
+_uses_segre_projection_transport_unwrapped(::Manifolds.Segre) = true
+_uses_segre_projection_transport_unwrapped(M::ProductManifold) =
+    all(_uses_segre_projection_transport, M.manifolds)
+_uses_segre_projection_transport_unwrapped(M) =
+    hasproperty(M, :native) ? _uses_segre_projection_transport(getproperty(M, :native)) :
+    false
 
 function ManifoldsBase.vector_transport_to(
     M::Manifolds.Segre,
@@ -105,6 +104,7 @@ function solve_rcg(
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
     post_step_callback = nothing,
     diagnostics_recorder = nothing,
+    iteration_callbacks = (),
 )
     p0_local = _solver_point(M, p0)
     T = _scalar_eltype(p0_local)
@@ -152,6 +152,7 @@ function solve_rcg(
             post_step_callback,
             diagnostics_callback,
             progress_callback,
+            iteration_callbacks...,
         ),
         count = [:Cost, :Gradient],
         return_state = true,
@@ -223,6 +224,7 @@ function run_first_order_solver(
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
     post_step_callback,
     diagnostics_recorder,
+    iteration_callbacks,
 )
     return solve_rcg(
         setup.model_cost,
@@ -238,5 +240,6 @@ function run_first_order_solver(
         vector_transport_method = vector_transport_method,
         post_step_callback,
         diagnostics_recorder,
+        iteration_callbacks,
     )
 end

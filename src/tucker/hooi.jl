@@ -17,35 +17,7 @@ function hooi(
     d = N
     processing_order = collect(1:d)
 
-    # Initialization
-    if init isa TuckerResult
-        td0 = init::TuckerResult{T,N}
-        size(td0.core) == ranks || throw(
-            DimensionMismatch(
-                "hooi: TuckerResult.core has size $(size(td0.core)), expected core size $ranks",
-            ),
-        )
-        for m = 1:d
-            size(td0.factors[m], 1) == dims[m] || throw(
-                DimensionMismatch(
-                    "hooi: TuckerResult factor $m has $(size(td0.factors[m],1)) rows, expected $(dims[m])",
-                ),
-            )
-            size(td0.factors[m], 2) == ranks[m] || throw(
-                DimensionMismatch(
-                    "hooi: TuckerResult factor $m has $(size(td0.factors[m],2)) cols, expected $(ranks[m])",
-                ),
-            )
-        end
-        factors0 = td0.factors
-        singular_vals = [copy(td0.singular_values[m]) for m = 1:d]
-    elseif init == :sthosvd
-        td0 = sthosvd(A, ranks)
-        factors0 = td0.factors
-        singular_vals = td0.singular_values
-    else
-        error("Unknown init: $init. Use :sthosvd or a TuckerResult.")
-    end
+    factors0, singular_vals = _hooi_initial_factors(A, ranks, init)
 
     factors = [copy(factors0[m]) for m = 1:d]
     prev_rel_error = T(Inf)
@@ -117,4 +89,44 @@ end
 function hooi(A::AbstractArray{T,N}, ranks::Vector{Int}; kwargs...) where {T,N}
     @assert length(ranks) == N
     return hooi(A, Tuple(Int.(ranks)); kwargs...)
+end
+
+function _hooi_initial_factors(
+    A::AbstractArray{T,N},
+    ranks::NTuple{N,Int},
+    init::TuckerResult{T,N},
+) where {T<:AbstractFloat,N}
+    dims = size(A)
+    size(init.core) == ranks || throw(
+        DimensionMismatch(
+            "hooi: TuckerResult.core has size $(size(init.core)), expected core size $ranks",
+        ),
+    )
+    @inbounds for m = 1:N
+        size(init.factors[m], 1) == dims[m] || throw(
+            DimensionMismatch(
+                "hooi: TuckerResult factor $m has $(size(init.factors[m], 1)) rows, expected $(dims[m])",
+            ),
+        )
+        size(init.factors[m], 2) == ranks[m] || throw(
+            DimensionMismatch(
+                "hooi: TuckerResult factor $m has $(size(init.factors[m], 2)) cols, expected $(ranks[m])",
+            ),
+        )
+    end
+    return init.factors, [copy(init.singular_values[m]) for m = 1:N]
+end
+
+function _hooi_initial_factors(
+    A::AbstractArray{T,N},
+    ranks::NTuple{N,Int},
+    init::Symbol,
+) where {T<:AbstractFloat,N}
+    init == :sthosvd || error("Unknown init: $init. Use :sthosvd or a TuckerResult.")
+    td0 = sthosvd(A, ranks)
+    return td0.factors, td0.singular_values
+end
+
+function _hooi_initial_factors(A::AbstractArray, ranks::Tuple, init)
+    error("Unknown init: $init. Use :sthosvd or a TuckerResult.")
 end

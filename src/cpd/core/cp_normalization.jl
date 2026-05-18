@@ -73,52 +73,86 @@ function normalize_components!(
         )
     end
 
-    if policy isa NoNormalization
-        return factors
-    elseif policy isa SeparateLambdaNormalization
-        @inbounds for k = 1:r
-            scale = lambda[k]
-            for m = 1:d
-                col = @view factors[m][:, k]
-                scale = _normalize_column_into_lambda!(col, scale)
-            end
-            lambda[k] = scale
-        end
-        return factors
-    elseif policy isa LastModeNormalization
-        last_mode = d
-        @inbounds for k = 1:r
-            total_scale = lambda[k]
-            for m = 1:d
-                col = @view factors[m][:, k]
-                nu = _safe_column_norm!(col)
-                col ./= nu
-                total_scale *= nu
-            end
-            mag = abs(total_scale)
-            factors[last_mode][:, k] .*= mag
-            lambda[k] = _sign_or_zero(total_scale)
-        end
-        return factors
-    elseif policy isa EvenDistributionNormalization
-        @inbounds for k = 1:r
-            total_scale = lambda[k]
-            for m = 1:d
-                col = @view factors[m][:, k]
-                nu = _safe_column_norm!(col)
-                col ./= nu
-                total_scale *= nu
-            end
-            mag = abs(total_scale)
-            scale = mag <= eps(T) ? zero(T) : mag^(inv(T(d)))
-            for m = 1:d
-                factors[m][:, k] .*= scale
-            end
-            lambda[k] = _sign_or_zero(total_scale)
-        end
-        return factors
-    end
+    return _normalize_components_policy!(factors, lambda, policy)
+end
 
+_normalize_components_policy!(
+    factors::Vector{Matrix{T}},
+    lambda::Vector{T},
+    ::NoNormalization,
+) where {T<:AbstractFloat} = factors
+
+function _normalize_components_policy!(
+    factors::Vector{Matrix{T}},
+    lambda::Vector{T},
+    ::SeparateLambdaNormalization,
+) where {T<:AbstractFloat}
+    r = length(lambda)
+    d = length(factors)
+    @inbounds for k = 1:r
+        scale = lambda[k]
+        for m = 1:d
+            col = @view factors[m][:, k]
+            scale = _normalize_column_into_lambda!(col, scale)
+        end
+        lambda[k] = scale
+    end
+    return factors
+end
+
+function _normalize_components_policy!(
+    factors::Vector{Matrix{T}},
+    lambda::Vector{T},
+    ::LastModeNormalization,
+) where {T<:AbstractFloat}
+    r = length(lambda)
+    d = length(factors)
+    last_mode = d
+    @inbounds for k = 1:r
+        total_scale = lambda[k]
+        for m = 1:d
+            col = @view factors[m][:, k]
+            nu = _safe_column_norm!(col)
+            col ./= nu
+            total_scale *= nu
+        end
+        mag = abs(total_scale)
+        factors[last_mode][:, k] .*= mag
+        lambda[k] = _sign_or_zero(total_scale)
+    end
+    return factors
+end
+
+function _normalize_components_policy!(
+    factors::Vector{Matrix{T}},
+    lambda::Vector{T},
+    ::EvenDistributionNormalization,
+) where {T<:AbstractFloat}
+    r = length(lambda)
+    d = length(factors)
+    @inbounds for k = 1:r
+        total_scale = lambda[k]
+        for m = 1:d
+            col = @view factors[m][:, k]
+            nu = _safe_column_norm!(col)
+            col ./= nu
+            total_scale *= nu
+        end
+        mag = abs(total_scale)
+        scale = mag <= eps(T) ? zero(T) : mag^(inv(T(d)))
+        for m = 1:d
+            factors[m][:, k] .*= scale
+        end
+        lambda[k] = _sign_or_zero(total_scale)
+    end
+    return factors
+end
+
+function _normalize_components_policy!(
+    factors::Vector{Matrix{T}},
+    lambda::Vector{T},
+    policy::AbstractNormalizationPolicy,
+) where {T<:AbstractFloat}
     throw(ArgumentError("Unsupported normalization policy $(typeof(policy))."))
 end
 
