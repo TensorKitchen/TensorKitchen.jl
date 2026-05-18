@@ -74,7 +74,7 @@ function _manifold_egrad(M, p, residual)
 end
 
 """
-    _ambient_vector(M, p, target_len) -> AbstractVector
+    _ambient_vector(M, p, target_len) returns AbstractVector
 
 Embed a component point into the flattened ambient tensor space, checking that
 its length matches the target.
@@ -108,7 +108,7 @@ function _ambient_vector(M, p, target_len::Int)
 end
 
 """
-    _ambient_tensor(M, p, target_shape) -> AbstractArray
+    _ambient_tensor(M, p, target_shape) returns AbstractArray
 
 Embed a component point into ambient space and reshape it to the target tensor
 shape.
@@ -118,7 +118,7 @@ function _ambient_tensor(M, p, target_shape::Tuple)
 end
 
 """
-    ambient_length(M) -> Int
+    ambient_length(M) returns Int
 
 Return the flattened ambient tensor length represented by a component manifold.
 """
@@ -137,7 +137,7 @@ ambient_length(M::Manifolds.Segre) = prod(factor_dims(M))
 ambient_length(M::Manifolds.Tucker) = prod(factor_dims(M))
 
 """
-    _join_vector_workspace_like(target, n)
+    _join_vector_workspace_like(target, n) returns AbstractVector
 
 Allocate a flattened work vector with the same storage style and scalar type as
 the target tensor.
@@ -151,7 +151,7 @@ the target tensor.
 end
 
 """
-    _validate_join_ambient_compatibility(manifolds, target)
+    _validate_join_ambient_compatibility(manifolds, target) validates the join ambient compatibility
 
 Ensure every join component embeds into the same flattened ambient space as the
 target tensor.
@@ -177,7 +177,7 @@ function _validate_join_ambient_compatibility(manifolds::Tuple, target::Abstract
 end
 
 """
-    _sum_backend_instance(B, manifolds, target; init_point=nothing)
+    _sum_backend_instance(B, manifolds, target; init_point=nothing) returns AbstractJoinBackend
 
 Construct either a generic `JoinBackend` or `BTDBackend` with shared target,
 product manifold, and reusable reconstruction/residual buffers.
