@@ -11,8 +11,8 @@ _uses_segre_projection_transport_unwrapped(::Manifolds.Segre) = true
 _uses_segre_projection_transport_unwrapped(M::ProductManifold) =
     all(_uses_segre_projection_transport, M.manifolds)
 _uses_segre_projection_transport_unwrapped(M) =
-    hasproperty(M, :native) ?
-    _uses_segre_projection_transport(getproperty(M, :native)) : false
+    hasproperty(M, :native) ? _uses_segre_projection_transport(getproperty(M, :native)) :
+    false
 
 function ManifoldsBase.vector_transport_to(
     M::Manifolds.Segre,

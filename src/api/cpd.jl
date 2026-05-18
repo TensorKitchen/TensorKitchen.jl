@@ -115,8 +115,8 @@ function _cpd_component_trace_info(rec::_CPDComponentTraceRecorder)
         component_trace_cost_rel_change_history = rec.cost_rel_change_history,
         component_trace_max_delta_history = rec.max_component_delta_history,
         component_trace_delta_history = rec.component_delta_history,
-        component_trace_final_max_delta = isempty(rec.max_component_delta_history) ?
-                                          NaN : rec.max_component_delta_history[end],
+        component_trace_final_max_delta = isempty(rec.max_component_delta_history) ? NaN :
+                                          rec.max_component_delta_history[end],
     )
 end
 

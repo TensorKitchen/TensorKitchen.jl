@@ -380,7 +380,8 @@ function _solver_retraction_method_unwrapped(M::ProductManifold, p)
             "Cannot derive solver retraction method: ProductManifold has $n factors but point has $(length(pparts)) parts.",
         ),
     )
-    methods = ntuple(i -> _default_component_retraction_method(M.manifolds[i], pparts[i]), n)
+    methods =
+        ntuple(i -> _default_component_retraction_method(M.manifolds[i], pparts[i]), n)
     return ManifoldsBase.ProductRetraction(methods)
 end
 
