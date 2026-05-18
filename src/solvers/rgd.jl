@@ -547,6 +547,7 @@ function solve_rgd(
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
     post_step_callback = nothing,
     diagnostics_recorder = nothing,
+    iteration_callbacks = (),
 )
     p0_local = _solver_point(M, p0)
     T = _scalar_eltype(p0_local)
@@ -626,6 +627,7 @@ function solve_rgd(
             post_step_callback,
             diagnostics_callback,
             progress_callback,
+            iteration_callbacks...,
         ),
         count = [:Cost, :Gradient],
         return_state = true,
@@ -691,6 +693,7 @@ function solve_rgd_fixed(
     model_grad = nothing,
     post_step_callback = nothing,
     diagnostics_recorder = nothing,
+    iteration_callbacks = (),
 )
     p0_local = _solver_point(M, p0)
     T = _scalar_eltype(p0_local)
@@ -725,6 +728,7 @@ function solve_rgd_fixed(
             post_step_callback,
             diagnostics_callback,
             progress_callback,
+            iteration_callbacks...,
         ),
         count = [:Cost, :Gradient],
         return_state = true,
@@ -801,6 +805,7 @@ function run_first_order_solver(
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
     post_step_callback,
     diagnostics_recorder,
+    iteration_callbacks,
 )
     return solve_rgd(
         setup.model_cost,
@@ -817,6 +822,7 @@ function run_first_order_solver(
         vector_transport_method = vector_transport_method,
         post_step_callback,
         diagnostics_recorder,
+        iteration_callbacks,
     )
 end
 
@@ -850,6 +856,7 @@ function run_first_order_solver(
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
     post_step_callback,
     diagnostics_recorder,
+    iteration_callbacks,
 )
     return solve_rgd_fixed(
         setup.model_cost,
@@ -865,5 +872,6 @@ function run_first_order_solver(
         model_grad = setup.model_grad,
         post_step_callback,
         diagnostics_recorder,
+        iteration_callbacks,
     )
 end

@@ -22,6 +22,104 @@ function _merge_res_solver_info(res, patch::NamedTuple)
     )
 end
 
+mutable struct _CPDComponentTraceRecorder{M}
+    model::M
+    previous::Any
+    previous_cost::Float64
+    iterations::Vector{Int}
+    cost_history::Vector{Float64}
+    cost_rel_change_history::Vector{Float64}
+    max_component_delta_history::Vector{Float64}
+    component_delta_history::Vector{Vector{Float64}}
+end
+
+function _CPDComponentTraceRecorder(model)
+    return _CPDComponentTraceRecorder(
+        model,
+        nothing,
+        NaN,
+        Int[],
+        Float64[],
+        Float64[],
+        Float64[],
+        Vector{Float64}[],
+    )
+end
+
+function _rankone_norm2(λ, U, k::Int)
+    val = abs2(λ[k])
+    @inbounds for m = 1:length(U)
+        val *= sum(abs2, @view U[m][:, k])
+    end
+    return Float64(val)
+end
+
+function _rankone_inner(λa, Ua, λb, Ub, k::Int)
+    val = λa[k] * λb[k]
+    @inbounds for m = 1:length(Ua)
+        val *= dot(@view(Ua[m][:, k]), @view(Ub[m][:, k]))
+    end
+    return Float64(val)
+end
+
+function _cpd_component_deltas(prev::CPDPoint, curr::CPDPoint)
+    λ_prev = lambda(prev)
+    U_prev = factors(prev)
+    λ_curr = lambda(curr)
+    U_curr = factors(curr)
+    r = length(λ_curr)
+    deltas = Vector{Float64}(undef, r)
+    @inbounds for k = 1:r
+        n_prev = _rankone_norm2(λ_prev, U_prev, k)
+        n_curr = _rankone_norm2(λ_curr, U_curr, k)
+        cross = _rankone_inner(λ_prev, U_prev, λ_curr, U_curr, k)
+        delta = sqrt(max(n_prev + n_curr - 2 * cross, 0.0))
+        deltas[k] = delta / max(sqrt(max(n_prev, 0.0)), 1.0)
+    end
+    return deltas
+end
+
+function _record_cpd_component_trace!(rec::_CPDComponentTraceRecorder, p, iter::Int)
+    q = cpd_point(rec.model, p)
+    cost_val = Float64(cost(rec.model, p))
+    if rec.previous !== nothing
+        deltas = _cpd_component_deltas(rec.previous, q)
+        rel_change = abs(rec.previous_cost - cost_val) / max(abs(rec.previous_cost), 1.0)
+        push!(rec.iterations, iter)
+        push!(rec.cost_history, cost_val)
+        push!(rec.cost_rel_change_history, rel_change)
+        push!(rec.max_component_delta_history, maximum(deltas))
+        push!(rec.component_delta_history, deltas)
+    end
+    rec.previous = q
+    rec.previous_cost = cost_val
+    return nothing
+end
+
+function _cpd_component_trace_callback(rec::_CPDComponentTraceRecorder)
+    return function (problem, state, k)
+        p = try
+            Manopt.get_iterate(state)
+        catch
+            return nothing
+        end
+        _record_cpd_component_trace!(rec, p, Int(k))
+        return nothing
+    end
+end
+
+function _cpd_component_trace_info(rec::_CPDComponentTraceRecorder)
+    return (
+        component_trace_iterations = rec.iterations,
+        component_trace_cost_history = rec.cost_history,
+        component_trace_cost_rel_change_history = rec.cost_rel_change_history,
+        component_trace_max_delta_history = rec.max_component_delta_history,
+        component_trace_delta_history = rec.component_delta_history,
+        component_trace_final_max_delta = isempty(rec.max_component_delta_history) ?
+                                          NaN : rec.max_component_delta_history[end],
+    )
+end
+
 function _pack_cpd_explicit_p0(model, p0)
     p0 isa CPDPoint && return pack_cpd_point(model, p0)
     p0 isa CPDResult && return pack_cpd_point(model, cpd_point(p0))
@@ -159,8 +257,12 @@ function _run_cpd_solver(
     verbose::Bool,
     vector_transport_method,
     pullback_eps,
+    component_trace,
     kwargs...,
 )
+    trace_recorder = component_trace ? _CPDComponentTraceRecorder(model) : nothing
+    iteration_callbacks =
+        isnothing(trace_recorder) ? () : (_cpd_component_trace_callback(trace_recorder),)
     p_solve = if init_eff isa ALSWarmStartInit && isnothing(p0) && !(solver isa ALSSolver)
         _cpd_als_warm_then_pack(
             model,
@@ -175,7 +277,7 @@ function _run_cpd_solver(
         _pack_cpd_explicit_p0(model, p0)
     end
 
-    return _solve_model(
+    result = _solve_model(
         model;
         init = init_eff,
         p0 = p_solve,
@@ -188,8 +290,11 @@ function _run_cpd_solver(
         verbose,
         refinement_verbose = verbose,
         vector_transport_method,
+        iteration_callbacks,
         kwargs...,
     )
+    return isnothing(trace_recorder) ? result :
+           _merge_res_solver_info(result, _cpd_component_trace_info(trace_recorder))
 end
 
 function _cpd_impl(
@@ -212,6 +317,7 @@ function _cpd_impl(
     verbose,
     vector_transport_method,
     pullback_eps = 1e-8,
+    component_trace::Bool = false,
     kwargs...,
 ) where {T<:AbstractFloat,N}
     haskey(kwargs, :softplus_beta) && throw(
@@ -254,6 +360,9 @@ function _cpd_impl(
         throw(ArgumentError("geometry=$geometry_eff requires nonnegative=true."))
     end
     if solver_obj isa ALSSolver
+        component_trace && throw(
+            ArgumentError("component_trace=true is only supported for manifold solvers."),
+        )
         geometry_eff == :canonical || throw(
             ArgumentError(
                 "solver=:als does not use manifold geometry. Use geometry=:canonical.",
@@ -292,6 +401,7 @@ function _cpd_impl(
             verbose,
             vector_transport_method,
             pullback_eps = pullback_eps_eff,
+            component_trace,
             nonnegative,
             kwargs...,
         )
@@ -361,6 +471,9 @@ If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
 * `verbose = true`: Enables progress output.
 * `nonnegative::Bool = false`: Nonnegative CPD option to be selected by the user. (same as `nncpd`)
 * `pullback_eps = 1e-8`: Regularization parameter for pullback-style nonnegative geometries.
+* `component_trace = false`: For manifold solvers, records per-iteration movement of
+  each CP rank-one term in `solver_info`. Use this to diagnose whether a flat cost
+  means the rank-one terms are also stuck.
 
 ## Notes
 * `solver = :als` does not use manifold geometry. In that case:
@@ -403,6 +516,7 @@ function cpd(
     verbose = true,
     vector_transport_method = nothing,
     pullback_eps = 1e-8,
+    component_trace::Bool = false,
     kwargs...,
 ) where {T<:AbstractFloat,N}
     if nonnegative
@@ -436,6 +550,7 @@ function cpd(
             scale_by_lambda = scale_by_lambda,
             lambda_eps = lambda_eps,
             pullback_eps = pullback_eps,
+            component_trace = component_trace,
             verbose = verbose,
             vector_transport_method = vector_transport_method,
             kwargs...,
@@ -459,6 +574,7 @@ function cpd(
         lambda_eps = lambda_eps,
         nonnegative = false,
         pullback_eps = pullback_eps,
+        component_trace = component_trace,
         verbose = verbose,
         vector_transport_method = vector_transport_method,
         kwargs...,

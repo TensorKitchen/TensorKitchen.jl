@@ -3,16 +3,22 @@
 # If every summand is a Manifolds.Segre with the same factor_dims, the call is a
 # plain rank-r CPD. Route those directly into the cpd() tree so they get the
 # CPDBackend, CPDResult, and all CPD-specific kwargs (geometry, nonnegative, ...).
+_is_segre_manifold(::Manifolds.Segre) = true
+_is_segre_manifold(::AbstractManifold) = false
+
 function _all_segre_uniform(manifolds)
     isempty(manifolds) && return false
-    all(m -> m isa Manifolds.Segre, manifolds) || return false
+    all(_is_segre_manifold, manifolds) || return false
     d0 = factor_dims(first(manifolds))
     return all(m -> factor_dims(m) == d0, manifolds)
 end
 
+_is_tucker_manifold(::Manifolds.Tucker) = true
+_is_tucker_manifold(::AbstractManifold) = false
+
 function _all_tucker_uniform(manifolds, target_shape::Tuple)
     isempty(manifolds) && return false
-    all(m -> m isa Manifolds.Tucker, manifolds) || return false
+    all(_is_tucker_manifold, manifolds) || return false
     dims0 = factor_dims(first(manifolds))
     ranks0 = multilinear_rank(first(manifolds))
     dims0 == target_shape || return false
