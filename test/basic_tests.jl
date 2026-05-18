@@ -2151,6 +2151,113 @@ end
     @test res_btd_zero.rel_error ≥ 0
 end
 
+@testset "README workflow examples stay executable" begin
+    rng = MersenneTwister(5151)
+    A = randn(rng, 8, 6, 5)
+    r = 3
+
+    res = cpd(A, r; init = TuckerInit(), maxiter = 5, verbose = false)
+    @test res isa CPDResult
+    λ = weights(res)
+    U = factors(res)
+    @test length(λ) == r
+    @test length(U) == ndims(A)
+    Â = reconstruct(res)
+    @test size(Â) == size(A)
+    @test cpd(A, r; solver = :als, maxiter = 3, verbose = false) isa CPDResult
+
+    mlrank = (4, 3, 2)
+    tucker_res = tucker(A, mlrank)
+    @test tucker_res isa TuckerResult
+    @test size(core(tucker_res)) == mlrank
+    @test length(factors(tucker_res)) == ndims(A)
+
+    B = abs.(A)
+    nn_res = nncpd(B, r; solver = :als, maxiter = 3, verbose = false)
+    @test nn_res isa CPDResult
+    @test length(weights(nn_res)) == r
+    @test length(factors(nn_res)) == ndims(B)
+    @test all(w -> w >= -1e-12, weights(nn_res))
+    @test all(F -> all(x -> x >= -1e-12, F), factors(nn_res))
+    @test cpd(B, r; nonnegative = true, solver = :als, maxiter = 3, verbose = false) isa
+          CPDResult
+
+    block_count = 2
+    block_rank = (3, 2, 2)
+    btd_res = btd(
+        A,
+        block_count,
+        block_rank;
+        solver = :als,
+        init = BTDHOSVDMultistartInit(2; screening_steps = 0, block_maxiter = 1),
+        maxiter = 2,
+        block_maxiter = 1,
+        verbose = false,
+    )
+    @test btd_res isa BTDResult
+    btd_blocks = blocks(btd_res)
+    @test length(btd_blocks) == block_count
+    blk = btd_blocks[1]
+    @test size(core(blk)) == block_rank
+    @test length(factors(blk)) == ndims(A)
+
+    p = [1.2, 0.4]
+    S = Manifolds.Sphere(1)
+    join_res = approx(
+        (S, S),
+        p;
+        init = :deterministic,
+        solver = :rgd,
+        maxiter = 60,
+        verbose = false,
+    )
+    @test join_res isa ApproxResult
+    @test length(components(join_res)) == 2
+    @test size(reconstruct(join_res)) == size(p)
+end
+
+@testset "result conversion consistency for CPD, NNCPD, and BTD" begin
+    rng = MersenneTwister(6262)
+    A = randn(rng, 6, 5, 4)
+    r = 2
+
+    res_cpd = cpd(A, r; solver = :als, init = TuckerInit(), maxiter = 4, verbose = false)
+    Ahat_cpd = reconstruct(res_cpd)
+    @test Ahat_cpd ≈ reconstruct_cpd_rankr(weights(res_cpd), factors(res_cpd))
+    @test rel_error(A, res_cpd) ≈ rel_error(A, Ahat_cpd)
+    @test length(components(res_cpd)) == r
+    @test factors(res_cpd) == TensorKitchen.factors_from_components(components(res_cpd))
+
+    B = abs.(A)
+    res_nn = nncpd(B, r; solver = :als, init = TuckerInit(), maxiter = 4, verbose = false)
+    Ahat_nn = reconstruct(res_nn)
+    @test Ahat_nn ≈ reconstruct_cpd_rankr(weights(res_nn), factors(res_nn))
+    @test rel_error(B, res_nn) ≈ rel_error(B, Ahat_nn)
+    @test length(components(res_nn)) == r
+    @test all(w -> w >= -1e-12, weights(res_nn))
+    @test all(F -> all(x -> x >= -1e-12, F), factors(res_nn))
+
+    res_btd = btd(
+        A,
+        2,
+        (2, 2, 2);
+        solver = :als,
+        init = BTDHOSVDMultistartInit(2; screening_steps = 0, block_maxiter = 1),
+        maxiter = 3,
+        block_maxiter = 1,
+        verbose = false,
+    )
+    Ahat_btd = reconstruct(res_btd)
+    block_sum = zero(A)
+    for blk in blocks(res_btd)
+        @test size(core(blk)) == (2, 2, 2)
+        @test length(factors(blk)) == ndims(A)
+        block_sum .+= tensor(blk)
+    end
+    @test Ahat_btd ≈ block_sum
+    @test rel_error(A, res_btd) ≈ rel_error(A, Ahat_btd)
+end
+
 # =========================================================================
 # utils: pack_unpack, cp_init_tucker, tensor_contractions
 # =========================================================================

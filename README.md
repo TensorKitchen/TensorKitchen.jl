@@ -89,7 +89,7 @@ Â = reconstruct(res)
 Per default, `cpd` finds the initial point by running ALS and then refines it using Riemannian optimization. To use ALS-only one can set the `:solver` flag:
 ```julia
 cpd(A, r; solver = :als)
-````
+```
 For a detailed overview on all the options see the documentation.
 
 <br>
@@ -138,7 +138,7 @@ CPDResult{Float64}
 or run 
 
 ```julia
-nncpd(B, r)
+nn_res = nncpd(B, r)
 ```
 
 We access the decomposition as follows.
@@ -172,13 +172,13 @@ BTDResult{Float64}
 The blocks of `btd_res` can be obtained as follows:
 
 ```julia
-blocks = blocks(btd_res)
+btd_blocks = blocks(btd_res)
 ```
 
 Each block is represented as a Tucker decomposition, so we can access its core and factor matrices via:
 
 ```julia
-blk = blocks[1]
+blk = btd_blocks[1]
 core(blk)
 factors(blk)
 ```
