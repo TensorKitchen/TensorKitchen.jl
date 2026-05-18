@@ -453,7 +453,11 @@ function _ambient_vector!(out::AbstractVector, M, p)
     return out
 end
 
-function _ambient_vector!(out::AbstractVector, M::Manifolds.Tucker, p::Manifolds.TuckerPoint)
+function _ambient_vector!(
+    out::AbstractVector,
+    M::Manifolds.Tucker,
+    p::Manifolds.TuckerPoint,
+)
     core = p.hosvd.core
     factors = p.hosvd.U
     reconstruct_tucker!(reshape(out, factor_dims(M)), core, factors)
