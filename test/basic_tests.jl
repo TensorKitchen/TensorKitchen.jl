@@ -15,6 +15,9 @@
     end
     Ahat = reconstruct_tucker(core, factors)
     @test size(Ahat) == size(A)
+    Ahat_inplace = similar(Ahat)
+    @test reconstruct_tucker!(Ahat_inplace, core, factors) === Ahat_inplace
+    @test Ahat_inplace ≈ Ahat
     @test reconstruction_error(A, core, factors) >= 0
     @test reconstruction_error(A, core, factors) <= 1 + 1e-10
 end

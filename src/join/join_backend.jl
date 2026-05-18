@@ -117,10 +117,6 @@ function _ambient_tensor(M, p, target_shape::Tuple)
     return reshape(_ambient_vector(M, p, prod(target_shape)), target_shape)
 end
 
-supports_ambient_length(::AbstractManifold) = false
-supports_ambient_length(M::Manifolds.Segre) = true
-supports_ambient_length(M::Manifolds.Tucker) = true
-
 """
     ambient_length(M) -> Int
 
@@ -192,6 +188,18 @@ function _sum_backend_instance(
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
+    throw(
+        ArgumentError(
+            "Unsupported join backend type $B. Use JoinBackend or BTDBackend.",
+        ),
+    )
+end
+
+function _sum_backend_parts(
+    manifolds,
+    target::AbstractArray{T,N};
+    init_point = nothing,
+) where {T<:AbstractFloat,N}
     r = length(manifolds)
     # Keep the original target representation instead of eagerly materializing Array.
     tgt = target
@@ -204,36 +212,64 @@ function _sum_backend_instance(
     work_rec = _join_vector_workspace_like(tgt, tgt_len)
     work_residual = _join_vector_workspace_like(tgt, tgt_len)
 
-    if B === BTDBackend
-        return B(
-            manifolds,
-            r,
-            tgt,
-            size(tgt),
-            tflat,
-            ProductManifold(manifolds...),
-            init_point,
-            work_rec,
-            work_residual,
-            BTDContractionWorkspace{T,N}(),
-            sum(abs2, tgt),
-            component_bufs,
-        )
-    else
-        return B(
-            manifolds,
-            r,
-            tgt,
-            size(tgt),
-            tflat,
-            ProductManifold(manifolds...),
-            init_point,
-            work_rec,
-            work_residual,
-            _JoinResidualWORO(_join_vector_workspace_like(tgt, tgt_len)),
-            component_bufs,
-        )
-    end
+    return (;
+        manifolds,
+        r,
+        target = tgt,
+        target_size = size(tgt),
+        target_flat = tflat,
+        target_len = tgt_len,
+        product = ProductManifold(manifolds...),
+        init_point,
+        work_rec,
+        work_residual,
+        component_bufs,
+    )
+end
+
+function _sum_backend_instance(
+    ::Type{JoinBackend},
+    manifolds,
+    target::AbstractArray{T,N};
+    init_point = nothing,
+) where {T<:AbstractFloat,N}
+    parts = _sum_backend_parts(manifolds, target; init_point)
+    return JoinBackend(
+        parts.manifolds,
+        parts.r,
+        parts.target,
+        parts.target_size,
+        parts.target_flat,
+        parts.product,
+        parts.init_point,
+        parts.work_rec,
+        parts.work_residual,
+        _JoinResidualWORO(_join_vector_workspace_like(parts.target, parts.target_len)),
+        parts.component_bufs,
+    )
+end
+
+function _sum_backend_instance(
+    ::Type{BTDBackend},
+    manifolds,
+    target::AbstractArray{T,N};
+    init_point = nothing,
+) where {T<:AbstractFloat,N}
+    parts = _sum_backend_parts(manifolds, target; init_point)
+    return BTDBackend(
+        parts.manifolds,
+        parts.r,
+        parts.target,
+        parts.target_size,
+        parts.target_flat,
+        parts.product,
+        parts.init_point,
+        parts.work_rec,
+        parts.work_residual,
+        BTDContractionWorkspace{T,N}(),
+        sum(abs2, parts.target),
+        parts.component_bufs,
+    )
 end
 
 """
@@ -309,17 +345,6 @@ function initial_point(
     parts =
         ntuple(k -> _manifold_init(backend.manifolds[k], backend.target, init), backend.r)
     return ArrayPartition(parts...)
-end
-
-function _join_reconstruct!(out::AbstractArray, manifolds::Tuple, r::Int, p)
-    parts = point_parts(p)
-    _check_parts_len(parts, r, "_join_reconstruct")
-    fill!(out, zero(eltype(out)))
-    out_len = length(out)
-    @inbounds for k = 1:r
-        out .+= _ambient_vector(manifolds[k], parts[k], out_len)
-    end
-    return out
 end
 
 # Gradient path: always recomputes the ambient reconstruction and marks the
@@ -430,8 +455,7 @@ function _ambient_vector!(out::AbstractVector, M, p)
     if M isa Manifolds.Tucker
         core = p.hosvd.core
         factors = p.hosvd.U
-        X = reconstruct_tucker(core, factors)
-        copyto!(out, vec(X))
+        reconstruct_tucker!(reshape(out, factor_dims(M)), core, factors)
         return out
     end
 
@@ -451,12 +475,41 @@ function _subtract_ambient_tensor!(
         ),
     )
     _ambient_vector!(work_vec, M, p)
-    @inbounds for i in eachindex(residual, work_vec)
-        residual[i] -= work_vec[i]
+    residual_vec = vec(residual)
+    @inbounds for i in eachindex(residual_vec, work_vec)
+        residual_vec[i] -= work_vec[i]
     end
     return residual
 end
 
+"""
+    _join_reconstruct!(out, backend, p)
+
+Reconstruct the ambient join approximation represented by `p` into `out`.
+
+For component manifolds `M_k` with embeddings
+`Phi_k : M_k -> R^n`, the generic join model optimizes
+
+```math
+f(p_1, ..., p_r) =
+    \\frac{1}{2}\\left\\|\\sum_{k=1}^r \\Phi_k(p_k) - A\\right\\|^2.
+```
+
+This backend implements the mathematical core of that model:
+
+- `_join_reconstruct!` computes `sum_k Phi_k(p_k)`.
+- `_join_residual!` computes `sum_k Phi_k(p_k) - A`.
+- `cost(model, p)` computes `1/2 * ||residual||^2`.
+- `_manifold_egrad` applies the adjoint embedding derivative
+  `DPhi_k(p_k)'` to the residual for each component.
+- `rgrad(model, p)` projects those component gradients to tangent spaces.
+- `extract_components(model, p)` converts the optimized component points
+  `p_k` into result components.
+
+The method writes each component embedding into preallocated component buffers,
+then accumulates those buffers into `out`. This avoids allocating one dense
+ambient tensor per component during solver iterations.
+"""
 function _join_reconstruct!(out::AbstractArray, backend::Union{JoinBackend,BTDBackend}, p)
     manifolds = backend.manifolds
     r = backend.r
@@ -468,10 +521,10 @@ function _join_reconstruct!(out::AbstractArray, backend::Union{JoinBackend,BTDBa
     fill!(out, zero(eltype(out)))
 
     @inbounds for k = 1:r
-        # 1. 각 컴포넌트(블록/랭크)를 미리 할당된 개별 버퍼에 in-place 재구성
+        # Reconstruct each component into its preallocated workspace.
         _ambient_vector!(bufs[k], manifolds[k], parts[k])
 
-        # 2. 전체 결과를 담는 out 텐서에 누적
+        # Accumulate into the output tensor without allocating a Khatri-Rao-sized object.
         out .+= bufs[k]
     end
 
