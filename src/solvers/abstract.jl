@@ -38,7 +38,11 @@ Gradient tolerance paired with `StopWhenCostRelChangeAndGradientLess`.
 Defaults to `sqrt(tol)`; callers may pass an explicit `grad_tol` (for example
 `grad_tol = tol` on the nonnegative CPD manifold route).
 """
-@inline function _dual_stop_grad_tol(::Type{T}, tol::Real, grad_tol = nothing) where {T<:Real}
+@inline function _dual_stop_grad_tol(
+    ::Type{T},
+    tol::Real,
+    grad_tol = nothing,
+) where {T<:Real}
     return isnothing(grad_tol) ? sqrt(T(tol)) : T(grad_tol)
 end
 

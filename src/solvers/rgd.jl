@@ -72,7 +72,10 @@ end
 Manopt.indicates_convergence(::StopWhenCostRelChangeAndGradientLess) = true
 
 function Base.show(io::IO, c::StopWhenCostRelChangeAndGradientLess)
-    return print(io, "StopWhenCostRelChangeAndGradientLess($(c.tol_cost), $(c.tol_grad))\n    $(Manopt.status_summary(c))")
+    return print(
+        io,
+        "StopWhenCostRelChangeAndGradientLess($(c.tol_cost), $(c.tol_grad))\n    $(Manopt.status_summary(c))",
+    )
 end
 
 
