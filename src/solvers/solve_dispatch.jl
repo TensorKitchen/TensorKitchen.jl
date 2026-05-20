@@ -45,6 +45,10 @@ function _solver_object(::Val{:btd_tsd}, stepsize::Real; kwargs...)
     )
 end
 
+function _solver_object(::Val{:tsd}, stepsize::Real; kwargs...)
+    return _solver_object(Val(:btd_tsd), stepsize; kwargs...)
+end
+
 function _solver_object(::Val{S}, ::Real; kwargs...) where {S}
     throw(
         ArgumentError(
