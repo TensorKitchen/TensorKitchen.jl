@@ -85,7 +85,7 @@ approx(M, target; verbose = false)
 # returns an BTDResult
 ```
 
-* `approx(base, r, target; kwargs...)` : builds a rank-r Segre join and routes to CPD when base isa Manifolds.Segre and BTD when base isa Manifolds.Tucker unless generic
+* `approx(base, r, target; kwargs...)` : builds a rank-r Segre join and routes by the type of `base`: `Manifolds.Segre` uses CPD and `Manifolds.Tucker` uses BTD unless generic
 dispatch is explicitly requested. 
     - base means one manifold template, not yet a full join.
     - `approx(base, r, target; ...)` repeats that same manifold r times to build a join.
@@ -133,31 +133,81 @@ For the generic join path:
 * `warm_steps` and `warm_init` are not part of the generic `approx(...)` path. Generic joins start from random initial point and then use manifold solvers for refinement.
 * For generic mixed joins, use manifold solvers such as `:rgd`, `:rcg`, or `:lbfgs`.
 """
+function _approx_manifold_collection(
+    dispatch::AutoApproxDispatch,
+    manifolds,
+    target::AbstractArray;
+    kwargs...,
+)
+    _all_segre_uniform(manifolds) && return _approx_manifold_collection(
+        CPDApproxDispatch(),
+        manifolds,
+        target;
+        kwargs...,
+    )
+    _all_tucker_uniform(manifolds, size(target)) && return _approx_manifold_collection(
+        BTDApproxDispatch(),
+        manifolds,
+        target;
+        kwargs...,
+    )
+    return _approx_manifold_collection(
+        GenericApproxDispatch(),
+        manifolds,
+        target;
+        kwargs...,
+    )
+end
+
+function _approx_manifold_collection(
+    ::CPDApproxDispatch,
+    manifolds,
+    target::AbstractArray;
+    kwargs...,
+)
+    _all_segre_uniform(manifolds) || throw(
+        ArgumentError(
+            "approx(...; dispatch=:cpd) requires all manifolds to be Manifolds.Segre with identical factor_dims.",
+        ),
+    )
+    return cpd(target, length(manifolds); kwargs...)
+end
+
+function _approx_manifold_collection(
+    ::BTDApproxDispatch,
+    manifolds,
+    target::AbstractArray;
+    kwargs...,
+)
+    _all_tucker_uniform(manifolds, size(target)) || throw(
+        ArgumentError(
+            "approx(...; dispatch=:btd) requires all manifolds to be Manifolds.Tucker with identical factor_dims/multilinear_rank matching the target.",
+        ),
+    )
+    return btd(target, length(manifolds), multilinear_rank(first(manifolds)); kwargs...)
+end
+
+function _approx_manifold_collection(
+    ::GenericApproxDispatch,
+    manifolds,
+    target::AbstractArray;
+    kwargs...,
+)
+    return approx(JoinModel(manifolds, target); kwargs...)
+end
+
 function approx(
     manifolds::Tuple{Vararg{AbstractManifold}},
     target::AbstractArray{T,N};
     dispatch::Symbol = :auto,
     kwargs...,
 ) where {T<:AbstractFloat,N}
-    dispatch = _normalize_approx_dispatch(dispatch)
-    if dispatch == :cpd || (dispatch == :auto && _all_segre_uniform(manifolds))
-        _all_segre_uniform(manifolds) || throw(
-            ArgumentError(
-                "approx(...; dispatch=:cpd) requires all manifolds to be Manifolds.Segre with identical factor_dims.",
-            ),
-        )
-        return cpd(target, length(manifolds); kwargs...)
-    end
-    if dispatch == :btd ||
-       (dispatch == :auto && _all_tucker_uniform(manifolds, size(target)))
-        _all_tucker_uniform(manifolds, size(target)) || throw(
-            ArgumentError(
-                "approx(...; dispatch=:btd) requires all manifolds to be Manifolds.Tucker with identical factor_dims/multilinear_rank matching the target.",
-            ),
-        )
-        return btd(target, length(manifolds), multilinear_rank(first(manifolds)); kwargs...)
-    end
-    return approx(JoinModel(manifolds, target); kwargs...)
+    return _approx_manifold_collection(
+        approx_dispatch(dispatch),
+        manifolds,
+        target;
+        kwargs...,
+    )
 end
 
 function approx(
@@ -166,25 +216,12 @@ function approx(
     dispatch::Symbol = :auto,
     kwargs...,
 ) where {T<:AbstractFloat,N}
-    dispatch = _normalize_approx_dispatch(dispatch)
-    if dispatch == :cpd || (dispatch == :auto && _all_segre_uniform(manifolds))
-        _all_segre_uniform(manifolds) || throw(
-            ArgumentError(
-                "approx(...; dispatch=:cpd) requires all manifolds to be Manifolds.Segre with identical factor_dims.",
-            ),
-        )
-        return cpd(target, length(manifolds); kwargs...)
-    end
-    if dispatch == :btd ||
-       (dispatch == :auto && _all_tucker_uniform(manifolds, size(target)))
-        _all_tucker_uniform(manifolds, size(target)) || throw(
-            ArgumentError(
-                "approx(...; dispatch=:btd) requires all manifolds to be Manifolds.Tucker with identical factor_dims/multilinear_rank matching the target.",
-            ),
-        )
-        return btd(target, length(manifolds), multilinear_rank(first(manifolds)); kwargs...)
-    end
-    return approx(JoinModel(manifolds, target); kwargs...)
+    return _approx_manifold_collection(
+        approx_dispatch(dispatch),
+        manifolds,
+        target;
+        kwargs...,
+    )
 end
 
 """
@@ -199,26 +236,45 @@ function approx(
     dispatch::Symbol = :auto,
     kwargs...,
 ) where {T<:AbstractFloat,N}
-    dispatch = _normalize_approx_dispatch(dispatch)
     mfs = Tuple(M.manifolds)
-    if dispatch == :cpd || (dispatch == :auto && _all_segre_uniform(mfs))
-        _all_segre_uniform(mfs) || throw(
-            ArgumentError(
-                "approx(...; dispatch=:cpd) requires all manifolds to be Manifolds.Segre with identical factor_dims.",
-            ),
-        )
-        return cpd(target, length(mfs); kwargs...)
-    end
-    if dispatch == :btd || (dispatch == :auto && _all_tucker_uniform(mfs, size(target)))
-        _all_tucker_uniform(mfs, size(target)) || throw(
-            ArgumentError(
-                "approx(...; dispatch=:btd) requires all manifolds to be Manifolds.Tucker with identical factor_dims/multilinear_rank matching the target.",
-            ),
-        )
-        return btd(target, length(mfs), multilinear_rank(first(mfs)); kwargs...)
-    end
+    return _approx_product_manifold(approx_dispatch(dispatch), M, mfs, target; kwargs...)
+end
+
+function _approx_product_manifold(
+    dispatch::Union{AutoApproxDispatch,CPDApproxDispatch,BTDApproxDispatch},
+    M::ProductManifold,
+    manifolds,
+    target::AbstractArray;
+    kwargs...,
+)
+    return _approx_manifold_collection(dispatch, manifolds, target; kwargs...)
+end
+
+function _approx_product_manifold(
+    ::GenericApproxDispatch,
+    M::ProductManifold,
+    manifolds,
+    target::AbstractArray;
+    kwargs...,
+)
     return approx(JoinModel(M, target); kwargs...)
 end
+
+_approx_segre_rank(
+    ::Union{AutoApproxDispatch,CPDApproxDispatch},
+    base::Manifolds.Segre,
+    r::Int,
+    target::AbstractArray;
+    kwargs...,
+) = cpd(target, r; kwargs...)
+
+_approx_segre_rank(
+    ::AbstractApproxDispatch,
+    base::Manifolds.Segre,
+    r::Int,
+    target::AbstractArray;
+    kwargs...,
+) = approx(JoinModel(base, r, target); kwargs...)
 
 """
     approx(base::Manifolds.Segre, r, target; dispatch=:auto, kwargs...)
@@ -233,10 +289,24 @@ function approx(
     dispatch::Symbol = :auto,
     kwargs...,
 ) where {T<:AbstractFloat,N}
-    dispatch = _normalize_approx_dispatch(dispatch)
-    return dispatch in (:auto, :cpd) ? cpd(target, r; kwargs...) :
-           approx(JoinModel(base, r, target); kwargs...)
+    return _approx_segre_rank(approx_dispatch(dispatch), base, r, target; kwargs...)
 end
+
+_approx_tucker_rank(
+    ::Union{AutoApproxDispatch,BTDApproxDispatch},
+    base::Manifolds.Tucker,
+    r::Int,
+    target::AbstractArray;
+    kwargs...,
+) = btd(target, r, multilinear_rank(base); kwargs...)
+
+_approx_tucker_rank(
+    ::AbstractApproxDispatch,
+    base::Manifolds.Tucker,
+    r::Int,
+    target::AbstractArray;
+    kwargs...,
+) = approx(JoinModel(base, r, target); kwargs...)
 
 """
     approx(base::Manifolds.Tucker, r, target; dispatch=:auto, kwargs...)
@@ -251,9 +321,18 @@ function approx(
     dispatch::Symbol = :auto,
     kwargs...,
 ) where {T<:AbstractFloat,N}
-    dispatch = _normalize_approx_dispatch(dispatch)
-    return dispatch in (:auto, :btd) ? btd(target, r, multilinear_rank(base); kwargs...) :
-           approx(JoinModel(base, r, target); kwargs...)
+    return _approx_tucker_rank(approx_dispatch(dispatch), base, r, target; kwargs...)
+end
+
+_reject_generic_rank_dispatch(::AutoApproxDispatch) = nothing
+_reject_generic_rank_dispatch(::GenericApproxDispatch) = nothing
+
+function _reject_generic_rank_dispatch(::CPDApproxDispatch)
+    throw(ArgumentError("approx(...; dispatch=:cpd) requires Manifolds.Segre inputs."))
+end
+
+function _reject_generic_rank_dispatch(::BTDApproxDispatch)
+    throw(ArgumentError("approx(...; dispatch=:btd) requires Manifolds.Tucker inputs."))
 end
 
 """
@@ -269,11 +348,7 @@ function approx(
     dispatch::Symbol = :auto,
     kwargs...,
 ) where {T<:AbstractFloat,N}
-    dispatch = _normalize_approx_dispatch(dispatch)
-    dispatch == :cpd &&
-        throw(ArgumentError("approx(...; dispatch=:cpd) requires Manifolds.Segre inputs."))
-    dispatch == :btd &&
-        throw(ArgumentError("approx(...; dispatch=:btd) requires Manifolds.Tucker inputs."))
+    _reject_generic_rank_dispatch(approx_dispatch(dispatch))
     return approx(JoinModel(base, r, target); kwargs...)
 end
 
@@ -289,11 +364,7 @@ function approx(
     dispatch::Symbol = :auto,
     kwargs...,
 ) where {T<:AbstractFloat,N}
-    dispatch = _normalize_approx_dispatch(dispatch)
-    dispatch == :cpd &&
-        throw(ArgumentError("approx(...; dispatch=:cpd) requires Manifolds.Segre inputs."))
-    dispatch == :btd &&
-        throw(ArgumentError("approx(...; dispatch=:btd) requires Manifolds.Tucker inputs."))
+    _reject_generic_rank_dispatch(approx_dispatch(dispatch))
     return approx(JoinModel(base, target); kwargs...)
 end
 

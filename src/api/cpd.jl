@@ -22,29 +22,31 @@ function _merge_res_solver_info(res, patch::NamedTuple)
     )
 end
 
-mutable struct _CPDComponentTraceRecorder{M}
-    model::M
-    previous::Any
-    previous_cost::Float64
-    iterations::Vector{Int}
-    cost_history::Vector{Float64}
-    cost_rel_change_history::Vector{Float64}
-    max_component_delta_history::Vector{Float64}
-    component_delta_history::Vector{Vector{Float64}}
+Base.@kwdef mutable struct _CPDComponentTraceHistory
+    iterations::Vector{Int} = Int[]
+    cost_history::Vector{Float64} = Float64[]
+    cost_rel_change_history::Vector{Float64} = Float64[]
+    max_component_delta_history::Vector{Float64} = Float64[]
+    component_delta_history::Vector{Vector{Float64}} = Vector{Float64}[]
+    rgrad_energy_history::Vector{Vector{Float64}} = Vector{Float64}[]
+    rgrad_share_history::Vector{Vector{Float64}} = Vector{Float64}[]
+    rgrad_top1_share_history::Vector{Float64} = Float64[]
+    rgrad_top2_share_history::Vector{Float64} = Float64[]
+    rgrad_top3_share_history::Vector{Float64} = Float64[]
+    rgrad_effective_components_history::Vector{Float64} = Float64[]
+    rgrad_argmax_component_history::Vector{Int} = Int[]
+    rgrad_failed_count::Int = 0
 end
 
-function _CPDComponentTraceRecorder(model)
-    return _CPDComponentTraceRecorder(
-        model,
-        nothing,
-        NaN,
-        Int[],
-        Float64[],
-        Float64[],
-        Float64[],
-        Vector{Float64}[],
-    )
+Base.@kwdef mutable struct _CPDComponentTraceRecorder{M}
+    model::M
+    previous::Union{Nothing,CPDPoint} = nothing
+    previous_cost::Float64 = NaN
+    start_rel_error::Float64 = NaN
+    history::_CPDComponentTraceHistory = _CPDComponentTraceHistory()
 end
+
+_CPDComponentTraceRecorder(model) = _CPDComponentTraceRecorder(; model)
 
 function _rankone_norm2(λ, U, k::Int)
     val = abs2(λ[k])
@@ -79,17 +81,116 @@ function _cpd_component_deltas(prev::CPDPoint, curr::CPDPoint)
     return deltas
 end
 
-function _record_cpd_component_trace!(rec::_CPDComponentTraceRecorder, p, iter::Int)
+function _component_energy_summary(energies::AbstractVector{<:Real})
+    r = length(energies)
+    if r == 0
+        return (
+            shares = Float64[],
+            top1 = NaN,
+            top2 = NaN,
+            top3 = NaN,
+            effective = NaN,
+            argmax_component = 0,
+        )
+    end
+    total = sum(energies)
+    if !isfinite(total) || total <= 0
+        return (
+            shares = fill(NaN, r),
+            top1 = NaN,
+            top2 = NaN,
+            top3 = NaN,
+            effective = NaN,
+            argmax_component = 0,
+        )
+    end
+    shares = Float64.(energies ./ total)
+    ordered = sort(shares; rev = true)
+    hhi = sum(abs2, shares)
+    return (
+        shares = shares,
+        top1 = ordered[1],
+        top2 = sum(@view ordered[1:min(2, r)]),
+        top3 = sum(@view ordered[1:min(3, r)]),
+        effective = hhi > 0 ? inv(hhi) : NaN,
+        argmax_component = argmax(shares),
+    )
+end
+
+function _cpd_rgrad_energy_from_blocks(gλ, gU)
+    r = length(gλ)
+    energies = zeros(Float64, r)
+    @inbounds for k = 1:r
+        energies[k] += abs2(Float64(gλ[k]))
+        for m in eachindex(gU)
+            energies[k] += sum(abs2, @view gU[m][:, k])
+        end
+    end
+    return energies
+end
+
+function _cpd_component_rgrad_energies(model::JoinModel{<:AbstractFloat,<:CPDBackend}, g)
+    return _cpd_component_rgrad_energies(cpd_model(model), g)
+end
+
+function _cpd_component_rgrad_energies(model::RankRCPDModel, g)
+    gλ, gU = unpack_point_rankr(g, model.dims, model.r)
+    return _cpd_rgrad_energy_from_blocks(gλ, gU)
+end
+
+function _cpd_component_rgrad_energies(model::Rank1CPDModel, g)
+    gλ, gU = unpack_point_rank1(g, model.dims)
+    energy = abs2(Float64(gλ))
+    @inbounds for u in gU
+        energy += sum(abs2, u)
+    end
+    return [energy]
+end
+
+_cpd_component_rgrad_energies(_, _) = Float64[]
+
+function _safe_cpd_component_rgrad_energies(rec::_CPDComponentTraceRecorder, problem, p)
+    g = try
+        Manopt.get_gradient(problem, p)
+    catch
+        rec.history.rgrad_failed_count += 1
+        nothing
+    end
+    isnothing(g) && return Float64[]
+    try
+        return _cpd_component_rgrad_energies(rec.model, g)
+    catch
+        rec.history.rgrad_failed_count += 1
+        return Float64[]
+    end
+end
+
+function _record_cpd_component_trace!(
+    rec::_CPDComponentTraceRecorder,
+    problem,
+    p,
+    iter::Int,
+)
     q = cpd_point(rec.model, p)
     cost_val = Float64(cost(rec.model, p))
+    rgrad_energies = _safe_cpd_component_rgrad_energies(rec, problem, p)
+    rgrad_summary = _component_energy_summary(rgrad_energies)
     if rec.previous !== nothing
+        hist = rec.history
         deltas = _cpd_component_deltas(rec.previous, q)
         rel_change = abs(rec.previous_cost - cost_val) / max(abs(rec.previous_cost), 1.0)
-        push!(rec.iterations, iter)
-        push!(rec.cost_history, cost_val)
-        push!(rec.cost_rel_change_history, rel_change)
-        push!(rec.max_component_delta_history, maximum(deltas))
-        push!(rec.component_delta_history, deltas)
+        push!(hist.iterations, iter)
+        push!(hist.cost_history, cost_val)
+        push!(hist.cost_rel_change_history, rel_change)
+        push!(hist.max_component_delta_history, maximum(deltas))
+        push!(hist.component_delta_history, deltas)
+        push!(hist.rgrad_energy_history, Float64.(rgrad_energies))
+        push!(hist.rgrad_share_history, rgrad_summary.shares)
+        push!(hist.rgrad_top1_share_history, rgrad_summary.top1)
+        push!(hist.rgrad_top2_share_history, rgrad_summary.top2)
+        push!(hist.rgrad_top3_share_history, rgrad_summary.top3)
+        push!(hist.rgrad_effective_components_history, rgrad_summary.effective)
+        push!(hist.rgrad_argmax_component_history, rgrad_summary.argmax_component)
     end
     rec.previous = q
     rec.previous_cost = cost_val
@@ -103,28 +204,121 @@ function _cpd_component_trace_callback(rec::_CPDComponentTraceRecorder)
         catch
             return nothing
         end
-        _record_cpd_component_trace!(rec, p, Int(k))
+        _record_cpd_component_trace!(rec, problem, p, Int(k))
         return nothing
     end
 end
 
 function _cpd_component_trace_info(rec::_CPDComponentTraceRecorder)
+    hist = rec.history
     return (
-        component_trace_iterations = rec.iterations,
-        component_trace_cost_history = rec.cost_history,
-        component_trace_cost_rel_change_history = rec.cost_rel_change_history,
-        component_trace_max_delta_history = rec.max_component_delta_history,
-        component_trace_delta_history = rec.component_delta_history,
-        component_trace_final_max_delta = isempty(rec.max_component_delta_history) ? NaN :
-                                          rec.max_component_delta_history[end],
+        component_trace_iterations = hist.iterations,
+        component_trace_cost_history = hist.cost_history,
+        component_trace_cost_rel_change_history = hist.cost_rel_change_history,
+        component_trace_max_delta_history = hist.max_component_delta_history,
+        component_trace_delta_history = hist.component_delta_history,
+        component_trace_final_max_delta = isempty(hist.max_component_delta_history) ? NaN :
+                                          hist.max_component_delta_history[end],
+        component_trace_rgrad_energy_history = hist.rgrad_energy_history,
+        component_trace_rgrad_share_history = hist.rgrad_share_history,
+        component_trace_rgrad_top1_share_history = hist.rgrad_top1_share_history,
+        component_trace_rgrad_top2_share_history = hist.rgrad_top2_share_history,
+        component_trace_rgrad_top3_share_history = hist.rgrad_top3_share_history,
+        component_trace_rgrad_effective_components_history = hist.rgrad_effective_components_history,
+        component_trace_rgrad_argmax_component_history = hist.rgrad_argmax_component_history,
+        component_trace_rgrad_failed_count = hist.rgrad_failed_count,
+        component_trace_rgrad_top1_share_final = isempty(hist.rgrad_top1_share_history) ?
+                                                 NaN : hist.rgrad_top1_share_history[end],
+        component_trace_rgrad_top2_share_final = isempty(hist.rgrad_top2_share_history) ?
+                                                 NaN : hist.rgrad_top2_share_history[end],
+        component_trace_rgrad_top3_share_final = isempty(hist.rgrad_top3_share_history) ?
+                                                 NaN : hist.rgrad_top3_share_history[end],
+        component_trace_rgrad_effective_components_final = isempty(
+            hist.rgrad_effective_components_history,
+        ) ? NaN : hist.rgrad_effective_components_history[end],
+        component_trace_rgrad_argmax_component_final = isempty(
+            hist.rgrad_argmax_component_history,
+        ) ? 0 : hist.rgrad_argmax_component_history[end],
+        component_trace_start_rel_error = rec.start_rel_error,
     )
 end
 
-function _pack_cpd_explicit_p0(model, p0)
-    p0 isa CPDPoint && return pack_cpd_point(model, p0)
-    p0 isa CPDResult && return pack_cpd_point(model, cpd_point(p0))
-    return p0
+_pack_cpd_explicit_p0(_, p0) = p0
+_pack_cpd_explicit_p0(model, p0::CPDPoint) = pack_cpd_point(model, p0)
+_pack_cpd_explicit_p0(model, p0::CPDResult) = pack_cpd_point(model, cpd_point(p0))
+
+_cpd_model_rank(model::RankRCPDModel) = model.r
+_cpd_model_rank(::Rank1CPDModel) = 1
+
+_cpd_auto_init(::ALSSolver) = :tucker
+_cpd_auto_init(::AbstractSolver) = :alswarm
+
+function _cpd_effective_init(init, solver::AbstractSolver, warm_steps::Int, warm_init)
+    init_resolved = init == :auto ? _cpd_auto_init(solver) : init
+    return init_resolved == :alswarm ? ALSWarmStartInit(warm_steps; base_init = warm_init) :
+           init_resolved
 end
+
+_cpd_solve_normalization(::AbstractSolver, nonnegative::Bool) = NoNormalization()
+_cpd_solve_normalization(::ALSSolver, nonnegative::Bool) =
+    nonnegative ? NoNormalization() : SeparateLambdaNormalization()
+
+function _cpd_normalizations(normalization, solver::AbstractSolver, nonnegative::Bool)
+    if normalization != :auto
+        policy = _normalization_policy(normalization)
+        return policy, policy
+    end
+    return (
+        _cpd_solve_normalization(solver, nonnegative),
+        nonnegative ? NoNormalization() : SeparateLambdaNormalization(),
+    )
+end
+
+function _validate_cpd_solver_supported(solver::AbstractSolver)
+    throw(
+        ArgumentError(
+            "Unsupported CPD solver $(typeof(solver)). Use :als, :rgd, :rgd_fixed, or :rcg.",
+        ),
+    )
+end
+
+_validate_cpd_solver_supported(::Union{ALSSolver,RGDSolver,RGDFixedSolver,RCGSolver}) =
+    nothing
+
+function _validate_cpd_solver_options(
+    solver::AbstractSolver,
+    geometry::Symbol,
+    gradient_mode,
+    component_trace::Bool,
+)
+    return nothing
+end
+
+function _validate_cpd_solver_options(
+    solver::ALSSolver,
+    geometry::Symbol,
+    gradient_mode,
+    component_trace::Bool,
+)
+    component_trace &&
+        throw(ArgumentError("component_trace=true is only supported for manifold solvers."))
+    geometry == :canonical || throw(
+        ArgumentError(
+            "solver=:als does not use manifold geometry. Use geometry=:canonical.",
+        ),
+    )
+    gradient_mode == :riemannian || throw(
+        ArgumentError(
+            "solver=:als does not use gradient_mode. Use gradient_mode=:riemannian.",
+        ),
+    )
+    return nothing
+end
+
+_cpd_nonnegative_init(init) = init == :tucker ? :alswarm : init
+_cpd_nonnegative_geometry(::ALSSolver, geometry) = :canonical
+_cpd_nonnegative_geometry(::AbstractSolver, geometry) =
+    geometry == :canonical ? :softplus_metric : geometry
 
 function _cpd_als_warm_then_pack(
     target::JoinModel{<:AbstractFloat,<:CPDBackend},
@@ -137,7 +331,7 @@ function _cpd_als_warm_then_pack(
 )
     inner = cpd_model(target)
     A = tensor(target)
-    r = inner isa RankRCPDModel ? inner.r : 1
+    r = _cpd_model_rank(inner)
     T = eltype(A)
     warm_init = init.base_init == :auto ? :tucker : init.base_init
     if r == 1
@@ -243,6 +437,66 @@ function initial_point(
     )
 end
 
+function _cpd_manifold_grad_tol(
+    model::JoinModel{<:AbstractFloat,<:CPDBackend},
+    solver::AbstractSolver,
+    tol::Real,
+)
+    return nothing
+end
+
+function _cpd_manifold_grad_tol(
+    model::JoinModel{<:AbstractFloat,<:CPDBackend},
+    solver::Union{RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver},
+    tol::Real,
+)
+    inner = cpd_model(model)
+    inner.nonnegative || return nothing
+    return tol
+end
+
+function _cpd_point_rel_error(model, p)
+    normA2 = sum(abs2, tensor(model))
+    cost_val = Float64(cost(model, p))
+    return Float64(_relative_error_frob_sq(2 * cost_val, Float64(normA2)))
+end
+
+function _cpd_initial_solve_point(model, init_eff, p0, solver::AbstractSolver; kwargs...)
+    return _pack_cpd_explicit_p0(model, p0)
+end
+
+function _cpd_initial_solve_point(
+    model,
+    init_eff::ALSWarmStartInit,
+    p0::Nothing,
+    solver::AbstractSolver;
+    tol,
+    warm_normalization,
+    verbose::Bool,
+    pullback_eps,
+    kwargs...,
+)
+    return _cpd_als_warm_then_pack(
+        model,
+        init_eff;
+        tol,
+        normalization = warm_normalization,
+        verbose,
+        pullback_eps,
+        kwargs...,
+    )
+end
+
+function _cpd_initial_solve_point(
+    model,
+    init_eff::ALSWarmStartInit,
+    p0::Nothing,
+    solver::ALSSolver;
+    kwargs...,
+)
+    return nothing
+end
+
 function _run_cpd_solver(
     model;
     init_eff,
@@ -263,18 +517,20 @@ function _run_cpd_solver(
     trace_recorder = component_trace ? _CPDComponentTraceRecorder(model) : nothing
     iteration_callbacks =
         isnothing(trace_recorder) ? () : (_cpd_component_trace_callback(trace_recorder),)
-    p_solve = if init_eff isa ALSWarmStartInit && isnothing(p0) && !(solver isa ALSSolver)
-        _cpd_als_warm_then_pack(
-            model,
-            init_eff;
-            tol,
-            normalization = warm_normalization,
-            verbose,
-            pullback_eps,
-            kwargs...,
-        )
-    else
-        _pack_cpd_explicit_p0(model, p0)
+    p_solve = _cpd_initial_solve_point(
+        model,
+        init_eff,
+        p0,
+        solver;
+        tol,
+        warm_normalization,
+        verbose,
+        pullback_eps,
+        kwargs...,
+    )
+    p_start = isnothing(p_solve) ? initial_point(model, init_eff; verbose) : p_solve
+    if !isnothing(trace_recorder)
+        trace_recorder.start_rel_error = _cpd_point_rel_error(model, p_start)
     end
 
     result = _solve_model(
@@ -290,6 +546,7 @@ function _run_cpd_solver(
         verbose,
         refinement_verbose = verbose,
         vector_transport_method,
+        grad_tol = _cpd_manifold_grad_tol(model, solver, tol),
         iteration_callbacks,
         kwargs...,
     )
@@ -327,30 +584,14 @@ function _cpd_impl(
     )
 
     solver_obj = _solver_object(solver, stepsize; kwargs...)
-    init_resolved = init == :auto ? (solver_obj isa ALSSolver ? :tucker : :alswarm) : init
-    init_eff =
-        init_resolved == :alswarm ? ALSWarmStartInit(warm_steps; base_init = warm_init) :
-        init_resolved
+    init_eff = _cpd_effective_init(init, solver_obj, warm_steps, warm_init)
     geometry_eff = _is_native_rankr_geometry(geometry) ? :native : geometry
     pullback_eps_eff = _pullback_eps_value(T, pullback_eps)
-    if normalization == :auto
-        normalization_eff =
-            solver_obj isa ALSSolver ?
-            (nonnegative ? NoNormalization() : SeparateLambdaNormalization()) :
-            NoNormalization()
-        warm_normalization_eff =
-            nonnegative ? NoNormalization() : SeparateLambdaNormalization()
-    else
-        normalization_eff = _normalization_policy(normalization)
-        warm_normalization_eff = normalization_eff
-    end
+    normalization_eff, warm_normalization_eff =
+        _cpd_normalizations(normalization, solver_obj, nonnegative)
 
     r >= 1 || throw(ArgumentError("rank r must be >= 1, got r=$r"))
-    solver_obj isa Union{ALSSolver,RGDSolver,RGDFixedSolver,RCGSolver} || throw(
-        ArgumentError(
-            "Unsupported CPD solver $(typeof(solver_obj)). Use :als, :rgd, :rgd_fixed, or :rcg.",
-        ),
-    )
+    _validate_cpd_solver_supported(solver_obj)
     geometry_eff in (:native, :canonical, :squaring_metric, :softplus_metric) || throw(
         ArgumentError(
             "Unknown geometry=$geometry. Use :native, :canonical, :squaring_metric, or :softplus_metric.",
@@ -359,21 +600,7 @@ function _cpd_impl(
     if geometry_eff in (:squaring_metric, :softplus_metric) && !nonnegative
         throw(ArgumentError("geometry=$geometry_eff requires nonnegative=true."))
     end
-    if solver_obj isa ALSSolver
-        component_trace && throw(
-            ArgumentError("component_trace=true is only supported for manifold solvers."),
-        )
-        geometry_eff == :canonical || throw(
-            ArgumentError(
-                "solver=:als does not use manifold geometry. Use geometry=:canonical.",
-            ),
-        )
-        gradient_mode == :riemannian || throw(
-            ArgumentError(
-                "solver=:als does not use gradient_mode. Use gradient_mode=:riemannian.",
-            ),
-        )
-    end
+    _validate_cpd_solver_options(solver_obj, geometry_eff, gradient_mode, component_trace)
 
     model = JoinModel(
         A,
@@ -472,8 +699,9 @@ If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
 * `nonnegative::Bool = false`: Nonnegative CPD option to be selected by the user. (same as `nncpd`)
 * `pullback_eps = 1e-8`: Regularization parameter for pullback-style nonnegative geometries.
 * `component_trace = false`: For manifold solvers, records per-iteration movement of
-  each CP rank-one term in `solver_info`. Use this to diagnose whether a flat cost
-  means the rank-one terms are also stuck.
+  each CP rank-one term in `solver_info`. It also records internal solver rgrad
+  block-coordinate energy grouped by CP component. Use this to diagnose whether a
+  flat cost means the rank-one terms are also stuck.
 
 ## Notes
 * `solver = :als` does not use manifold geometry. In that case:
@@ -523,15 +751,9 @@ function cpd(
         solver_obj = _solver_object(solver, stepsize; kwargs...)
         # Align effective defaults with nncpd() on the nonnegative route.
         # Explicitly passed non-default values are preserved.
-        init_nn = init == :tucker ? :alswarm : init
+        init_nn = _cpd_nonnegative_init(init)
         warm_steps_nn = warm_steps
-        geometry_nn = if solver_obj isa ALSSolver
-            :canonical
-        elseif geometry == :canonical
-            :softplus_metric
-        else
-            geometry
-        end
+        geometry_nn = _cpd_nonnegative_geometry(solver_obj, geometry)
         stepsize_nn = stepsize == 1.0 ? 0.01 : stepsize
         return nncpd(
             A,

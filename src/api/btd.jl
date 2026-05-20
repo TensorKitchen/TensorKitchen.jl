@@ -45,40 +45,23 @@ function _polish_btd_with_als(
     )
 end
 
-@inline function _resolve_btd_init(init, solver::Symbol)
+_default_btd_init(::ALSSolver) = BTDHOSVDMultistartInit()
+_default_btd_init(::AbstractSolver) = :alswarm
+
+@inline function _resolve_btd_init(init, solver::AbstractSolver)
     init == :auto || return init
-    return solver == :als ? BTDHOSVDMultistartInit() : :alswarm
+    return _default_btd_init(solver)
 end
 
 @inline _btd_solver_symbol(::ALSSolver) = :als
 @inline _btd_solver_symbol(solver::AbstractSolver) = solver_symbol(solver)
 
-function _btd_effective_init(
-    solver::Symbol,
-    init,
-    warm_steps::Int,
-    warm_init,
-    warm_block_method::Symbol,
-    warm_block_maxiter::Int,
-)
-    if init == :alswarm
-        return BTDALSWarmStartInit(
-            warm_steps;
-            base_init = warm_init,
-            block_method = warm_block_method,
-            block_maxiter = warm_block_maxiter,
-        )
-    elseif solver ∉ (:als,)
-        return BTDALSWarmStartInit(
-            warm_steps;
-            base_init = init,
-            block_method = warm_block_method,
-            block_maxiter = warm_block_maxiter,
-        )
-    end
-    return init
-end
+_btd_uses_warm_start(::AbstractSolver, _) = false
+_btd_uses_warm_start(::ALSSolver, ::BTDALSWarmStartInit) = false
+_btd_uses_warm_start(::AbstractSolver, ::BTDALSWarmStartInit) = true
 
+_btd_should_polish(::ALSSolver, ::Integer) = false
+_btd_should_polish(::AbstractSolver, polish_n::Integer) = polish_n > 0
 
 function _btd_warm_start_result(
     model::JoinModel{T,<:BTDBackend},
@@ -251,7 +234,7 @@ function btd(
 ) where {T<:AbstractFloat,N}
     solver_obj = _solver_object(solver, stepsize; kwargs...)
     solver_sym = _btd_solver_symbol(solver_obj)
-    init_resolved = _resolve_btd_init(init, solver_sym)
+    init_resolved = _resolve_btd_init(init, solver_obj)
     init_eff =
         init_resolved == :alswarm ?
         BTDALSWarmStartInit(
@@ -269,7 +252,7 @@ function btd(
     warm_info = (;)
     short_circuited = Ref(false)
     result = with_phase_progress() do
-        if solver_sym ∉ (:als,) && init_eff isa BTDALSWarmStartInit
+        if _btd_uses_warm_start(solver_obj, init_eff)
             warm = _btd_warm_start_result(
                 model,
                 b,
@@ -320,7 +303,7 @@ function btd(
     else
         btd_als_polish_maxiter
     end
-    if polish_n > 0 && solver_sym ∉ (:als,)
+    if _btd_should_polish(solver_obj, polish_n)
         result = _polish_btd_with_als(
             b,
             result,

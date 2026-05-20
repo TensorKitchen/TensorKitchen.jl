@@ -1,6 +1,13 @@
 # api/nncpd.jl — user-facing nonnegative CP decomposition entry points
 export nncpd
 
+_nncpd_default_geometry(::ALSSolver) = :canonical
+_nncpd_default_geometry(::AbstractSolver) = :softplus_metric
+
+function _nncpd_effective_geometry(geometry, solver::AbstractSolver)
+    return isnothing(geometry) ? _nncpd_default_geometry(solver) : geometry
+end
+
 """
      nncpd(A, r; kwargs...)
 
@@ -70,9 +77,7 @@ function nncpd(
     kwargs...,
 ) where {T<:AbstractFloat,N}
     solver_obj = _solver_object(solver, stepsize; kwargs...)
-    geometry_eff =
-        isnothing(geometry) ? (solver_obj isa ALSSolver ? :canonical : :softplus_metric) :
-        geometry
+    geometry_eff = _nncpd_effective_geometry(geometry, solver_obj)
     return _cpd_impl(
         A,
         r;

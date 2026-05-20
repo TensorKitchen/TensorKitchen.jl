@@ -6,21 +6,30 @@ function _cp_tucker_decomposition(
     ranks::NTuple{N,Int};
     method::Symbol = :hosvd,
 ) where {T<:AbstractFloat,N}
-    get_cf = (
-        hosvd = () -> tucker_hosvd(A, ranks),
-        sthosvd = () -> (t = sthosvd(A, ranks); (t.core, t.factors)),
-        thosvd = () -> (t = thosvd(A, ranks); (t.core, t.factors)),
-        hooi = () ->
-            (t = hooi(A, ranks; init = :sthosvd, maxiter = 20, verbose = false);
-            (t.core, t.factors)),
-    )
-    return get(get_cf, method) do
-        throw(
-            ArgumentError(
-                "Unknown method=$method. Use :hosvd, :sthosvd, :thosvd, or :hooi.",
-            ),
-        )
-    end()
+    return _cp_tucker_decomposition(Val(method), A, ranks)
+end
+
+function _cp_tucker_decomposition(::Val{:hosvd}, A, ranks)
+    return tucker_hosvd(A, ranks)
+end
+
+function _cp_tucker_decomposition(::Val{:sthosvd}, A, ranks)
+    t = sthosvd(A, ranks)
+    return t.core, t.factors
+end
+
+function _cp_tucker_decomposition(::Val{:thosvd}, A, ranks)
+    t = thosvd(A, ranks)
+    return t.core, t.factors
+end
+
+function _cp_tucker_decomposition(::Val{:hooi}, A, ranks)
+    t = hooi(A, ranks; init = :sthosvd, maxiter = 20, verbose = false)
+    return t.core, t.factors
+end
+
+function _cp_tucker_decomposition(::Val{M}, A, ranks) where {M}
+    throw(ArgumentError("Unknown method=$M. Use :hosvd, :sthosvd, :thosvd, or :hooi."))
 end
 
 function _cp_core_diag_init(core::AbstractArray{T,N}, r::Int) where {T<:AbstractFloat,N}

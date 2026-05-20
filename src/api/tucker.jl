@@ -8,7 +8,7 @@ Computes a Tucker decomposition of `A` with multilinear rank `ranks`.
 ## Main Options
 
 * `method = :sthosvd`: Sets the Tucker decomposition algorithm. Possible options are:
-    - `:sthosvd` (default): Sequentially Truncated HOSVD. A direct one-pass decomposition, mainly used as a fast standalone Tucker approximation or as the default initializer for :hooiFast, deterministic, and usually a good initial point.
+    - `:sthosvd` (default): Sequentially Truncated HOSVD. A direct one-pass decomposition, mainly used as a fast standalone Tucker approximation or as the default initializer for `:hooi`. Fast, deterministic, and usually a good initial point.
     - `:hooi`: High-Order Orthogonal Iteration. Iteratively refines the Tucker factors, initialized by ST-HOSVD by default.
 
 ## Extended Options
@@ -58,9 +58,12 @@ reconstruct_tucker(core(res), factors(res))
 
 """
 function tucker(A, ranks; method::Symbol = :sthosvd, kwargs...)
-    fn = (sthosvd = sthosvd, hooi = hooi)
-    f = get(fn, method) do
-        throw(ArgumentError("Unknown method=$method. Use :sthosvd or :hooi."))
-    end
-    return f(A, ranks; kwargs...)
+    return _tucker(Val(method), A, ranks; kwargs...)
+end
+
+_tucker(::Val{:sthosvd}, A, ranks; kwargs...) = sthosvd(A, ranks; kwargs...)
+_tucker(::Val{:hooi}, A, ranks; kwargs...) = hooi(A, ranks; kwargs...)
+
+function _tucker(::Val{M}, A, ranks; kwargs...) where {M}
+    throw(ArgumentError("Unknown method=$M. Use :sthosvd or :hooi."))
 end

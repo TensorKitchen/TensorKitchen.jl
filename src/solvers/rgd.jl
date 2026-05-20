@@ -14,15 +14,28 @@ mutable struct StopWhenCostRelChangeAndGradientLess{T<:Real} <: Manopt.StoppingC
     tol_cost::T
     tol_grad::T
     prev_cost::T
-    reason::String
+    last_cost_rel_change::T
+    last_grad_norm::T
+    at_iteration::Int
 end
 
-StopWhenCostRelChangeAndGradientLess(tol_cost::T, tol_grad::T) where {T} =
-    StopWhenCostRelChangeAndGradientLess{T}(tol_cost, tol_grad, T(Inf), "")
+function StopWhenCostRelChangeAndGradientLess(tol_cost::T, tol_grad::T) where {T<:Real}
+    return StopWhenCostRelChangeAndGradientLess{T}(
+        tol_cost,
+        tol_grad,
+        T(Inf),
+        T(Inf),
+        T(Inf),
+        -1,
+    )
+end
 
 function (c::StopWhenCostRelChangeAndGradientLess)(problem, state, i)
     if i == 0
         c.prev_cost = Manopt.get_cost(problem, Manopt.get_iterate(state))
+        c.last_cost_rel_change = oftype(c.tol_cost, Inf)
+        c.last_grad_norm = oftype(c.tol_grad, Inf)
+        c.at_iteration = -1
         return false
     end
     M = Manopt.get_manifold(problem)
@@ -32,11 +45,37 @@ function (c::StopWhenCostRelChangeAndGradientLess)(problem, state, i)
     grad_norm = norm(M, p, grad_val)
     rel_change = abs(c.prev_cost - cost_val) / max(abs(c.prev_cost), one(cost_val))
     c.prev_cost = cost_val
+    c.last_cost_rel_change = rel_change
+    c.last_grad_norm = grad_norm
     if rel_change < c.tol_cost && grad_norm < c.tol_grad
-        c.reason = "Cost rel change (< $(c.tol_cost)) AND grad norm (< $(c.tol_grad))"
+        c.at_iteration = i
         return true
     end
     return false
+end
+
+function Manopt.get_reason(c::StopWhenCostRelChangeAndGradientLess)
+    if c.at_iteration >= 0
+        return "At iteration $(c.at_iteration) the relative cost change ($(c.last_cost_rel_change)) " *
+               "is below $(c.tol_cost) and the gradient norm ($(c.last_grad_norm)) " *
+               "is below $(c.tol_grad).\n"
+    end
+    return ""
+end
+
+function Manopt.status_summary(c::StopWhenCostRelChangeAndGradientLess)
+    has_stopped = c.at_iteration >= 0
+    status = has_stopped ? "reached" : "not reached"
+    return "cost rel change < $(c.tol_cost) and |grad f| < $(c.tol_grad): $status"
+end
+
+Manopt.indicates_convergence(::StopWhenCostRelChangeAndGradientLess) = true
+
+function Base.show(io::IO, c::StopWhenCostRelChangeAndGradientLess)
+    return print(
+        io,
+        "StopWhenCostRelChangeAndGradientLess($(c.tol_cost), $(c.tol_grad))\n    $(Manopt.status_summary(c))",
+    )
 end
 
 
@@ -220,13 +259,7 @@ end
     end
 end
 
-@inline function _solver_has_converged(state)
-    try
-        return Manopt.has_converged(state)
-    catch
-        return false
-    end
-end
+@inline _solver_has_converged(state) = Manopt.has_converged(state)
 
 
 function _solver_iterations(state, maxiter::Int)
@@ -275,7 +308,6 @@ function _solver_stats(
     converged_grad =
         grad_norm < tol_T || (!isnothing(tiny_grad_tol) && grad_norm < tiny_grad_tol)
     converged_state = _solver_has_converged(state)
-    converged = converged_state || converged_grad
     solver_info = merge(
         solver_info,
         (
@@ -291,7 +323,7 @@ function _solver_stats(
         rel_error = rel_error,
         grad_norm = grad_norm,
         iterations = iterations,
-        converged = converged,
+        converged = converged_state,
         solver = solver,
         solver_info = solver_info,
     )
@@ -324,7 +356,6 @@ function _solver_stats(
     converged_grad =
         grad_norm < tol_T || (!isnothing(tiny_grad_tol) && grad_norm < tiny_grad_tol)
     converged_state = _solver_has_converged(state)
-    converged = converged_state || converged_grad
     solver_info = merge(
         solver_info,
         (
@@ -340,7 +371,7 @@ function _solver_stats(
         rel_error = rel_error,
         grad_norm = grad_norm,
         iterations = iterations,
-        converged = converged,
+        converged = converged_state,
         solver = solver,
         solver_info = solver_info,
     )
@@ -548,6 +579,7 @@ function solve_rgd(
     post_step_callback = nothing,
     diagnostics_recorder = nothing,
     iteration_callbacks = (),
+    grad_tol = nothing,
 )
     p0_local = _solver_point(M, p0)
     T = _scalar_eltype(p0_local)
@@ -555,7 +587,7 @@ function solve_rgd(
     model_grad_local = _layout_adapt_gradient(model_grad_raw)
     retraction_method = _solver_retraction_method(M, p0_local)
     armijo_alpha_min = T(1e-8)
-    tol_g = max(sqrt(T(tol)), T(1e-4))
+    tol_g = _dual_stop_grad_tol(T, tol, grad_tol)
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
 
     stopping = StopWhenAny(
@@ -694,12 +726,14 @@ function solve_rgd_fixed(
     post_step_callback = nothing,
     diagnostics_recorder = nothing,
     iteration_callbacks = (),
+    grad_tol = nothing,
 )
     p0_local = _solver_point(M, p0)
     T = _scalar_eltype(p0_local)
     model_grad_raw = isnothing(model_grad) ? grad(model_egrad) : model_grad
     model_grad_local = _layout_adapt_gradient(model_grad_raw)
     retraction_method = _solver_retraction_method(M, p0_local)
+    tiny_grad_tol = isnothing(grad_tol) ? T(1e-5) : T(grad_tol)
     stopping = StopWhenAny(StopAfterIteration(maxiter), StopWhenGradientNormLess(T(tol)))
     progress =
         maxiter > 0 ?
@@ -760,7 +794,7 @@ function solve_rgd_fixed(
         tol_T = T(tol),
         maxiter,
         solver = :rgd_fixed,
-        tiny_grad_tol = T(1e-5),
+        tiny_grad_tol = tiny_grad_tol,
         solver_info,
     ) :
            _solver_stats(
@@ -773,7 +807,7 @@ function solve_rgd_fixed(
         tol_T = T(tol),
         maxiter,
         solver = :rgd_fixed,
-        tiny_grad_tol = T(1e-5),
+        tiny_grad_tol = tiny_grad_tol,
         solver_info,
     )
 end
@@ -806,6 +840,7 @@ function run_first_order_solver(
     post_step_callback,
     diagnostics_recorder,
     iteration_callbacks,
+    grad_tol = nothing,
 )
     return solve_rgd(
         setup.model_cost,
@@ -819,10 +854,11 @@ function run_first_order_solver(
         return_stats,
         normA2 = setup.normA2,
         model_grad = setup.model_grad,
-        vector_transport_method = vector_transport_method,
+        vector_transport_method,
         post_step_callback,
         diagnostics_recorder,
         iteration_callbacks,
+        grad_tol,
     )
 end
 
@@ -857,6 +893,7 @@ function run_first_order_solver(
     post_step_callback,
     diagnostics_recorder,
     iteration_callbacks,
+    grad_tol = nothing,
 )
     return solve_rgd_fixed(
         setup.model_cost,
@@ -873,5 +910,6 @@ function run_first_order_solver(
         post_step_callback,
         diagnostics_recorder,
         iteration_callbacks,
+        grad_tol,
     )
 end

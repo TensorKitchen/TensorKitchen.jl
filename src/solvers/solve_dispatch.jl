@@ -9,43 +9,49 @@ function _solver_object(solver, ::Real; kwargs...)
 end
 
 function _solver_object(solver::Symbol, stepsize::Real; kwargs...)
-    solvers = (
-        als = () -> ALSSolver(),
-        rgd = () -> RGDSolver(stepsize),
-        rgd_fixed = () -> RGDFixedSolver(stepsize),
-        rcg = () -> RCGSolver(),
-        lbfgs = () -> LBFGSSolver(;
-            memory_size = get(kwargs, :memory_size, 1),
-            cautious_update = get(kwargs, :cautious_update, true),
-            initial_scale = get(kwargs, :initial_scale, 1.0),
-            nonpositive_curvature_behavior = get(
-                kwargs,
-                :nonpositive_curvature_behavior,
-                :ignore,
-            ),
-            linesearch = get(kwargs, :linesearch, :wolfe),
-            preconditioner = get(kwargs, :preconditioner, nothing),
-        ),
-        btd_tsd = () -> BTDTSDSolver(;
-            stepsize,
-            schedule = get(kwargs, :schedule, :cyclic),
-            block_repeats = get(kwargs, :block_repeats, 1),
-            armijo_contraction = get(kwargs, :armijo_contraction, 0.5),
-            armijo_sufficient_decrease = get(kwargs, :armijo_sufficient_decrease, 1e-4),
-            armijo_alpha_min = get(kwargs, :armijo_alpha_min, 1e-12),
-        ),
-    )
-    f = get(solvers, solver) do
-        throw(
-            ArgumentError(
-                "Unknown solver=$solver. Use :als, :rgd, :rgd_fixed, :rcg, :lbfgs, or :btd_tsd.",
-            ),
-        )
-    end
-    return f()
+    return _solver_object(Val(solver), stepsize; kwargs...)
 end
 
 _solver_object(solver::AbstractSolver, ::Real; kwargs...) = solver
+
+_solver_object(::Val{:als}, ::Real; kwargs...) = ALSSolver()
+_solver_object(::Val{:rgd}, stepsize::Real; kwargs...) = RGDSolver(stepsize)
+_solver_object(::Val{:rgd_fixed}, stepsize::Real; kwargs...) = RGDFixedSolver(stepsize)
+_solver_object(::Val{:rcg}, ::Real; kwargs...) = RCGSolver()
+
+function _solver_object(::Val{:lbfgs}, ::Real; kwargs...)
+    return LBFGSSolver(;
+        memory_size = get(kwargs, :memory_size, 1),
+        cautious_update = get(kwargs, :cautious_update, true),
+        initial_scale = get(kwargs, :initial_scale, 1.0),
+        nonpositive_curvature_behavior = get(
+            kwargs,
+            :nonpositive_curvature_behavior,
+            :ignore,
+        ),
+        linesearch = get(kwargs, :linesearch, :wolfe),
+        preconditioner = get(kwargs, :preconditioner, nothing),
+    )
+end
+
+function _solver_object(::Val{:btd_tsd}, stepsize::Real; kwargs...)
+    return BTDTSDSolver(;
+        stepsize,
+        schedule = get(kwargs, :schedule, :cyclic),
+        block_repeats = get(kwargs, :block_repeats, 1),
+        armijo_contraction = get(kwargs, :armijo_contraction, 0.5),
+        armijo_sufficient_decrease = get(kwargs, :armijo_sufficient_decrease, 1e-4),
+        armijo_alpha_min = get(kwargs, :armijo_alpha_min, 1e-12),
+    )
+end
+
+function _solver_object(::Val{S}, ::Real; kwargs...) where {S}
+    throw(
+        ArgumentError(
+            "Unknown solver=$S. Use :als, :rgd, :rgd_fixed, :rcg, :lbfgs, or :btd_tsd.",
+        ),
+    )
+end
 
 function _solve_with_solver(
     solver_obj::AbstractROSolver,
@@ -58,6 +64,7 @@ function _solve_with_solver(
     normalization = NoNormalization(),
     verbose::Bool,
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
+    grad_tol = nothing,
     iteration_callbacks = (),
     kwargs...,
 )
@@ -73,6 +80,7 @@ function _solve_with_solver(
         verbose,
         return_stats = true,
         vector_transport_method,
+        grad_tol,
         iteration_callbacks,
     )
 end

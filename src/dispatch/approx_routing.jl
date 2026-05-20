@@ -24,12 +24,3 @@ function _all_tucker_uniform(manifolds, target_shape::Tuple)
     dims0 == target_shape || return false
     return all(m -> factor_dims(m) == dims0 && multilinear_rank(m) == ranks0, manifolds)
 end
-
-@inline function _normalize_approx_dispatch(dispatch::Symbol)
-    dispatch in (:auto, :generic, :cpd, :btd) || throw(
-        ArgumentError(
-            "Unknown approx dispatch=$dispatch. Use :auto, :generic, :cpd, or :btd.",
-        ),
-    )
-    return dispatch
-end
