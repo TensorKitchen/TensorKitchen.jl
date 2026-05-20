@@ -243,6 +243,13 @@ function initial_point(
     )
 end
 
+function _cpd_manifold_grad_tol(model::JoinModel{<:AbstractFloat,<:CPDBackend}, solver::AbstractSolver, tol::Real)
+    inner = cpd_model(model)
+    inner.nonnegative || return nothing
+    solver isa Union{RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver} || return nothing
+    return tol
+end
+
 function _run_cpd_solver(
     model;
     init_eff,
@@ -290,6 +297,7 @@ function _run_cpd_solver(
         verbose,
         refinement_verbose = verbose,
         vector_transport_method,
+        grad_tol = _cpd_manifold_grad_tol(model, solver, tol),
         iteration_callbacks,
         kwargs...,
     )

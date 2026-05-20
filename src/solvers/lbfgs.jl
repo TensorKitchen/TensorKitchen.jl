@@ -74,6 +74,7 @@ function solve_lbfgs(
     nonpositive_curvature_behavior::Symbol = :ignore,
     linesearch::Symbol = :wolfe,
     preconditioner = nothing,
+    grad_tol = nothing,
 )
     p0_local = _solver_point(M, p0)
     T = _scalar_eltype(p0_local)
@@ -84,7 +85,7 @@ function solve_lbfgs(
         isnothing(vector_transport_method) ?
         _default_vector_transport_method(M, p0_local, retraction_method) :
         vector_transport_method
-    tol_g = max(sqrt(T(tol)), T(1e-4))
+    tol_g = _dual_stop_grad_tol(T, tol, grad_tol)
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
     stopping = StopWhenAny(
         StopAfterIteration(maxiter),
@@ -203,6 +204,7 @@ function run_second_order_solver(
     post_step_callback,
     diagnostics_recorder,
     iteration_callbacks,
+    grad_tol = nothing,
 )
     return solve_lbfgs(
         setup.model_cost,
@@ -215,10 +217,11 @@ function run_second_order_solver(
         return_stats,
         normA2 = setup.normA2,
         model_grad = setup.model_grad,
-        vector_transport_method = vector_transport_method,
+        vector_transport_method,
         post_step_callback,
         diagnostics_recorder,
         iteration_callbacks,
+        grad_tol,
         memory_size = solver.memory_size,
         cautious_update = solver.cautious_update,
         initial_scale = solver.initial_scale,

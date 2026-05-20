@@ -58,6 +58,7 @@ function _solve_with_solver(
     normalization = NoNormalization(),
     verbose::Bool,
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
+    grad_tol = nothing,
     iteration_callbacks = (),
     kwargs...,
 )
@@ -73,6 +74,7 @@ function _solve_with_solver(
         verbose,
         return_stats = true,
         vector_transport_method,
+        grad_tol,
         iteration_callbacks,
     )
 end

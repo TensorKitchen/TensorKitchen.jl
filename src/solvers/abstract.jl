@@ -31,6 +31,17 @@ end
 StandardSolverTrace{T}() where {T<:AbstractFloat} =
     StandardSolverTrace{T}(IterationRecord{T}[], 0, 0, 0.0)
 
+"""
+    _dual_stop_grad_tol(T, tol; grad_tol=nothing)
+
+Gradient tolerance paired with `StopWhenCostRelChangeAndGradientLess`.
+Defaults to `sqrt(tol)`; callers may pass an explicit `grad_tol` (for example
+`grad_tol = tol` on the nonnegative CPD manifold route).
+"""
+@inline function _dual_stop_grad_tol(::Type{T}, tol::Real, grad_tol = nothing) where {T<:Real}
+    return isnothing(grad_tol) ? sqrt(T(tol)) : T(grad_tol)
+end
+
 function record!(
     trace::StandardSolverTrace{T},
     iter::Int,
@@ -209,6 +220,7 @@ function solve(
     verbose::Bool = true,
     return_stats::Bool = false,
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
+    grad_tol = nothing,
     iteration_callbacks = (),
 ) where {T<:AbstractFloat}
     setup = _prepare_solver_problem(model; init, p0, gradient_mode, verbose)
@@ -230,6 +242,7 @@ function solve(
         verbose,
         return_stats,
         vector_transport_method,
+        grad_tol,
         post_step_callback,
         diagnostics_recorder,
         iteration_callbacks,
@@ -248,6 +261,7 @@ function solve(
     verbose::Bool = true,
     return_stats::Bool = false,
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
+    grad_tol = nothing,
     iteration_callbacks = (),
 ) where {T<:AbstractFloat}
     setup = _prepare_solver_problem(model; init, p0, gradient_mode)
@@ -269,6 +283,7 @@ function solve(
         verbose,
         return_stats,
         vector_transport_method,
+        grad_tol,
         post_step_callback,
         diagnostics_recorder,
         iteration_callbacks,
