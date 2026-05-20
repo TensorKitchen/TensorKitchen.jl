@@ -63,16 +63,14 @@ struct CPDApproxDispatch <: AbstractApproxDispatch end
 struct BTDApproxDispatch <: AbstractApproxDispatch end
 
 approx_dispatch(dispatch::AbstractApproxDispatch) = dispatch
-function approx_dispatch(dispatch::Symbol)
-    dispatch === :auto && return AutoApproxDispatch()
-    dispatch === :generic && return GenericApproxDispatch()
-    dispatch === :cpd && return CPDApproxDispatch()
-    dispatch === :btd && return BTDApproxDispatch()
-    throw(
-        ArgumentError(
-            "Unknown approx dispatch=$dispatch. Use :auto, :generic, :cpd, or :btd.",
-        ),
-    )
+approx_dispatch(dispatch::Symbol) = approx_dispatch(Val(dispatch))
+approx_dispatch(::Val{:auto}) = AutoApproxDispatch()
+approx_dispatch(::Val{:generic}) = GenericApproxDispatch()
+approx_dispatch(::Val{:cpd}) = CPDApproxDispatch()
+approx_dispatch(::Val{:btd}) = BTDApproxDispatch()
+
+function approx_dispatch(::Val{D}) where {D}
+    throw(ArgumentError("Unknown approx dispatch=$D. Use :auto, :generic, :cpd, or :btd."))
 end
 approx_dispatch_symbol(::AutoApproxDispatch) = :auto
 approx_dispatch_symbol(::GenericApproxDispatch) = :generic
