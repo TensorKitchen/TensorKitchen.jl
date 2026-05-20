@@ -85,7 +85,7 @@ approx(M, target; verbose = false)
 # returns an BTDResult
 ```
 
-* `approx(base, r, target; kwargs...)` : builds a rank-r Segre join and routes to CPD when base isa Manifolds.Segre and BTD when base isa Manifolds.Tucker unless generic
+* `approx(base, r, target; kwargs...)` : builds a rank-r Segre join and routes by the type of `base`: `Manifolds.Segre` uses CPD and `Manifolds.Tucker` uses BTD unless generic
 dispatch is explicitly requested. 
     - base means one manifold template, not yet a full join.
     - `approx(base, r, target; ...)` repeats that same manifold r times to build a join.
