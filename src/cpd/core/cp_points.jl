@@ -42,7 +42,7 @@ function CPDPoint(
         throw(ArgumentError("CPDPoint requires at least one factor matrix."))
     r = length(lambda)
     mats = Vector{Matrix{T}}(undef, length(factors))
-    @inbounds for m = 1:length(factors)
+    @inbounds for m in eachindex(factors)
         size(factors[m], 2) == r || throw(
             DimensionMismatch("factor $m has $(size(factors[m], 2)) columns, expected $r"),
         )

@@ -61,7 +61,7 @@ function _compose_tucker_cp(
             Um = similar(factors[m], size(factors[m], 1), size(Ucore[m], 2))
             mul!(Um, factors[m], Ucore[m])
             Um
-        end for m = 1:length(factors)
+        end for m in eachindex(factors)
     ]
     λ = Vector{T}(λcore)
     normalize_factors!(U, λ)
@@ -78,7 +78,7 @@ function _cp_least_squares_lambda(
     dlen = length(A)
     Z = similar(A, T, dlen, r)
     @inbounds for k = 1:r
-        vecs = [collect(@view U0[m][:, k]) for m = 1:N]
+        vecs = [collect(@view U0[m][:, k]) for m in eachindex(U0)]
         Z[:, k] .= vec(reconstruct_cp_rank1(one(T), vecs))
     end
     return Vector{T}(Z \ vec(A))

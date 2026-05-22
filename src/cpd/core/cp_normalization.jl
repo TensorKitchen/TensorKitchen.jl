@@ -2,8 +2,7 @@
 export AbstractNormalizationPolicy,
     NoNormalization,
     SeparateLambdaNormalization,
-    LastModeNormalization,
-    EvenDistributionNormalization,
+    NonnegativeSeparateLambdaNormalization,
     normalize_components!,
     normalize_components
 
@@ -11,23 +10,21 @@ abstract type AbstractNormalizationPolicy end
 
 struct NoNormalization <: AbstractNormalizationPolicy end
 struct SeparateLambdaNormalization <: AbstractNormalizationPolicy end
-struct LastModeNormalization <: AbstractNormalizationPolicy end
-struct EvenDistributionNormalization <: AbstractNormalizationPolicy end
+struct NonnegativeSeparateLambdaNormalization <: AbstractNormalizationPolicy end
 
 _normalization_policy(::NoNormalization) = NoNormalization()
 _normalization_policy(::SeparateLambdaNormalization) = SeparateLambdaNormalization()
-_normalization_policy(::LastModeNormalization) = LastModeNormalization()
-_normalization_policy(::EvenDistributionNormalization) = EvenDistributionNormalization()
+_normalization_policy(::NonnegativeSeparateLambdaNormalization) =
+    NonnegativeSeparateLambdaNormalization()
 _normalization_policy(::Nothing) = NoNormalization()
 
 function _normalization_policy(policy::Symbol)
     policy === :none && return NoNormalization()
     policy === :lambda_separate && return SeparateLambdaNormalization()
-    policy === :last_mode && return LastModeNormalization()
-    policy === :distribute_evenly && return EvenDistributionNormalization()
+    policy === :nn_lambda_separate && return NonnegativeSeparateLambdaNormalization()
     throw(
         ArgumentError(
-            "Unknown normalization=$policy. Use :none, :lambda_separate, :last_mode, or :distribute_evenly.",
+            "Unknown normalization=$policy. Use :none, :lambda_separate, or :nn_lambda_separate.",
         ),
     )
 end
@@ -39,18 +36,6 @@ function _normalization_policy(policy)
             "Use a normalization policy object or symbol.",
         ),
     )
-end
-
-@inline _sign_or_zero(x::T) where {T<:AbstractFloat} = iszero(x) ? zero(T) : sign(x)
-
-@inline function _safe_column_norm!(u::AbstractVector{T}) where {T<:AbstractFloat}
-    nu = norm(u)
-    if !isfinite(nu) || nu <= eps(T)
-        fill!(u, zero(T))
-        u[1] = one(T)
-        return one(T)
-    end
-    return nu
 end
 
 """
@@ -82,6 +67,33 @@ _normalize_components_policy!(
     ::NoNormalization,
 ) where {T<:AbstractFloat} = factors
 
+"""
+    NonnegativeSeparateLambdaNormalization
+
+Gauge fixing for nonnegative CPD/NNCPD manifold refinement.
+
+Applied in decoded nonnegative coordinates (`cpd_point` → normalize → `pack_cpd_point`):
+column norms are absorbed into `λ` while preserving the represented tensor. Intended
+for `:softplus_metric` / squaring geometries where latent scale can drift without
+changing the tensor much.
+"""
+function _normalize_components_policy!(
+    factors::Vector{Matrix{T}},
+    lambda::Vector{T},
+    ::NonnegativeSeparateLambdaNormalization,
+) where {T<:AbstractFloat}
+    r = length(lambda)
+    d = length(factors)
+    @inbounds for k = 1:r
+        lambda[k] = max(lambda[k], zero(T))
+        for m = 1:d
+            col = @view factors[m][:, k]
+            col .= max.(col, zero(T))
+        end
+    end
+    return _normalize_components_policy!(factors, lambda, SeparateLambdaNormalization())
+end
+
 function _normalize_components_policy!(
     factors::Vector{Matrix{T}},
     lambda::Vector{T},
@@ -96,54 +108,6 @@ function _normalize_components_policy!(
             scale = _normalize_column_into_lambda!(col, scale)
         end
         lambda[k] = scale
-    end
-    return factors
-end
-
-function _normalize_components_policy!(
-    factors::Vector{Matrix{T}},
-    lambda::Vector{T},
-    ::LastModeNormalization,
-) where {T<:AbstractFloat}
-    r = length(lambda)
-    d = length(factors)
-    last_mode = d
-    @inbounds for k = 1:r
-        total_scale = lambda[k]
-        for m = 1:d
-            col = @view factors[m][:, k]
-            nu = _safe_column_norm!(col)
-            col ./= nu
-            total_scale *= nu
-        end
-        mag = abs(total_scale)
-        factors[last_mode][:, k] .*= mag
-        lambda[k] = _sign_or_zero(total_scale)
-    end
-    return factors
-end
-
-function _normalize_components_policy!(
-    factors::Vector{Matrix{T}},
-    lambda::Vector{T},
-    ::EvenDistributionNormalization,
-) where {T<:AbstractFloat}
-    r = length(lambda)
-    d = length(factors)
-    @inbounds for k = 1:r
-        total_scale = lambda[k]
-        for m = 1:d
-            col = @view factors[m][:, k]
-            nu = _safe_column_norm!(col)
-            col ./= nu
-            total_scale *= nu
-        end
-        mag = abs(total_scale)
-        scale = mag <= eps(T) ? zero(T) : mag^(inv(T(d)))
-        for m = 1:d
-            factors[m][:, k] .*= scale
-        end
-        lambda[k] = _sign_or_zero(total_scale)
     end
     return factors
 end

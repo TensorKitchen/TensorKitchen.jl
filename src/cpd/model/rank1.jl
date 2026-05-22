@@ -63,7 +63,7 @@ function embed_point(model::Rank1CPDModel{T,N}, p) where {T,N}
         if _rank1_uses_softplus_metric(model.M)
             λ̃, Ũ = unpack_point_rank1(p, model.dims)
             λ = _softplus_value(λ̃)
-            U = [_softplus_value.(Ũ[m]) for m = 1:length(Ũ)]
+            U = [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)]
             return reconstruct_cp_rank1(λ, U)
         end
         return embed_point_rank1_nn(p, model.dims)
@@ -136,7 +136,7 @@ function rgrad(model::Rank1CPDModel{T,N}, p) where {T,N}
     inner = rank1_inner_parts(model.A, parts)
     grad_λ = λ - inner
     grad_U = Vector{Vector{T}}(undef, length(model.dims))
-    for m = 1:length(model.dims)
+    for m in eachindex(model.dims)
         # Reuse the in-place contraction helper so only the final tangent vectors are allocated.
         g = Vector{T}(undef, model.dims[m])
         rank1_mode_contract_parts!(g, model.A, parts, m)
@@ -146,11 +146,11 @@ function rgrad(model::Rank1CPDModel{T,N}, p) where {T,N}
 
     if model.scale_by_lambda
         λ_abs = max(abs(λ), model.lambda_eps)
-        for m = 1:length(grad_U)
+        for m in eachindex(grad_U)
             grad_U[m] ./= λ_abs
         end
     end
-    for m = 1:length(grad_U)
+    for m in eachindex(grad_U)
         um = parts[m+1]
         grad_U[m] .-= dot(um, grad_U[m]) .* um
     end
@@ -182,7 +182,9 @@ initial_point(model::Rank1CPDModel, init::PointInit; kwargs...) = init.point
 initial_point(model::Rank1CPDModel, init::FunctionInit; kwargs...) = init.f(model)
 
 supports_normalization_policy(model::Rank1CPDModel, policy::AbstractNormalizationPolicy) =
-    model.nonnegative || policy isa Union{NoNormalization,SeparateLambdaNormalization}
+    model.nonnegative ?
+    policy isa Union{NoNormalization,NonnegativeSeparateLambdaNormalization} :
+    policy isa Union{NoNormalization,SeparateLambdaNormalization}
 
 """
     cpd_point(model::Rank1CPDModel, p)
@@ -199,13 +201,13 @@ function cpd_point(model::Rank1CPDModel{T,N}, p) where {T<:AbstractFloat,N}
         if _rank1_uses_softplus_metric(model.M)
             return CPDPoint(
                 T[_softplus_value(λ̃)],
-                [reshape(_softplus_value.(Ũ[m]), :, 1) for m = 1:length(Ũ)],
+                [reshape(_softplus_value.(Ũ[m]), :, 1) for m in eachindex(Ũ)],
             )
         end
-        return CPDPoint(T[λ̃^2], [reshape(Ũ[m] .^ 2, :, 1) for m = 1:length(Ũ)])
+        return CPDPoint(T[λ̃^2], [reshape(Ũ[m] .^ 2, :, 1) for m in eachindex(Ũ)])
     end
     λ, U = unpack_point_rank1(p, model.dims)
-    return CPDPoint(T[λ], [reshape(U[m], :, 1) for m = 1:length(U)])
+    return CPDPoint(T[λ], [reshape(U[m], :, 1) for m in eachindex(U)])
 end
 
 function pack_cpd_point(
@@ -218,7 +220,7 @@ function pack_cpd_point(
         ),
     )
     λ = lambda(point)[1]
-    U = [vec(F[:, 1]) for F in factors(point)]
+    U = [Vector(@view F[:, 1]) for F in factors(point)]
     if model.nonnegative
         if _rank1_uses_softplus_metric(model.M)
             return pack_point_rank1(
@@ -243,9 +245,21 @@ function post_step!(
             "Normalization policy $(typeof(policy)) is incompatible with Rank1CPDModel nonnegative=$(model.nonnegative).",
         ),
     )
-    if policy isa NoNormalization ||
-       (!model.nonnegative && policy isa SeparateLambdaNormalization)
-        return p
+    policy isa NoNormalization && return p
+    if model.nonnegative
+        policy isa NonnegativeSeparateLambdaNormalization || throw(
+            ArgumentError(
+                "Nonnegative Rank1CPDModel supports NoNormalization() and " *
+                "NonnegativeSeparateLambdaNormalization() only.",
+            ),
+        )
+    elseif !(policy isa SeparateLambdaNormalization)
+        throw(
+            ArgumentError(
+                "Signed Rank1CPDModel supports NoNormalization() and " *
+                "SeparateLambdaNormalization() only.",
+            ),
+        )
     end
     q = cpd_point(model, p)
     normalize_components!(q, policy)

@@ -504,6 +504,15 @@ end
     @test hasproperty(trace_info, :component_trace_rgrad_top1_share_history)
     @test hasproperty(trace_info, :component_trace_rgrad_top3_share_history)
     @test hasproperty(trace_info, :component_trace_rgrad_effective_components_history)
+    @test hasproperty(trace_info, :component_trace_coordinate_rgrad_energy_history)
+    @test hasproperty(trace_info, :component_trace_metric_rgrad_energy_history)
+    @test hasproperty(trace_info, :component_trace_ambient_component_velocity_history)
+    @test hasproperty(trace_info, :component_trace_metric_rgrad_top1_share_history)
+    @test hasproperty(trace_info, :component_trace_ambient_velocity_top1_share_history)
+    @test hasproperty(trace_info, :component_trace_metric_rgrad_argmax_component_history)
+    @test hasproperty(trace_info, :component_trace_ambient_velocity_argmax_component_history)
+    @test hasproperty(trace_info, :component_trace_metric_rgrad_argmax_component_final)
+    @test hasproperty(trace_info, :component_trace_ambient_velocity_argmax_component_final)
     @test hasproperty(trace_info, :component_trace_start_rel_error)
     @test hasproperty(trace_info, :component_trace_rgrad_failed_count)
     @test isfinite(trace_info.component_trace_start_rel_error)
@@ -518,7 +527,18 @@ end
           length(trace_info.component_trace_iterations)
     @test length(trace_info.component_trace_rgrad_effective_components_history) ==
           length(trace_info.component_trace_iterations)
+    @test length(trace_info.component_trace_metric_rgrad_top1_share_history) ==
+          length(trace_info.component_trace_iterations)
+    @test length(trace_info.component_trace_ambient_velocity_top1_share_history) ==
+          length(trace_info.component_trace_iterations)
     @test all(length(deltas) == r for deltas in trace_info.component_trace_delta_history)
+    @test all(
+        length(energies) == r for
+        energies in trace_info.component_trace_metric_rgrad_energy_history
+    )
+    @test all(
+        length(vel) == r for vel in trace_info.component_trace_ambient_component_velocity_history
+    )
     @test all(isfinite, trace_info.component_trace_max_delta_history)
     @test all(
         x -> isnan(x) || -1e-12 <= x <= 1 + 1e-12,
@@ -540,6 +560,14 @@ end
         x -> isnan(x) || 1 <= x <= r,
         trace_info.component_trace_rgrad_effective_components_history,
     )
+    @test trace_info.component_trace_rgrad_argmax_component_final ==
+          trace_info.component_trace_rgrad_argmax_component_history[end]
+    @test trace_info.component_trace_metric_rgrad_argmax_component_final ==
+          trace_info.component_trace_metric_rgrad_argmax_component_history[end]
+    @test trace_info.component_trace_ambient_velocity_argmax_component_final ==
+          trace_info.component_trace_ambient_velocity_argmax_component_history[end]
+    @test 1 <= trace_info.component_trace_metric_rgrad_argmax_component_final <= r
+    @test 1 <= trace_info.component_trace_ambient_velocity_argmax_component_final <= r
     @test_throws ArgumentError cpd(
         A,
         r;
@@ -656,59 +684,81 @@ end
     @test λ_sep isa Vector{Float64}
     @test reconstruct_cpd_rankr(λ_sep, U_sep) ≈ A_ref
 
-    q_last = normalize_components(CPDPoint(λ, U), :last_mode)
-    @test reconstruct_cpd_rankr(q_last.lambda, q_last.factors) ≈ A_ref
-    @test all(
-        isapprox(norm(q_last.factors[m][:, k]), 1; atol = 1e-10) for m = 1:2 for k = 1:r
-    )
-    @test all(abs.(q_last.lambda) .<= 1 .+ 1e-12)
-
-    q_even = normalize_components(CPDPoint(λ, U), :distribute_evenly)
-    @test reconstruct_cpd_rankr(q_even.lambda, q_even.factors) ≈ A_ref
-    @test all(
-        isapprox(
-            norm(q_even.factors[1][:, k]),
-            norm(q_even.factors[m][:, k]);
-            atol = 1e-10,
-        ) for m = 2:3 for k = 1:r
-    )
+    @test_throws ArgumentError normalize_components(CPDPoint(λ, U), :last_mode)
+    @test_throws ArgumentError normalize_components(CPDPoint(λ, U), :distribute_evenly)
 
     A_pos = abs.(A_ref)
-    res_nn = cpd(
+    @test_throws ArgumentError cpd(
         A_pos,
         r;
         solver = :rgd,
         nonnegative = true,
-        normalization = :distribute_evenly,
-        maxiter = 3,
-        tol = 1e-6,
-        verbose = false,
-    )
-    @test res_nn isa CPDResult
-    @test TensorKitchen.point(res_nn) isa CPDPoint
-    @test isfinite(res_nn.rel_error)
-
-    @test_throws ArgumentError cpd(
-        A_ref,
-        r;
-        solver = :rgd,
-        normalization = :last_mode,
+        normalization = :lambda_separate,
         maxiter = 3,
         tol = 1e-6,
         verbose = false,
     )
 
-    out_last = fit_cp_als(
+    out_als = fit_cp_als(
         A_ref,
         r;
         maxiter = 3,
         tol = 1e-6,
         init = RandomInit(),
-        normalization = :last_mode,
+        normalization = :lambda_separate,
         verbose = false,
         return_stats = true,
     )
-    @test isfinite(out_last.rel_error)
+    @test isfinite(out_als.rel_error)
+end
+
+@testset "cpd.jl: NonnegativeSeparateLambdaNormalization" begin
+    dims = (8, 7, 6)
+    r = 3
+    λ = [1.0e6, 1.0e-4, 2.0]
+    U = [
+        [1.0e3 1.0e-2 3.0; 2.0e2 4.0e-3 1.0; 5.0e1 2.0e-2 0.5],
+        [8.0e2 3.0e-3 2.0; 1.0e2 1.0e-2 4.0; 4.0e1 5.0e-3 1.0],
+        [6.0e2 2.0e-2 1.0; 9.0e1 4.0e-3 3.0; 3.0e1 1.0e-2 2.0],
+    ]
+    A_ref = reconstruct_cpd_rankr(components_from_factors(λ, U))
+
+    q = normalize_components(CPDPoint(λ, U), NonnegativeSeparateLambdaNormalization())
+    @test reconstruct_cpd_rankr(q.lambda, q.factors) ≈ A_ref
+    @test all(q.lambda .>= 0)
+    @test all(F -> all(F .>= 0), q.factors)
+    @test all(
+        isapprox(norm(q.factors[m][:, k]), 1; atol = 1e-10) for m = 1:3 for k = 1:r
+    )
+
+    rng = MersenneTwister(77)
+    comps =
+        [RankOneTensor(abs(randn(rng)), [abs.(randn(rng, d)) for d in dims]) for _ = 1:r]
+    A = reconstruct_cpd_rankr(comps)
+    res_auto = cpd(
+        A,
+        r;
+        solver = :rgd,
+        nonnegative = true,
+        geometry = :softplus_metric,
+        normalization = :auto,
+        maxiter = 5,
+        tol = 1e-6,
+        verbose = false,
+    )
+    @test res_auto isa CPDResult
+    @test isfinite(res_auto.rel_error)
+
+    @test_throws ArgumentError cpd(
+        A,
+        r;
+        solver = :rgd,
+        nonnegative = true,
+        normalization = :lambda_separate,
+        maxiter = 2,
+        tol = 1e-6,
+        verbose = false,
+    )
 end
 
 @testset "cpd.jl: nonnegative ALS auto normalization uses no normalization" begin
