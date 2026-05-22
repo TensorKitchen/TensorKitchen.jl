@@ -28,6 +28,28 @@ Base.@kwdef mutable struct _CPDComponentTraceHistory
     cost_rel_change_history::Vector{Float64} = Float64[]
     max_component_delta_history::Vector{Float64} = Float64[]
     component_delta_history::Vector{Vector{Float64}} = Vector{Float64}[]
+    coordinate_rgrad_energy_history::Vector{Vector{Float64}} = Vector{Float64}[]
+    coordinate_rgrad_share_history::Vector{Vector{Float64}} = Vector{Float64}[]
+    coordinate_rgrad_top1_share_history::Vector{Float64} = Float64[]
+    coordinate_rgrad_top2_share_history::Vector{Float64} = Float64[]
+    coordinate_rgrad_top3_share_history::Vector{Float64} = Float64[]
+    coordinate_rgrad_effective_components_history::Vector{Float64} = Float64[]
+    coordinate_rgrad_argmax_component_history::Vector{Int} = Int[]
+    metric_rgrad_energy_history::Vector{Vector{Float64}} = Vector{Float64}[]
+    metric_rgrad_share_history::Vector{Vector{Float64}} = Vector{Float64}[]
+    metric_rgrad_top1_share_history::Vector{Float64} = Float64[]
+    metric_rgrad_top2_share_history::Vector{Float64} = Float64[]
+    metric_rgrad_top3_share_history::Vector{Float64} = Float64[]
+    metric_rgrad_effective_components_history::Vector{Float64} = Float64[]
+    metric_rgrad_argmax_component_history::Vector{Int} = Int[]
+    ambient_component_velocity_history::Vector{Vector{Float64}} = Vector{Float64}[]
+    ambient_velocity_share_history::Vector{Vector{Float64}} = Vector{Float64}[]
+    ambient_velocity_top1_share_history::Vector{Float64} = Float64[]
+    ambient_velocity_top2_share_history::Vector{Float64} = Float64[]
+    ambient_velocity_top3_share_history::Vector{Float64} = Float64[]
+    ambient_velocity_effective_components_history::Vector{Float64} = Float64[]
+    ambient_velocity_argmax_component_history::Vector{Int} = Int[]
+    # Legacy aliases (coordinate / block-norm rgrad diagnostics).
     rgrad_energy_history::Vector{Vector{Float64}} = Vector{Float64}[]
     rgrad_share_history::Vector{Vector{Float64}} = Vector{Float64}[]
     rgrad_top1_share_history::Vector{Float64} = Float64[]
@@ -50,7 +72,7 @@ _CPDComponentTraceRecorder(model) = _CPDComponentTraceRecorder(; model)
 
 function _rankone_norm2(λ, U, k::Int)
     val = abs2(λ[k])
-    @inbounds for m = 1:length(U)
+    @inbounds for m in eachindex(U)
         val *= sum(abs2, @view U[m][:, k])
     end
     return Float64(val)
@@ -58,7 +80,7 @@ end
 
 function _rankone_inner(λa, Ua, λb, Ub, k::Int)
     val = λa[k] * λb[k]
-    @inbounds for m = 1:length(Ua)
+    @inbounds for m in eachindex(Ua)
         val *= dot(@view(Ua[m][:, k]), @view(Ub[m][:, k]))
     end
     return Float64(val)
@@ -117,7 +139,7 @@ function _component_energy_summary(energies::AbstractVector{<:Real})
     )
 end
 
-function _cpd_rgrad_energy_from_blocks(gλ, gU)
+function _cpd_coordinate_rgrad_energy_from_blocks(gλ, gU)
     r = length(gλ)
     energies = zeros(Float64, r)
     @inbounds for k = 1:r
@@ -129,16 +151,19 @@ function _cpd_rgrad_energy_from_blocks(gλ, gU)
     return energies
 end
 
-function _cpd_component_rgrad_energies(model::JoinModel{<:AbstractFloat,<:CPDBackend}, g)
-    return _cpd_component_rgrad_energies(cpd_model(model), g)
+function _cpd_component_coordinate_rgrad_energies(
+    model::JoinModel{<:AbstractFloat,<:CPDBackend},
+    g,
+)
+    return _cpd_component_coordinate_rgrad_energies(cpd_model(model), g)
 end
 
-function _cpd_component_rgrad_energies(model::RankRCPDModel, g)
+function _cpd_component_coordinate_rgrad_energies(model::RankRCPDModel, g)
     gλ, gU = unpack_point_rankr(g, model.dims, model.r)
-    return _cpd_rgrad_energy_from_blocks(gλ, gU)
+    return _cpd_coordinate_rgrad_energy_from_blocks(gλ, gU)
 end
 
-function _cpd_component_rgrad_energies(model::Rank1CPDModel, g)
+function _cpd_component_coordinate_rgrad_energies(model::Rank1CPDModel, g)
     gλ, gU = unpack_point_rank1(g, model.dims)
     energy = abs2(Float64(gλ))
     @inbounds for u in gU
@@ -147,21 +172,249 @@ function _cpd_component_rgrad_energies(model::Rank1CPDModel, g)
     return [energy]
 end
 
-_cpd_component_rgrad_energies(_, _) = Float64[]
+_cpd_component_coordinate_rgrad_energies(_, _) = Float64[]
 
-function _safe_cpd_component_rgrad_energies(rec::_CPDComponentTraceRecorder, problem, p)
+function _cpd_product_block_metric_energy(M::ProductManifold, p, g, block_idx::Int)
+    factors = M.manifolds
+    pp = point_parts(p)
+    gp = point_parts(g)
+    return Float64(
+        ManifoldsBase.inner(
+            factors[block_idx],
+            pp[block_idx],
+            gp[block_idx],
+            gp[block_idx],
+        ),
+    )
+end
+
+function _cpd_join_component_metric_energy(M::ProductManifold, p, g, k::Int, d::Int)
+    base = (k - 1) * (d + 1)
+    energy = 0.0
+    @inbounds for b = 1:(d+1)
+        energy += _cpd_product_block_metric_energy(M, p, g, base + b)
+    end
+    return energy
+end
+
+function _cpd_native_component_metric_energy(M::ProductManifold, p, g, k::Int)
+    factors = M.manifolds
+    pp = point_parts(p)
+    gp = point_parts(g)
+    return Float64(ManifoldsBase.inner(factors[k], pp[k], gp[k], gp[k]))
+end
+
+function _cpd_canonical_component_metric_energy(M::ProductManifold, p, g, k::Int, d::Int)
+    factors = M.manifolds
+    pp = point_parts(p)
+    gp = point_parts(g)
+    energy = abs2(Float64(gp[1][k]))
+    @inbounds for m = 1:d
+        mode_M = factors[m+1]
+        energy += Float64(
+            ManifoldsBase.inner(mode_M.manifolds[k], pp[m+1][k], gp[m+1][k], gp[m+1][k]),
+        )
+    end
+    return energy
+end
+
+function _cpd_component_metric_rgrad_energies(
+    model::JoinModel{<:AbstractFloat,<:CPDBackend},
+    p,
+    g,
+)
+    return _cpd_component_metric_rgrad_energies(cpd_model(model), p, g)
+end
+
+function _cpd_component_metric_rgrad_energies(model::RankRCPDModel, p, g)
+    M = model.M
+    r, d = model.r, length(model.dims)
+    if M isa ProductManifold
+        nf = length(M.manifolds)
+        if nf == r * (d + 1)
+            return [_cpd_join_component_metric_energy(M, p, g, k, d) for k = 1:r]
+        elseif nf == r
+            return [_cpd_native_component_metric_energy(M, p, g, k) for k = 1:r]
+        elseif nf == d + 1
+            return [_cpd_canonical_component_metric_energy(M, p, g, k, d) for k = 1:r]
+        end
+    end
+    return _cpd_component_coordinate_rgrad_energies(model, g)
+end
+
+function _cpd_component_metric_rgrad_energies(model::Rank1CPDModel, p, g)
+    M = model.M
+    if model.nonnegative && M isa ProductManifold
+        factors = M.manifolds
+        pp = point_parts(p)
+        gp = point_parts(g)
+        energy = 0.0
+        @inbounds for i in eachindex(factors)
+            energy += Float64(ManifoldsBase.inner(factors[i], pp[i], gp[i], gp[i]))
+        end
+        return [energy]
+    elseif M isa Manifolds.Segre
+        return [Float64(ManifoldsBase.inner(M, p, g, g))]
+    end
+    return _cpd_component_coordinate_rgrad_energies(model, g)
+end
+
+_cpd_component_metric_rgrad_energies(_, _, _) = Float64[]
+
+function _ambient_rankone_tangent_norm2(
+    λk::Real,
+    u::Vector{<:AbstractVector},
+    δλk::Real,
+    δu::Vector{<:AbstractVector},
+)
+    T = promote_type(typeof(λk), eltype(u[1]), typeof(δλk), eltype(δu[1]))
+    δT_total = reconstruct_cp_rank1(T(δλk), u)
+    @inbounds for m in eachindex(u)
+        u_pert = [j == m ? δu[j] : u[j] for j in eachindex(u)]
+        δT_total .+= reconstruct_cp_rank1(T(λk), u_pert)
+    end
+    return Float64(sum(abs2, δT_total))
+end
+
+function _decoded_tangent_for_component_k(geometry::Symbol, λ̃, Ũ, gλ, gU, k::Int)
+    if geometry == :softplus_metric
+        δλk = Float64(_softplus_derivative(λ̃[k]) * gλ[k])
+        δu = [
+            begin
+                ũ = @view Ũ[m][:, k]
+                gu = @view gU[m][:, k]
+                [_softplus_derivative(ũ[i]) * gu[i] for i in eachindex(ũ)]
+            end for m in eachindex(gU)
+        ]
+        return δλk, δu
+    elseif geometry == :squaring_metric
+        δλk = Float64(2 * λ̃[k] * gλ[k])
+        δu = [@views Float64.(2 .* Ũ[m][:, k] .* gU[m][:, k]) for m in eachindex(gU)]
+        return δλk, δu
+    else
+        δλk = Float64(gλ[k])
+        δu = [Vector{Float64}(@view gU[m][:, k]) for m in eachindex(gU)]
+        return δλk, δu
+    end
+end
+
+function _cpd_component_ambient_velocities(
+    model::JoinModel{<:AbstractFloat,<:CPDBackend},
+    p,
+    g,
+)
+    return _cpd_component_ambient_velocities(cpd_model(model), p, g)
+end
+
+function _cpd_component_ambient_velocities(model::RankRCPDModel, p, g)
+    λ̃, Ũ = unpack_point_rankr(p, model.dims, model.r)
+    gλ, gU = unpack_point_rankr(g, model.dims, model.r)
+    q = cpd_point(model, p)
+    λ = lambda(q)
+    U = factors(q)
+    r = model.r
+    energies = Vector{Float64}(undef, r)
+    @inbounds for k = 1:r
+        δλk, δu = _decoded_tangent_for_component_k(model.geometry, λ̃, Ũ, gλ, gU, k)
+        u_cols = [@view U[m][:, k] for m in eachindex(U)]
+        energies[k] = _ambient_rankone_tangent_norm2(λ[k], u_cols, δλk, δu)
+    end
+    return energies
+end
+
+function _decoded_tangent_rank1(geometry::Symbol, λ̃, Ũ, gλ, gU)
+    if geometry == :softplus_metric
+        δλk = Float64(_softplus_derivative(λ̃) * gλ)
+        δu = [
+            [_softplus_derivative(Ũ[m][i]) * gU[m][i] for i in eachindex(Ũ[m])] for
+            m in eachindex(Ũ)
+        ]
+        return δλk, δu
+    elseif geometry == :squaring_metric
+        return Float64(2 * λ̃ * gλ), [Float64.(2 .* Ũ[m] .* gU[m]) for m in eachindex(Ũ)]
+    else
+        return Float64(gλ), [Vector{Float64}(gU[m]) for m in eachindex(gU)]
+    end
+end
+
+function _cpd_component_ambient_velocities(model::Rank1CPDModel, p, g)
+    λ̃, Ũ = unpack_point_rank1(p, model.dims)
+    gλ, gU = unpack_point_rank1(g, model.dims)
+    q = cpd_point(model, p)
+    geometry =
+        model.nonnegative ?
+        (_rank1_uses_softplus_metric(model.M) ? :softplus_metric : :squaring_metric) :
+        :canonical
+    δλk, δu = _decoded_tangent_rank1(geometry, λ̃, Ũ, gλ, gU)
+    u_cols = factors(q)
+    return [_ambient_rankone_tangent_norm2(lambda(q), u_cols, δλk, δu)]
+end
+
+_cpd_component_ambient_velocities(_, _, _) = Float64[]
+
+function _push_component_energy_trace!(
+    hist::_CPDComponentTraceHistory,
+    energies::AbstractVector{<:Real},
+    kind::Symbol,
+)
+    summary = _component_energy_summary(energies)
+    energies_f = Float64.(energies)
+    if kind == :coordinate
+        push!(hist.coordinate_rgrad_energy_history, energies_f)
+        push!(hist.coordinate_rgrad_share_history, summary.shares)
+        push!(hist.coordinate_rgrad_top1_share_history, summary.top1)
+        push!(hist.coordinate_rgrad_top2_share_history, summary.top2)
+        push!(hist.coordinate_rgrad_top3_share_history, summary.top3)
+        push!(hist.coordinate_rgrad_effective_components_history, summary.effective)
+        push!(hist.coordinate_rgrad_argmax_component_history, summary.argmax_component)
+        push!(hist.rgrad_energy_history, energies_f)
+        push!(hist.rgrad_share_history, summary.shares)
+        push!(hist.rgrad_top1_share_history, summary.top1)
+        push!(hist.rgrad_top2_share_history, summary.top2)
+        push!(hist.rgrad_top3_share_history, summary.top3)
+        push!(hist.rgrad_effective_components_history, summary.effective)
+        push!(hist.rgrad_argmax_component_history, summary.argmax_component)
+    elseif kind == :metric
+        push!(hist.metric_rgrad_energy_history, energies_f)
+        push!(hist.metric_rgrad_share_history, summary.shares)
+        push!(hist.metric_rgrad_top1_share_history, summary.top1)
+        push!(hist.metric_rgrad_top2_share_history, summary.top2)
+        push!(hist.metric_rgrad_top3_share_history, summary.top3)
+        push!(hist.metric_rgrad_effective_components_history, summary.effective)
+        push!(hist.metric_rgrad_argmax_component_history, summary.argmax_component)
+    elseif kind == :ambient
+        push!(hist.ambient_component_velocity_history, energies_f)
+        push!(hist.ambient_velocity_share_history, summary.shares)
+        push!(hist.ambient_velocity_top1_share_history, summary.top1)
+        push!(hist.ambient_velocity_top2_share_history, summary.top2)
+        push!(hist.ambient_velocity_top3_share_history, summary.top3)
+        push!(hist.ambient_velocity_effective_components_history, summary.effective)
+        push!(hist.ambient_velocity_argmax_component_history, summary.argmax_component)
+    end
+    return nothing
+end
+
+function _safe_cpd_component_gradient_diagnostics(
+    rec::_CPDComponentTraceRecorder,
+    problem,
+    p,
+)
     g = try
         Manopt.get_gradient(problem, p)
     catch
         rec.history.rgrad_failed_count += 1
-        nothing
+        return (; coordinate = Float64[], metric = Float64[], ambient = Float64[])
     end
-    isnothing(g) && return Float64[]
+    inner = cpd_model(rec.model)
     try
-        return _cpd_component_rgrad_energies(rec.model, g)
+        return (
+            coordinate = _cpd_component_coordinate_rgrad_energies(inner, g),
+            metric = _cpd_component_metric_rgrad_energies(inner, p, g),
+            ambient = _cpd_component_ambient_velocities(inner, p, g),
+        )
     catch
         rec.history.rgrad_failed_count += 1
-        return Float64[]
+        return (; coordinate = Float64[], metric = Float64[], ambient = Float64[])
     end
 end
 
@@ -173,8 +426,7 @@ function _record_cpd_component_trace!(
 )
     q = cpd_point(rec.model, p)
     cost_val = Float64(cost(rec.model, p))
-    rgrad_energies = _safe_cpd_component_rgrad_energies(rec, problem, p)
-    rgrad_summary = _component_energy_summary(rgrad_energies)
+    grad_diags = _safe_cpd_component_gradient_diagnostics(rec, problem, p)
     if rec.previous !== nothing
         hist = rec.history
         deltas = _cpd_component_deltas(rec.previous, q)
@@ -184,13 +436,9 @@ function _record_cpd_component_trace!(
         push!(hist.cost_rel_change_history, rel_change)
         push!(hist.max_component_delta_history, maximum(deltas))
         push!(hist.component_delta_history, deltas)
-        push!(hist.rgrad_energy_history, Float64.(rgrad_energies))
-        push!(hist.rgrad_share_history, rgrad_summary.shares)
-        push!(hist.rgrad_top1_share_history, rgrad_summary.top1)
-        push!(hist.rgrad_top2_share_history, rgrad_summary.top2)
-        push!(hist.rgrad_top3_share_history, rgrad_summary.top3)
-        push!(hist.rgrad_effective_components_history, rgrad_summary.effective)
-        push!(hist.rgrad_argmax_component_history, rgrad_summary.argmax_component)
+        _push_component_energy_trace!(hist, grad_diags.coordinate, :coordinate)
+        _push_component_energy_trace!(hist, grad_diags.metric, :metric)
+        _push_component_energy_trace!(hist, grad_diags.ambient, :ambient)
     end
     rec.previous = q
     rec.previous_cost = cost_val
@@ -209,6 +457,8 @@ function _cpd_component_trace_callback(rec::_CPDComponentTraceRecorder)
     end
 end
 
+_trace_history_final(history, default) = isempty(history) ? default : history[end]
+
 function _cpd_component_trace_info(rec::_CPDComponentTraceRecorder)
     hist = rec.history
     return (
@@ -217,8 +467,31 @@ function _cpd_component_trace_info(rec::_CPDComponentTraceRecorder)
         component_trace_cost_rel_change_history = hist.cost_rel_change_history,
         component_trace_max_delta_history = hist.max_component_delta_history,
         component_trace_delta_history = hist.component_delta_history,
-        component_trace_final_max_delta = isempty(hist.max_component_delta_history) ? NaN :
-                                          hist.max_component_delta_history[end],
+        component_trace_final_max_delta = _trace_history_final(
+            hist.max_component_delta_history,
+            NaN,
+        ),
+        component_trace_coordinate_rgrad_energy_history = hist.coordinate_rgrad_energy_history,
+        component_trace_coordinate_rgrad_share_history = hist.coordinate_rgrad_share_history,
+        component_trace_coordinate_rgrad_top1_share_history = hist.coordinate_rgrad_top1_share_history,
+        component_trace_coordinate_rgrad_top2_share_history = hist.coordinate_rgrad_top2_share_history,
+        component_trace_coordinate_rgrad_top3_share_history = hist.coordinate_rgrad_top3_share_history,
+        component_trace_coordinate_rgrad_effective_components_history = hist.coordinate_rgrad_effective_components_history,
+        component_trace_coordinate_rgrad_argmax_component_history = hist.coordinate_rgrad_argmax_component_history,
+        component_trace_metric_rgrad_energy_history = hist.metric_rgrad_energy_history,
+        component_trace_metric_rgrad_share_history = hist.metric_rgrad_share_history,
+        component_trace_metric_rgrad_top1_share_history = hist.metric_rgrad_top1_share_history,
+        component_trace_metric_rgrad_top2_share_history = hist.metric_rgrad_top2_share_history,
+        component_trace_metric_rgrad_top3_share_history = hist.metric_rgrad_top3_share_history,
+        component_trace_metric_rgrad_effective_components_history = hist.metric_rgrad_effective_components_history,
+        component_trace_metric_rgrad_argmax_component_history = hist.metric_rgrad_argmax_component_history,
+        component_trace_ambient_component_velocity_history = hist.ambient_component_velocity_history,
+        component_trace_ambient_velocity_share_history = hist.ambient_velocity_share_history,
+        component_trace_ambient_velocity_top1_share_history = hist.ambient_velocity_top1_share_history,
+        component_trace_ambient_velocity_top2_share_history = hist.ambient_velocity_top2_share_history,
+        component_trace_ambient_velocity_top3_share_history = hist.ambient_velocity_top3_share_history,
+        component_trace_ambient_velocity_effective_components_history = hist.ambient_velocity_effective_components_history,
+        component_trace_ambient_velocity_argmax_component_history = hist.ambient_velocity_argmax_component_history,
         component_trace_rgrad_energy_history = hist.rgrad_energy_history,
         component_trace_rgrad_share_history = hist.rgrad_share_history,
         component_trace_rgrad_top1_share_history = hist.rgrad_top1_share_history,
@@ -227,18 +500,46 @@ function _cpd_component_trace_info(rec::_CPDComponentTraceRecorder)
         component_trace_rgrad_effective_components_history = hist.rgrad_effective_components_history,
         component_trace_rgrad_argmax_component_history = hist.rgrad_argmax_component_history,
         component_trace_rgrad_failed_count = hist.rgrad_failed_count,
-        component_trace_rgrad_top1_share_final = isempty(hist.rgrad_top1_share_history) ?
-                                                 NaN : hist.rgrad_top1_share_history[end],
-        component_trace_rgrad_top2_share_final = isempty(hist.rgrad_top2_share_history) ?
-                                                 NaN : hist.rgrad_top2_share_history[end],
-        component_trace_rgrad_top3_share_final = isempty(hist.rgrad_top3_share_history) ?
-                                                 NaN : hist.rgrad_top3_share_history[end],
-        component_trace_rgrad_effective_components_final = isempty(
+        component_trace_rgrad_top1_share_final = _trace_history_final(
+            hist.rgrad_top1_share_history,
+            NaN,
+        ),
+        component_trace_rgrad_top2_share_final = _trace_history_final(
+            hist.rgrad_top2_share_history,
+            NaN,
+        ),
+        component_trace_rgrad_top3_share_final = _trace_history_final(
+            hist.rgrad_top3_share_history,
+            NaN,
+        ),
+        component_trace_rgrad_effective_components_final = _trace_history_final(
             hist.rgrad_effective_components_history,
-        ) ? NaN : hist.rgrad_effective_components_history[end],
-        component_trace_rgrad_argmax_component_final = isempty(
+            NaN,
+        ),
+        component_trace_rgrad_argmax_component_final = _trace_history_final(
             hist.rgrad_argmax_component_history,
-        ) ? 0 : hist.rgrad_argmax_component_history[end],
+            0,
+        ),
+        component_trace_coordinate_rgrad_argmax_component_final = _trace_history_final(
+            hist.coordinate_rgrad_argmax_component_history,
+            0,
+        ),
+        component_trace_metric_rgrad_argmax_component_final = _trace_history_final(
+            hist.metric_rgrad_argmax_component_history,
+            0,
+        ),
+        component_trace_ambient_velocity_argmax_component_final = _trace_history_final(
+            hist.ambient_velocity_argmax_component_history,
+            0,
+        ),
+        component_trace_metric_rgrad_top1_share_final = _trace_history_final(
+            hist.metric_rgrad_top1_share_history,
+            NaN,
+        ),
+        component_trace_ambient_velocity_top1_share_final = _trace_history_final(
+            hist.ambient_velocity_top1_share_history,
+            NaN,
+        ),
         component_trace_start_rel_error = rec.start_rel_error,
     )
 end
@@ -259,9 +560,10 @@ function _cpd_effective_init(init, solver::AbstractSolver, warm_steps::Int, warm
            init_resolved
 end
 
-_cpd_solve_normalization(::AbstractSolver, nonnegative::Bool) = NoNormalization()
 _cpd_solve_normalization(::ALSSolver, nonnegative::Bool) =
     nonnegative ? NoNormalization() : SeparateLambdaNormalization()
+_cpd_solve_normalization(::AbstractSolver, nonnegative::Bool) =
+    nonnegative ? NonnegativeSeparateLambdaNormalization() : NoNormalization()
 
 function _cpd_normalizations(normalization, solver::AbstractSolver, nonnegative::Bool)
     if normalization != :auto
@@ -497,6 +799,20 @@ function _cpd_initial_solve_point(
     return nothing
 end
 
+function _cpd_solver_start_point(
+    model,
+    p_solve,
+    init_eff,
+    solver::AbstractSolver;
+    verbose::Bool,
+)
+    return isnothing(p_solve) ? initial_point(model, init_eff; verbose) : p_solve
+end
+
+function _cpd_solver_start_point(model, p_solve, init_eff, solver::ALSSolver; verbose::Bool)
+    return p_solve
+end
+
 function _run_cpd_solver(
     model;
     init_eff,
@@ -528,7 +844,7 @@ function _run_cpd_solver(
         pullback_eps,
         kwargs...,
     )
-    p_start = isnothing(p_solve) ? initial_point(model, init_eff; verbose) : p_solve
+    p_start = _cpd_solver_start_point(model, p_solve, init_eff, solver; verbose)
     if !isnothing(trace_recorder)
         trace_recorder.start_rel_error = _cpd_point_rel_error(model, p_start)
     end
@@ -536,7 +852,7 @@ function _run_cpd_solver(
     result = _solve_model(
         model;
         init = init_eff,
-        p0 = p_solve,
+        p0 = p_start,
         solver = solver,
         maxiter,
         stepsize,
@@ -698,10 +1014,6 @@ If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
 * `verbose = true`: Enables progress output.
 * `nonnegative::Bool = false`: Nonnegative CPD option to be selected by the user. (same as `nncpd`)
 * `pullback_eps = 1e-8`: Regularization parameter for pullback-style nonnegative geometries.
-* `component_trace = false`: For manifold solvers, records per-iteration movement of
-  each CP rank-one term in `solver_info`. It also records internal solver rgrad
-  block-coordinate energy grouped by CP component. Use this to diagnose whether a
-  flat cost means the rank-one terms are also stuck.
 
 ## Notes
 * `solver = :als` does not use manifold geometry. In that case:

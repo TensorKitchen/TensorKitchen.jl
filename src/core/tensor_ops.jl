@@ -393,7 +393,7 @@ end
 function cross_component(a::RankOneTensor{T}, b::RankOneTensor{T}) where {T<:AbstractFloat}
     length(a.vectors) == length(b.vectors) ||
         throw(DimensionMismatch("RankOneTensor mode count"))
-    return a.λ * b.λ * prod(dot(a.vectors[m], b.vectors[m]) for m = 1:length(a.vectors))
+    return a.λ * b.λ * prod(dot(a.vectors[m], b.vectors[m]) for m in eachindex(a.vectors))
 end
 
 function build_cross_matrix(components::Vector{RankOneTensor{T}}) where {T<:AbstractFloat}
@@ -416,7 +416,7 @@ function build_cross_matrix_unit(
         for l = 1:r
             cross_mat[k, l] = prod(
                 dot(components[k].vectors[m], components[l].vectors[m]) for
-                m = 1:length(components[1].vectors)
+                m in eachindex(components[1].vectors)
             )
         end
     end
@@ -445,7 +445,7 @@ cross_component_except_mode(
     b::RankOneTensor{T},
     exclude_m::Int,
 ) where {T<:AbstractFloat} =
-    prod(dot(a.vectors[j], b.vectors[j]) for j in setdiff(1:length(a.vectors), exclude_m))
+    prod(dot(a.vectors[j], b.vectors[j]) for j in setdiff(eachindex(a.vectors), exclude_m))
 
 function cross_term_gradU(
     components::Vector{RankOneTensor{T}},
@@ -453,7 +453,7 @@ function cross_term_gradU(
     m::Int,
 ) where {T<:AbstractFloat}
     out = zeros(T, length(components[k].vectors[m]))
-    for l in setdiff(1:length(components), k)
+    for l in setdiff(eachindex(components), k)
         coef =
             components[l].λ * cross_component_except_mode(components[k], components[l], m)
         out .+= coef .* components[l].vectors[m]
@@ -470,8 +470,8 @@ gradU_column_cp(
 
 cp_reconstruction_norm2(components::Vector{RankOneTensor{T}}) where {T<:AbstractFloat} =
     sum(
-        cross_component(components[i], components[j]) for i = 1:length(components),
-        j = 1:length(components)
+        cross_component(components[i], components[j]) for i in eachindex(components),
+        j in eachindex(components)
     )
 
 function cp_inner_AX(
@@ -479,7 +479,8 @@ function cp_inner_AX(
     components::Vector{RankOneTensor{T}},
 ) where {T<:AbstractFloat,N}
     return sum(
-        components[k].λ * rank1_inner(A, components[k].vectors) for k = 1:length(components)
+        components[k].λ * rank1_inner(A, components[k].vectors) for
+        k in eachindex(components)
     )
 end
 
@@ -546,5 +547,5 @@ function components_from_factors(
 ) where {T<:AbstractFloat}
     r = length(λ)
     N = length(U)
-    return [RankOneTensor(λ[k], [Vector(U[m][:, k]) for m = 1:N]) for k = 1:r]
+    return [RankOneTensor(λ[k], [Vector(@view U[m][:, k]) for m = 1:N]) for k = 1:r]
 end
