@@ -66,7 +66,7 @@ function _tucker_init(M::Manifolds.Tucker, target, init::Symbol)
     A = _reshape_like_tucker(M, target, "Tucker init target")
     if init == :random
         core = randn(T, r...)
-        factors = [_rand_orthonormal_tucker(d[m], r[m], T) for m = 1:length(d)]
+        factors = [_rand_orthonormal_tucker(d[m], r[m], T) for m in eachindex(d)]
         return Manifolds.TuckerPoint(core, factors...)
     end
     if init in (:tucker, :tucker_diag)
@@ -87,7 +87,7 @@ function _tucker_init(M::Manifolds.Tucker, target, init::Symbol)
 
     # fallback to random
     core = randn(T, r...)
-    factors = [_rand_orthonormal_tucker(d[m], r[m], T) for m = 1:length(d)]
+    factors = [_rand_orthonormal_tucker(d[m], r[m], T) for m in eachindex(d)]
     return Manifolds.TuckerPoint(core, factors...)
 end
 

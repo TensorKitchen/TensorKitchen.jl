@@ -63,7 +63,7 @@ function _manifold_egrad(M::Manifolds.Segre, p, residual)
     λ = parts[1][1]
     grad_λ = rank1_inner_parts(R, parts)
     grad_U = Vector{Vector{eltype(R)}}(undef, length(dims))
-    @inbounds for m = 1:length(dims)
+    @inbounds for m in eachindex(dims)
         g = rank1_mode_contract_parts(R, parts, m)
         rmul!(g, λ)
         grad_U[m] = g
@@ -160,7 +160,7 @@ target tensor.
 function _validate_join_ambient_compatibility(manifolds::Tuple, target::AbstractArray)
     target_len = length(target)
     failures = String[]
-    @inbounds for k = 1:length(manifolds)
+    @inbounds for k in eachindex(manifolds)
         mk = ambient_length(manifolds[k])
         if mk != target_len
             push!(
