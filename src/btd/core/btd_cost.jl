@@ -3,9 +3,11 @@
 function _check_tucker_block(pb, b)
     pb isa Manifolds.TuckerPoint && return nothing
 
-    throw(ArgumentError(
-        "BTD cost expects TuckerPoint blocks, got $(typeof(pb)) at block $b.",
-    ))
+    throw(
+        ArgumentError(
+            "BTD cost expects TuckerPoint blocks, got $(typeof(pb)) at block $b.",
+        ),
+    )
 end
 
 function _btd_cost(backend::BTDBackend, p)
@@ -39,5 +41,4 @@ function _btd_cost(backend::BTDBackend, p)
     return s / 2
 end
 
-cost(model::JoinModel{<:AbstractFloat,<:BTDBackend}, p) =
-    _btd_cost(model.backend, p)
+cost(model::JoinModel{<:AbstractFloat,<:BTDBackend}, p) = _btd_cost(model.backend, p)

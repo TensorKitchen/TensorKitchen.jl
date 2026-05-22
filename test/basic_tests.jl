@@ -510,7 +510,10 @@ end
     @test hasproperty(trace_info, :component_trace_metric_rgrad_top1_share_history)
     @test hasproperty(trace_info, :component_trace_ambient_velocity_top1_share_history)
     @test hasproperty(trace_info, :component_trace_metric_rgrad_argmax_component_history)
-    @test hasproperty(trace_info, :component_trace_ambient_velocity_argmax_component_history)
+    @test hasproperty(
+        trace_info,
+        :component_trace_ambient_velocity_argmax_component_history,
+    )
     @test hasproperty(trace_info, :component_trace_metric_rgrad_argmax_component_final)
     @test hasproperty(trace_info, :component_trace_ambient_velocity_argmax_component_final)
     @test hasproperty(trace_info, :component_trace_start_rel_error)
@@ -537,7 +540,8 @@ end
         energies in trace_info.component_trace_metric_rgrad_energy_history
     )
     @test all(
-        length(vel) == r for vel in trace_info.component_trace_ambient_component_velocity_history
+        length(vel) == r for
+        vel in trace_info.component_trace_ambient_component_velocity_history
     )
     @test all(isfinite, trace_info.component_trace_max_delta_history)
     @test all(
@@ -727,9 +731,7 @@ end
     @test reconstruct_cpd_rankr(q.lambda, q.factors) ≈ A_ref
     @test all(q.lambda .>= 0)
     @test all(F -> all(F .>= 0), q.factors)
-    @test all(
-        isapprox(norm(q.factors[m][:, k]), 1; atol = 1e-10) for m = 1:3 for k = 1:r
-    )
+    @test all(isapprox(norm(q.factors[m][:, k]), 1; atol = 1e-10) for m = 1:3 for k = 1:r)
 
     rng = MersenneTwister(77)
     comps =
