@@ -80,7 +80,7 @@ function fit_cp_rals(
             for m in reverse(others)
                 local_idx = findfirst(==(m), others)
                 rows = [c[local_idx] for c in coords]
-                Z_s .*= U[m][rows, :]
+                Z_s .*= @view U[m][rows, :]
             end
 
             # 3. Sample Tensor Fibers X_s (Size: samples x dims[n])

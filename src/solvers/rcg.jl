@@ -31,7 +31,7 @@ function ManifoldsBase.vector_transport_to(
     T = promote_type(eltype(_unwrap_part(xparts[1])), eltype(_unwrap_part(qparts[1])))
     ν = T(_unwrap_part(xparts[1])[1])
     Udot = Vector{Vector{T}}(undef, length(xparts) - 1)
-    @inbounds for m = 1:length(Udot)
+    @inbounds for m in eachindex(Udot)
         xm = Vector{T}(_unwrap_part(xparts[m+1]))
         qm = _unwrap_part(qparts[m+1])
         length(xm) == length(qm) ||
@@ -58,7 +58,7 @@ function ManifoldsBase.vector_transport_to!(
             "Segre transport destination part count mismatch: $(length(yparts)) vs $(length(newparts)).",
         ),
     )
-    @inbounds for k = 1:length(newparts)
+    @inbounds for k in eachindex(newparts)
         yparts[k] = newparts[k]
     end
     return Y

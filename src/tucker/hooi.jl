@@ -43,7 +43,7 @@ function hooi(
             Yk = unfold_mode(Y, k)
             F = svd(Yk)
             rk = min(ranks[k], size(F.U, 2))
-            factors[k] = F.U[:, 1:rk]
+            factors[k] = Matrix(@view F.U[:, 1:rk])
             prefix = mode_n_product(prefix, factors[k]', k)
         end
 
