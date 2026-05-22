@@ -20,7 +20,7 @@ function unpack_rankr_native(p, dims::NTuple{N,Int}, r::Int) where {N}
         )
         λ[k] = comp[1][1]
         for m = 1:d
-            U[m][:, k] .= comp[m+1]
+            @views U[m][:, k] .= comp[m+1]
         end
     end
     return λ, U
@@ -47,7 +47,7 @@ function unpack_rankr_canonical(p, dims::NTuple{N,Int}, r::Int) where {N}
                     "mode $m, component $k has length $(length(uk)), expected $(dims[m])",
                 ),
             )
-            Um[:, k] .= uk
+            @views Um[:, k] .= uk
         end
         U[m] = Um
     end
@@ -65,7 +65,7 @@ function unpack_rankr_join(p, dims::NTuple{N,Int}, r::Int) where {N}
         λ[k] = parts[idx][1]
         idx += 1
         for m = 1:N
-            U[m][:, k] .= parts[idx]
+            @views U[m][:, k] .= parts[idx]
             idx += 1
         end
     end
@@ -75,7 +75,7 @@ end
 function pack_point_rank1(λ::T, U::Vector{Vector{T}}) where {T<:AbstractFloat}
     parts = Vector{Vector{T}}(undef, length(U) + 1)
     parts[1] = T[λ]
-    @inbounds for i = 1:length(U)
+    @inbounds for i in eachindex(U)
         parts[i+1] = U[i]
     end
     return ArrayPartition(parts...)
@@ -150,9 +150,9 @@ function unpack_point_rank1(
     λ̃ = p[1]
     U = Vector{Vector{T}}(undef, length(dims))
     idx = 2
-    for m = 1:length(dims)
+    for m in eachindex(dims)
         n = dims[m]
-        U[m] = p[idx:(idx+n-1)]
+        U[m] = copy(@view p[idx:(idx+n-1)])
         idx += n
     end
     return λ̃, U
@@ -174,7 +174,8 @@ function unpack_point_rankr(
         idx = b + 2
         for m = 1:d
             n = dims[m]
-            U[m][:, k] = p[idx:(idx+n-1)]
+            src = @view p[idx:(idx+n-1)]
+            @views U[m][:, k] .= src
             idx += n
         end
     end
@@ -186,5 +187,5 @@ function pack_point_rank1_to_vector(λ̃::T, U::Vector{Vector{T}}) where {T}
 end
 
 function pack_point_rankr_to_vector(λ::Vector{T}, U::Vector{Matrix{T}}, r::Int) where {T}
-    return vcat((vcat(λ[k], (U[m][:, k] for m = 1:length(U))...) for k = 1:r)...)
+    return vcat((vcat(λ[k], ((@view U[m][:, k]) for m in eachindex(U))...) for k = 1:r)...)
 end

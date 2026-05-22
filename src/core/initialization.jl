@@ -164,7 +164,7 @@ function _cp_init_factors_from_rank1_point(
             ),
         )
         λ = [lambda(p0)[1]]
-        U = [reshape(Vector(F[:, 1]), :, 1) for F in factors(p0)]
+        U = [reshape(Vector(@view F[:, 1]), :, 1) for F in factors(p0)]
     elseif p0 isa CPDResult
         λ = weights(p0)
         length(λ) == 1 || throw(
@@ -173,7 +173,7 @@ function _cp_init_factors_from_rank1_point(
             ),
         )
         λ = [λ[1]]
-        U = [reshape(Vector(F[:, 1]), :, 1) for F in factors(p0)]
+        U = [reshape(Vector(@view F[:, 1]), :, 1) for F in factors(p0)]
     else
         λ0, U0 = unpack_point_rank1(p0, dims)
         λ = [λ0]
@@ -199,7 +199,7 @@ end
 function random_unit_matrix(n::Int, r::Int, ::Type{T} = Float64) where {T<:AbstractFloat}
     U = zeros(T, n, r)
     for k = 1:r
-        U[:, k] = random_unit_vector(n, T)
+        @views U[:, k] .= random_unit_vector(n, T)
     end
     return U
 end
