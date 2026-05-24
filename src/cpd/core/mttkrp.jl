@@ -63,16 +63,16 @@ function khatri_rao(mats::AbstractVector{<:AbstractMatrix{T}}) where {T<:Abstrac
         size(m, 2) == r || throw(ArgumentError("khatri_rao: column counts must match"))
     end
     out = copy(mats[1])
-    for i = 2:length(mats)
+    for i in Iterators.drop(eachindex(mats), 1)
         A = mats[i]
         new = similar(out, T, size(out, 1) * size(A, 1), r)
         rows_out = size(out, 1)
         rows_A = size(A, 1)
-        @inbounds for k = 1:r
+        @inbounds for k in axes(out, 2)
             idx = 1
-            for io = 1:rows_out
+            for io in axes(out, 1)
                 scale = out[io, k]
-                for ia = 1:rows_A
+                for ia in axes(A, 1)
                     new[idx, k] = scale * A[ia, k]
                     idx += 1
                 end
@@ -111,15 +111,15 @@ function khatri_rao!(
     copyto!(view(out, 1:rows_cur, :), mats[1])
     src = out
     dst = work
-    for i = 2:length(mats)
+    for i in Iterators.drop(eachindex(mats), 1)
         A = mats[i]
         rows_A = size(A, 1)
         new_rows = rows_cur * rows_A
-        @inbounds for k = 1:r
+        @inbounds for k in axes(out, 2)
             idx = 1
-            for io = 1:rows_cur
+            for io in eachindex(Base.OneTo(rows_cur))
                 scale = src[io, k]
-                for ia = 1:rows_A
+                for ia in axes(A, 1)
                     dst[idx, k] = scale * A[ia, k]
                     idx += 1
                 end
@@ -209,19 +209,24 @@ function _mttkrp_direct3!(
     mode::Int,
 ) where {T<:AbstractFloat}
     I, J, K = size(A)
+    k_axis = axes(U[3], 1)
     fill!(out, zero(T))
     if mode == 1
-        @inbounds for k = 1:K
+        @inbounds for kk in eachindex(k_axis)
+            k = k_axis[kk]
             mul!(tmp, @view(A[:, :, k]), U[2])
             _accumulate_scaled_columns!(out, tmp, @view(U[3][k, :]))
         end
     elseif mode == 2
-        @inbounds for k = 1:K
+        @inbounds for kk in eachindex(k_axis)
+            k = k_axis[kk]
             mul!(tmp, transpose(@view(A[:, :, k])), U[1])
             _accumulate_scaled_columns!(out, tmp, @view(U[3][k, :]))
         end
     elseif mode == 3
-        @inbounds for j = 1:J
+        j_axis = axes(U[2], 1)
+        @inbounds for jj in eachindex(j_axis)
+            j = j_axis[jj]
             mul!(tmp, transpose(reshape(@view(A[:, j, :]), I, K)), U[1])
             _accumulate_scaled_columns!(out, tmp, @view(U[2][j, :]))
         end
@@ -249,32 +254,43 @@ function _mttkrp_direct4!(
     U::AbstractVector{<:AbstractMatrix{T}},
     mode::Int,
 ) where {T<:AbstractFloat}
-    I, J, K, L = size(A)
+    I, _, K, L = size(A)
+    j_axis = axes(U[2], 1)
+    k_axis = axes(U[3], 1)
+    l_axis = axes(U[4], 1)
     fill!(out, zero(T))
     if mode == 1
-        @inbounds for l = 1:L
-            for k = 1:K
+        @inbounds for ll in eachindex(l_axis)
+            l = l_axis[ll]
+            for kk in eachindex(k_axis)
+                k = k_axis[kk]
                 mul!(tmp, @view(A[:, :, k, l]), U[2])
                 _accumulate_scaled_columns!(out, tmp, @view(U[3][k, :]), @view(U[4][l, :]))
             end
         end
     elseif mode == 2
-        @inbounds for l = 1:L
-            for k = 1:K
+        @inbounds for ll in eachindex(l_axis)
+            l = l_axis[ll]
+            for kk in eachindex(k_axis)
+                k = k_axis[kk]
                 mul!(tmp, transpose(@view(A[:, :, k, l])), U[1])
                 _accumulate_scaled_columns!(out, tmp, @view(U[3][k, :]), @view(U[4][l, :]))
             end
         end
     elseif mode == 3
-        @inbounds for l = 1:L
-            for j = 1:J
+        @inbounds for ll in eachindex(l_axis)
+            l = l_axis[ll]
+            for jj in eachindex(j_axis)
+                j = j_axis[jj]
                 mul!(tmp, transpose(reshape(@view(A[:, j, :, l]), I, K)), U[1])
                 _accumulate_scaled_columns!(out, tmp, @view(U[2][j, :]), @view(U[4][l, :]))
             end
         end
     elseif mode == 4
-        @inbounds for k = 1:K
-            for j = 1:J
+        @inbounds for kk in eachindex(k_axis)
+            k = k_axis[kk]
+            for jj in eachindex(j_axis)
+                j = j_axis[jj]
                 mul!(tmp, transpose(reshape(@view(A[:, j, k, :]), I, L)), U[1])
                 _accumulate_scaled_columns!(out, tmp, @view(U[2][j, :]), @view(U[3][k, :]))
             end
@@ -294,7 +310,7 @@ function _mttkrp_contract(
     r = size(U[1], 2)
     out = similar(U[1], T, dims[mode], r)
     fill!(out, zero(T))
-    for k = 1:r
+    for k in eachindex(axes(out, 2))
         @views out[:, k] .= rank1_mode_contract_column(A, U, mode, k)
     end
     return out
@@ -307,7 +323,7 @@ function _mttkrp_contract!(
     mode::Int,
 ) where {T<:AbstractFloat,N}
     r = size(U[1], 2)
-    @inbounds for q = 1:r
+    @inbounds for q in eachindex(axes(out, 2))
         @views out[:, q] .= rank1_mode_contract_column(A, U, mode, q)
     end
     return out
@@ -320,7 +336,7 @@ function _mttkrp_contract(
 ) where {T<:AbstractFloat}
     r = size(U[1], 2)
     out = similar(U[1], T, size(A, mode), r)
-    @inbounds for q = 1:r
+    @inbounds for q in eachindex(axes(out, 2))
         @views out[:, q] .= rank1_mode_contract_column(A, U, mode, q)
     end
     return out
@@ -333,7 +349,7 @@ function _mttkrp_contract(
 ) where {T<:AbstractFloat}
     r = size(U[1], 2)
     out = similar(U[1], T, size(A, mode), r)
-    @inbounds for q = 1:r
+    @inbounds for q in eachindex(axes(out, 2))
         @views out[:, q] .= rank1_mode_contract_column(A, U, mode, q)
     end
     return out
@@ -363,7 +379,7 @@ function mttkrp(
         throw(DimensionMismatch("mttkrp: expected $N factor matrices, got $(length(U))"))
 
     r = size(U[1], 2)
-    for m = 1:N
+    for m in eachindex(U)
         size(U[m], 1) == dims[m] || throw(
             DimensionMismatch(
                 "mttkrp: U[$m] has $(size(U[m], 1)) rows, expected $(dims[m])",
@@ -414,7 +430,7 @@ function mttkrp!(
         throw(DimensionMismatch("mttkrp: expected $N factor matrices, got $(length(U))"))
 
     r = size(U[1], 2)
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(U)
         size(U[m], 1) == dims[m] || throw(
             DimensionMismatch(
                 "mttkrp: U[$m] has $(size(U[m], 1)) rows, expected $(dims[m])",

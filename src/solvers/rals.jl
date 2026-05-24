@@ -31,7 +31,7 @@ function fit_cp_rals(
     else
         init_sym = _builtin_initializer_symbol(init)
         if init_sym == :random
-            (ones(T, r), [Matrix(qr(randn(T, dims[n], r)).Q) for n = 1:N])
+            (ones(T, r), [Matrix(qr(randn(T, dims[n], r)).Q) for n in eachindex(dims)])
         elseif init_sym in (:hosvd, :tucker, :tucker_diag)
             init_cpd_factors(A, r; init = init_sym)
         else
@@ -43,7 +43,7 @@ function fit_cp_rals(
     A_work = A
     if mix
         Q_mix = [Matrix(qr(randn(T, d, d)).Q) for d in dims]
-        for n = 1:N
+        for n in eachindex(dims)
             A_work = mode_n_product(A_work, Q_mix[n], n)
         end
     end
@@ -51,7 +51,7 @@ function fit_cp_rals(
     fit_old = 0.0
     converged = false
     iter_final = maxiter
-    others_indices = [CartesianIndices(Tuple(dims[setdiff(1:N, n)])) for n = 1:N]
+    others_indices = [CartesianIndices(Tuple(dims[setdiff(eachindex(dims), n)])) for n in eachindex(dims)]
     progress =
         maxiter > 0 ?
         (
@@ -71,8 +71,8 @@ function fit_cp_rals(
         ) : NoMethodProgress()
 
     for iter = 1:maxiter
-        for n = 1:N
-            others = setdiff(1:N, n)
+        for n in eachindex(dims)
+            others = setdiff(eachindex(dims), n)
             sample_idx = rand(1:length(others_indices[n]), samples)
             coords = others_indices[n][sample_idx]
 
@@ -87,7 +87,7 @@ function fit_cp_rals(
             # We need to extract A[i, :, k, ...] where (i, k, ...) comes from coords
             # Construct indices for A
             X_s = zeros(T, samples, dims[n])
-            for s = 1:samples
+            for s in eachindex(coords)
                 idx = ntuple(d -> d == n ? Colon() : coords[s][findfirst(==(d), others)], N)
                 X_s[s, :] = A_work[idx...]
             end
@@ -136,7 +136,7 @@ function fit_cp_rals(
 
     # Un-mix factors if needed
     if mix
-        for n = 1:N
+        for n in eachindex(dims)
             # U_orig = Q * U_mixed
             U[n] = Q_mix[n] * U[n]
         end

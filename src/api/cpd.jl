@@ -49,14 +49,6 @@ Base.@kwdef mutable struct _CPDComponentTraceHistory
     ambient_velocity_top3_share_history::Vector{Float64} = Float64[]
     ambient_velocity_effective_components_history::Vector{Float64} = Float64[]
     ambient_velocity_argmax_component_history::Vector{Int} = Int[]
-    # Legacy aliases (coordinate / block-norm rgrad diagnostics).
-    rgrad_energy_history::Vector{Vector{Float64}} = Vector{Float64}[]
-    rgrad_share_history::Vector{Vector{Float64}} = Vector{Float64}[]
-    rgrad_top1_share_history::Vector{Float64} = Float64[]
-    rgrad_top2_share_history::Vector{Float64} = Float64[]
-    rgrad_top3_share_history::Vector{Float64} = Float64[]
-    rgrad_effective_components_history::Vector{Float64} = Float64[]
-    rgrad_argmax_component_history::Vector{Int} = Int[]
     rgrad_failed_count::Int = 0
 end
 
@@ -93,7 +85,7 @@ function _cpd_component_deltas(prev::CPDPoint, curr::CPDPoint)
     U_curr = factors(curr)
     r = length(λ_curr)
     deltas = Vector{Float64}(undef, r)
-    @inbounds for k = 1:r
+    @inbounds for k in eachindex(deltas)
         n_prev = _rankone_norm2(λ_prev, U_prev, k)
         n_curr = _rankone_norm2(λ_curr, U_curr, k)
         cross = _rankone_inner(λ_prev, U_prev, λ_curr, U_curr, k)
@@ -142,7 +134,7 @@ end
 function _cpd_coordinate_rgrad_energy_from_blocks(gλ, gU)
     r = length(gλ)
     energies = zeros(Float64, r)
-    @inbounds for k = 1:r
+    @inbounds for k in eachindex(energies)
         energies[k] += abs2(Float64(gλ[k]))
         for m in eachindex(gU)
             energies[k] += sum(abs2, @view gU[m][:, k])
@@ -191,7 +183,7 @@ end
 function _cpd_join_component_metric_energy(M::ProductManifold, p, g, k::Int, d::Int)
     base = (k - 1) * (d + 1)
     energy = 0.0
-    @inbounds for b = 1:(d+1)
+    @inbounds for b in eachindex(Base.OneTo(d + 1))
         energy += _cpd_product_block_metric_energy(M, p, g, base + b)
     end
     return energy
@@ -209,7 +201,7 @@ function _cpd_canonical_component_metric_energy(M::ProductManifold, p, g, k::Int
     pp = point_parts(p)
     gp = point_parts(g)
     energy = abs2(Float64(gp[1][k]))
-    @inbounds for m = 1:d
+    @inbounds for m in eachindex(Base.OneTo(d))
         mode_M = factors[m+1]
         energy += Float64(
             ManifoldsBase.inner(mode_M.manifolds[k], pp[m+1][k], gp[m+1][k], gp[m+1][k]),
@@ -232,11 +224,11 @@ function _cpd_component_metric_rgrad_energies(model::RankRCPDModel, p, g)
     if M isa ProductManifold
         nf = length(M.manifolds)
         if nf == r * (d + 1)
-            return [_cpd_join_component_metric_energy(M, p, g, k, d) for k = 1:r]
+            return [_cpd_join_component_metric_energy(M, p, g, k, d) for k in eachindex(Base.OneTo(r))]
         elseif nf == r
-            return [_cpd_native_component_metric_energy(M, p, g, k) for k = 1:r]
+            return [_cpd_native_component_metric_energy(M, p, g, k) for k in eachindex(Base.OneTo(r))]
         elseif nf == d + 1
-            return [_cpd_canonical_component_metric_energy(M, p, g, k, d) for k = 1:r]
+            return [_cpd_canonical_component_metric_energy(M, p, g, k, d) for k in eachindex(Base.OneTo(r))]
         end
     end
     return _cpd_component_coordinate_rgrad_energies(model, g)
@@ -314,7 +306,7 @@ function _cpd_component_ambient_velocities(model::RankRCPDModel, p, g)
     U = factors(q)
     r = model.r
     energies = Vector{Float64}(undef, r)
-    @inbounds for k = 1:r
+    @inbounds for k in eachindex(energies)
         δλk, δu = _decoded_tangent_for_component_k(model.geometry, λ̃, Ũ, gλ, gU, k)
         u_cols = [@view U[m][:, k] for m in eachindex(U)]
         energies[k] = _ambient_rankone_tangent_norm2(λ[k], u_cols, δλk, δu)
@@ -367,13 +359,6 @@ function _push_component_energy_trace!(
         push!(hist.coordinate_rgrad_top3_share_history, summary.top3)
         push!(hist.coordinate_rgrad_effective_components_history, summary.effective)
         push!(hist.coordinate_rgrad_argmax_component_history, summary.argmax_component)
-        push!(hist.rgrad_energy_history, energies_f)
-        push!(hist.rgrad_share_history, summary.shares)
-        push!(hist.rgrad_top1_share_history, summary.top1)
-        push!(hist.rgrad_top2_share_history, summary.top2)
-        push!(hist.rgrad_top3_share_history, summary.top3)
-        push!(hist.rgrad_effective_components_history, summary.effective)
-        push!(hist.rgrad_argmax_component_history, summary.argmax_component)
     elseif kind == :metric
         push!(hist.metric_rgrad_energy_history, energies_f)
         push!(hist.metric_rgrad_share_history, summary.shares)
@@ -492,33 +477,22 @@ function _cpd_component_trace_info(rec::_CPDComponentTraceRecorder)
         component_trace_ambient_velocity_top3_share_history = hist.ambient_velocity_top3_share_history,
         component_trace_ambient_velocity_effective_components_history = hist.ambient_velocity_effective_components_history,
         component_trace_ambient_velocity_argmax_component_history = hist.ambient_velocity_argmax_component_history,
-        component_trace_rgrad_energy_history = hist.rgrad_energy_history,
-        component_trace_rgrad_share_history = hist.rgrad_share_history,
-        component_trace_rgrad_top1_share_history = hist.rgrad_top1_share_history,
-        component_trace_rgrad_top2_share_history = hist.rgrad_top2_share_history,
-        component_trace_rgrad_top3_share_history = hist.rgrad_top3_share_history,
-        component_trace_rgrad_effective_components_history = hist.rgrad_effective_components_history,
-        component_trace_rgrad_argmax_component_history = hist.rgrad_argmax_component_history,
         component_trace_rgrad_failed_count = hist.rgrad_failed_count,
-        component_trace_rgrad_top1_share_final = _trace_history_final(
-            hist.rgrad_top1_share_history,
+        component_trace_coordinate_rgrad_top1_share_final = _trace_history_final(
+            hist.coordinate_rgrad_top1_share_history,
             NaN,
         ),
-        component_trace_rgrad_top2_share_final = _trace_history_final(
-            hist.rgrad_top2_share_history,
+        component_trace_coordinate_rgrad_top2_share_final = _trace_history_final(
+            hist.coordinate_rgrad_top2_share_history,
             NaN,
         ),
-        component_trace_rgrad_top3_share_final = _trace_history_final(
-            hist.rgrad_top3_share_history,
+        component_trace_coordinate_rgrad_top3_share_final = _trace_history_final(
+            hist.coordinate_rgrad_top3_share_history,
             NaN,
         ),
-        component_trace_rgrad_effective_components_final = _trace_history_final(
-            hist.rgrad_effective_components_history,
+        component_trace_coordinate_rgrad_effective_components_final = _trace_history_final(
+            hist.coordinate_rgrad_effective_components_history,
             NaN,
-        ),
-        component_trace_rgrad_argmax_component_final = _trace_history_final(
-            hist.rgrad_argmax_component_history,
-            0,
         ),
         component_trace_coordinate_rgrad_argmax_component_final = _trace_history_final(
             hist.coordinate_rgrad_argmax_component_history,

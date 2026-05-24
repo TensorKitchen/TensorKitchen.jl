@@ -52,7 +52,7 @@ function normalize_components!(
     isempty(factors) && return factors
     r = length(lambda)
     d = length(factors)
-    @inbounds for m = 1:d
+    @inbounds for m in eachindex(factors)
         size(factors[m], 2) == r || throw(
             DimensionMismatch("factor $m has $(size(factors[m], 2)) columns, expected $r"),
         )
@@ -84,9 +84,9 @@ function _normalize_components_policy!(
 ) where {T<:AbstractFloat}
     r = length(lambda)
     d = length(factors)
-    @inbounds for k = 1:r
+    @inbounds for k in eachindex(lambda)
         lambda[k] = max(lambda[k], zero(T))
-        for m = 1:d
+        for m in eachindex(factors)
             col = @view factors[m][:, k]
             col .= max.(col, zero(T))
         end
@@ -101,9 +101,9 @@ function _normalize_components_policy!(
 ) where {T<:AbstractFloat}
     r = length(lambda)
     d = length(factors)
-    @inbounds for k = 1:r
+    @inbounds for k in eachindex(lambda)
         scale = lambda[k]
-        for m = 1:d
+        for m in eachindex(factors)
             col = @view factors[m][:, k]
             scale = _normalize_column_into_lambda!(col, scale)
         end

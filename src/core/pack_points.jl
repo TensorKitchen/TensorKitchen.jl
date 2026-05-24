@@ -36,16 +36,16 @@ function pack_rankr_native(
 ) where {T<:AbstractFloat}
     d = length(U)
     length(λ) == r || throw(DimensionMismatch("length(λ)=$(length(λ)) must equal r=$r"))
-    for m = 1:d
+    for m in eachindex(U)
         size(U[m], 2) == r ||
             throw(DimensionMismatch("U[$m] has $(size(U[m],2)) columns, expected r=$r"))
     end
 
     comps = Vector{Vector{Vector{T}}}(undef, r)
-    @inbounds for k = 1:r
+    @inbounds for k in eachindex(λ)
         λk = λ[k]
         Uk = Vector{Vector{T}}(undef, d)
-        for m = 1:d
+        for m in eachindex(U)
             u = Vector{T}(@view U[m][:, k])
             λk = _normalize_column_into_lambda!(u, λk)
             Uk[m] = u
@@ -91,16 +91,16 @@ function pack_rankr_canonical_tuple(
 ) where {T<:AbstractFloat}
     d = length(U)
     length(λ) == r || throw(DimensionMismatch("length(λ)=$(length(λ)) must equal r=$r"))
-    for m = 1:d
+    for m in eachindex(U)
         size(U[m], 2) == r ||
             throw(DimensionMismatch("U[$m] has $(size(U[m],2)) columns, expected r=$r"))
     end
 
     λn = Vector{T}(undef, r)
-    mode_cols = [Vector{Vector{T}}(undef, r) for _ = 1:d]
-    @inbounds for k = 1:r
+    mode_cols = [Vector{Vector{T}}(undef, r) for _ in eachindex(U)]
+    @inbounds for k in eachindex(λ)
         λk = λ[k]
-        for m = 1:d
+        for m in eachindex(U)
             u = Vector{T}(@view U[m][:, k])
             λk = _normalize_column_into_lambda!(u, λk)
             mode_cols[m][k] = u
@@ -118,16 +118,16 @@ function pack_rankr_join_tuple(
 ) where {T<:AbstractFloat}
     d = length(U)
     length(λ) == r || throw(DimensionMismatch("length(λ)=$(length(λ)) must equal r=$r"))
-    for m = 1:d
+    for m in eachindex(U)
         size(U[m], 2) == r ||
             throw(DimensionMismatch("U[$m] has $(size(U[m],2)) columns, expected r=$r"))
     end
     parts = Vector{Vector{T}}(undef, r * (d + 1))
     idx = 1
-    @inbounds for k = 1:r
+    @inbounds for k in eachindex(λ)
         parts[idx] = T[λ[k]]
         idx += 1
-        for m = 1:d
+        for m in eachindex(U)
             parts[idx] = Vector{T}(@view U[m][:, k])
             idx += 1
         end

@@ -6,7 +6,7 @@ function _btd_core_grad_block(backend::BTDBackend, parts, b::Int)
 
     grad_core = copy(Gb)
     grad_core .-= _tucker_project_target(backend, pb, backend.target)
-    @inbounds for c = 1:backend.r
+    @inbounds for c in eachindex(parts)
         c == b && continue
         grad_core .+= _tucker_cross_core(backend, pb, parts[c])
     end
@@ -19,12 +19,12 @@ function _btd_factor_grad_block(backend::BTDBackend, parts, b::Int)
     T = eltype(Gb)
     N = length(Ub)
     grad_factors = Vector{Matrix{T}}(undef, N)
-    core_unfolds = [unfold_mode(Gb, m) for m = 1:N]
-    core_gram_factors = [core_unfolds[m] * transpose(core_unfolds[m]) for m = 1:N]
+    core_unfolds = [unfold_mode(Gb, m) for m in eachindex(Ub)]
+    core_gram_factors = [core_unfolds[m] * transpose(core_unfolds[m]) for m in eachindex(Ub)]
     oneT = one(T)
     zeroT = zero(T)
 
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(Ub)
         Gbm = core_unfolds[m]
         GbmT = transpose(Gbm)
         nmode = size(Ub[m], 1)
@@ -37,7 +37,7 @@ function _btd_factor_grad_block(backend::BTDBackend, parts, b::Int)
 
         mul!(grad_m, Ub[m], core_gram_factors[m], oneT, oneT)
 
-        for c = 1:backend.r
+        for c in eachindex(parts)
             c == b && continue
             _, Uc = _tucker_data(parts[c])
             cross_unfold =

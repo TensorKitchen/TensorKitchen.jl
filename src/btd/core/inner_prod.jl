@@ -186,7 +186,7 @@ function _tucker_tucker_inner(p::Manifolds.TuckerPoint, q::Manifolds.TuckerPoint
         throw(DimensionMismatch("Tucker core/factor count mismatch for second point."))
     N == length(Uq) ||
         throw(DimensionMismatch("Tucker mode count mismatch between points."))
-    @inbounds for k = 1:N
+    @inbounds for k in eachindex(Up)
         size(Up[k], 2) == size(Gp, k) ||
             throw(DimensionMismatch("Tucker factor dimension mismatch for mode $k."))
         size(Uq[k], 2) == size(Gq, k) ||
@@ -196,7 +196,7 @@ function _tucker_tucker_inner(p::Manifolds.TuckerPoint, q::Manifolds.TuckerPoint
     end
 
     Ht = Gq
-    @inbounds for k = 1:N
+    @inbounds for k in eachindex(Up)
         Ht = mode_n_product(Ht, Up[k]' * Uq[k], k)
     end
     return sum(Gp .* Ht)
@@ -226,7 +226,7 @@ function _target_tucker_inner(A::AbstractArray, p::Manifolds.TuckerPoint)
     G, U = _tucker_data(p)
     N = length(U)
     ndims(G) == N || throw(DimensionMismatch("Tucker core/factor count mismatch."))
-    @inbounds for k = 1:N
+    @inbounds for k in eachindex(U)
         size(U[k], 2) == size(G, k) ||
             throw(DimensionMismatch("Tucker factor dimension mismatch for mode $k."))
         size(U[k], 1) == size(A, k) ||

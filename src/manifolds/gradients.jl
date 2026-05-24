@@ -70,7 +70,7 @@ function egrad_to_rgrad(M::Manifolds.Segre, p, egrad)
     out = Vector{Vector{T}}(undef, d + 1)
     out[1] = _grad_vec(gparts[1], T)
     length(out[1]) == 1 || throw(DimensionMismatch("Segre λ-gradient must have length 1."))
-    @inbounds for m = 1:d
+    @inbounds for m in eachindex(Base.OneTo(d))
         u = _grad_vec(parts[m+1], T)
         gm = _grad_vec(gparts[m+1], T)
         length(u) == length(gm) ||
@@ -141,7 +141,7 @@ function _embedded_euclidean_basis_fallback(
     coeff = zeros(T, d)
     e_j = zeros(T, d)
     u = similar(egrad, T, length(egrad))
-    @inbounds for j = 1:d
+    @inbounds for j in eachindex(Base.OneTo(d))
         fill!(e_j, zero(T))
         e_j[j] = one(T)
         ξj = ManifoldsBase.get_vector(M, p, e_j, basis)

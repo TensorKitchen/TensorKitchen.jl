@@ -198,7 +198,7 @@ end
 
 function random_unit_matrix(n::Int, r::Int, ::Type{T} = Float64) where {T<:AbstractFloat}
     U = zeros(T, n, r)
-    for k = 1:r
+    for k in axes(U, 2)
         @views U[:, k] .= random_unit_vector(n, T)
     end
     return U
@@ -209,7 +209,7 @@ function _tucker_diag(core::AbstractArray{T}, r::Int) where {T<:AbstractFloat}
     out = zeros(T, r)
     maxr = minimum(size(core))
     rr = min(r, maxr)
-    for k = 1:rr
+    for k in eachindex(Base.OneTo(rr))
         idx = ntuple(_ -> k, N)
         out[k] = core[idx...]
     end

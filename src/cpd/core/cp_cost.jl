@@ -161,7 +161,7 @@ function _inner_from_mttkrp_first_mode(
 ) where {T<:AbstractFloat}
     r = size(M1, 2)
     inner = Vector{T}(undef, r)
-    @inbounds for k = 1:r
+    @inbounds for k in eachindex(inner)
         inner[k] = dot(@view(U[1][:, k]), @view(M1[:, k]))
     end
     return inner
@@ -181,8 +181,8 @@ function _CPRankrEvalCache(
     dims::NTuple{N,Int},
     r::Int,
 ) where {T<:AbstractFloat,N}
-    contracts = [Matrix{T}(undef, dims[m], r) for m = 1:N]
-    grams = [Matrix{T}(undef, r, r) for _ = 1:N]
+    contracts = [Matrix{T}(undef, dims[m], r) for m in eachindex(dims)]
+    grams = [Matrix{T}(undef, r, r) for _ in eachindex(dims)]
     return _CPRankrEvalCache{T}(
         nothing,
         false,
@@ -226,13 +226,13 @@ function _cp_rankr_refresh_cache!(
         return cache
     end
 
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(U)
         copyto!(cache.contracts[m], mttkrp(A, U, m; method))
         mul!(cache.grams[m], transpose(U[m]), U[m])
     end
 
     fill!(cache.cross_mat, one(T))
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(U)
         cache.cross_mat .*= cache.grams[m]
     end
 
@@ -265,9 +265,9 @@ function _rankr_gradU_from_terms(
     r = length(λ)
     gradU = Vector{Matrix{T}}(undef, Nmodes)
     λouter = λ * transpose(λ)
-    @inbounds for m = 1:Nmodes
+    @inbounds for m in eachindex(U)
         prod_except = ones(T, r, r)
-        for j = 1:Nmodes
+        for j in eachindex(U)
             j == m && continue
             prod_except .*= grams[j]
         end
@@ -321,7 +321,7 @@ function egrad_secant_rankr(
         Nmodes = length(U)
 
         contracts = Vector{Matrix{T}}(undef, Nmodes)
-        for m = 1:Nmodes
+        for m in eachindex(U)
             contracts[m] = mttkrp(A, U, m; method = :auto)
         end
 
@@ -333,9 +333,9 @@ function egrad_secant_rankr(
         gradU = _rankr_gradU_from_terms(U, λ, contracts, grams)
 
         if scale_by_lambda
-            for k = 1:r
+            for k in eachindex(λ)
                 λ_abs = max(abs(λ[k]), lambda_eps_T)
-                for m = 1:Nmodes
+                for m in eachindex(gradU)
                     gradU[m][:, k] ./= λ_abs
                 end
             end
@@ -357,7 +357,7 @@ end
         throw(DimensionMismatch("expected $(N+1) tuple parts, got $(length(parts))"))
     λ = parts[1]
     length(λ) == r || throw(DimensionMismatch("expected λ length $r, got $(length(λ))"))
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(Ubuf)
         mode_m = parts[m+1]
         length(mode_m) == r ||
             throw(DimensionMismatch("mode $m has $(length(mode_m)) vectors, expected $r"))
@@ -367,7 +367,7 @@ end
         else
             Um = Ubuf[m]
         end
-        for k = 1:r
+        for k in eachindex(Base.OneTo(r))
             uk = mode_m[k]
             length(uk) == dims[m] || throw(
                 DimensionMismatch(
@@ -429,9 +429,9 @@ function egrad_rankr_canonical(
         gradU = _rankr_gradU_from_terms(Ubuf, λ, cache.contracts, cache.grams)
 
         if scale_by_lambda
-            for k = 1:r
+            for k in eachindex(λ)
                 λ_abs = max(abs(λ[k]), lambda_eps_T)
-                for m = 1:Nmodes
+                for m in eachindex(gradU)
                     gradU[m][:, k] ./= λ_abs
                 end
             end
@@ -491,17 +491,17 @@ function egrad_rankr_native(
         gradU = _rankr_gradU_from_terms(U, λ, cache.contracts, cache.grams)
 
         if scale_by_lambda
-            for k = 1:r
+            for k in eachindex(λ)
                 λ_abs = max(abs(λ[k]), lambda_eps_T)
-                for m = 1:Nmodes
+                for m in eachindex(gradU)
                     gradU[m][:, k] ./= λ_abs
                 end
             end
         end
 
         grad_parts = Vector{Vector{Vector{T}}}(undef, r)
-        @inbounds for k = 1:r
-            grad_Uk = [Vector(@view gradU[m][:, k]) for m = 1:Nmodes]
+        @inbounds for k in eachindex(grad_parts)
+            grad_Uk = [Vector(@view gradU[m][:, k]) for m in eachindex(gradU)]
             grad_parts[k] = pack_tangent_rank1_segre(grad_λ[k], grad_Uk)
         end
 

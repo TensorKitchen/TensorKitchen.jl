@@ -501,9 +501,9 @@ end
     @test hasproperty(trace_info, :component_trace_iterations)
     @test hasproperty(trace_info, :component_trace_max_delta_history)
     @test hasproperty(trace_info, :component_trace_delta_history)
-    @test hasproperty(trace_info, :component_trace_rgrad_top1_share_history)
-    @test hasproperty(trace_info, :component_trace_rgrad_top3_share_history)
-    @test hasproperty(trace_info, :component_trace_rgrad_effective_components_history)
+    @test hasproperty(trace_info, :component_trace_coordinate_rgrad_top1_share_history)
+    @test hasproperty(trace_info, :component_trace_coordinate_rgrad_top3_share_history)
+    @test hasproperty(trace_info, :component_trace_coordinate_rgrad_effective_components_history)
     @test hasproperty(trace_info, :component_trace_coordinate_rgrad_energy_history)
     @test hasproperty(trace_info, :component_trace_metric_rgrad_energy_history)
     @test hasproperty(trace_info, :component_trace_ambient_component_velocity_history)
@@ -524,11 +524,11 @@ end
           length(trace_info.component_trace_max_delta_history)
     @test length(trace_info.component_trace_delta_history) ==
           length(trace_info.component_trace_max_delta_history)
-    @test length(trace_info.component_trace_rgrad_top1_share_history) ==
+    @test length(trace_info.component_trace_coordinate_rgrad_top1_share_history) ==
           length(trace_info.component_trace_iterations)
-    @test length(trace_info.component_trace_rgrad_top3_share_history) ==
+    @test length(trace_info.component_trace_coordinate_rgrad_top3_share_history) ==
           length(trace_info.component_trace_iterations)
-    @test length(trace_info.component_trace_rgrad_effective_components_history) ==
+    @test length(trace_info.component_trace_coordinate_rgrad_effective_components_history) ==
           length(trace_info.component_trace_iterations)
     @test length(trace_info.component_trace_metric_rgrad_top1_share_history) ==
           length(trace_info.component_trace_iterations)
@@ -546,26 +546,26 @@ end
     @test all(isfinite, trace_info.component_trace_max_delta_history)
     @test all(
         x -> isnan(x) || -1e-12 <= x <= 1 + 1e-12,
-        trace_info.component_trace_rgrad_top1_share_history,
+        trace_info.component_trace_coordinate_rgrad_top1_share_history,
     )
     @test all(
         x -> isnan(x) || -1e-12 <= x <= 1 + 1e-12,
-        trace_info.component_trace_rgrad_top3_share_history,
+        trace_info.component_trace_coordinate_rgrad_top3_share_history,
     )
     @test all(
         zip(
-            trace_info.component_trace_rgrad_top1_share_history,
-            trace_info.component_trace_rgrad_top3_share_history,
+            trace_info.component_trace_coordinate_rgrad_top1_share_history,
+            trace_info.component_trace_coordinate_rgrad_top3_share_history,
         ),
     ) do (top1, top3)
         isnan(top1) || isnan(top3) || top1 <= top3 + 1e-12
     end
     @test all(
         x -> isnan(x) || 1 <= x <= r,
-        trace_info.component_trace_rgrad_effective_components_history,
+        trace_info.component_trace_coordinate_rgrad_effective_components_history,
     )
-    @test trace_info.component_trace_rgrad_argmax_component_final ==
-          trace_info.component_trace_rgrad_argmax_component_history[end]
+    @test trace_info.component_trace_coordinate_rgrad_argmax_component_final ==
+          trace_info.component_trace_coordinate_rgrad_argmax_component_history[end]
     @test trace_info.component_trace_metric_rgrad_argmax_component_final ==
           trace_info.component_trace_metric_rgrad_argmax_component_history[end]
     @test trace_info.component_trace_ambient_velocity_argmax_component_final ==

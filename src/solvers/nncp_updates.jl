@@ -104,7 +104,7 @@ function _nncp_nnls_row_update!(
 ) where {T<:AbstractFloat}
     floor = sqrt(eps(T))
     mul!(work, V, x)
-    @inbounds for _ = 1:max_cd_sweeps
+    @inbounds for _ in eachindex(Base.OneTo(max_cd_sweeps))
         max_delta = zero(T)
         max_x = maximum(x)
         for k in eachindex(x)
@@ -135,7 +135,7 @@ function _nncp_nnls_row_update!(
 ) where {T<:AbstractFloat}
     floor = sqrt(eps(T))
     d = max.(diag(V), floor)
-    @inbounds for _ = 1:max_cd_sweeps
+    @inbounds for _ in eachindex(Base.OneTo(max_cd_sweeps))
         mul!(work, V, x)
         x_new = max.(x .- (work .- g) ./ d, floor)
         max_delta = maximum(abs.(x_new .- x))
@@ -177,7 +177,7 @@ function _nncp_nnls_mode_update!(
     floor = sqrt(eps(T))
     d = max.(diag(V), floor)
     d_row = reshape(d, 1, :)
-    @inbounds for _ = 1:max_cd_sweeps
+    @inbounds for _ in eachindex(Base.OneTo(max_cd_sweeps))
         mul!(work, U, V)
         U_new = max.(U .- (work .- M_mttkrp) ./ d_row, floor)
         max_delta = maximum(abs.(U_new .- U))
@@ -278,7 +278,7 @@ function _projected_grad_norm_nonnegative!(
 ) where {T<:AbstractFloat,N}
     sq = zero(T)
     u_sq = zero(T)
-    for n = 1:N
+    for n in eachindex(U)
         _hadamard_G_except!(V, grams, n)
         M_mttkrp = mttkrp!(
             mttkrp_bufs[n],

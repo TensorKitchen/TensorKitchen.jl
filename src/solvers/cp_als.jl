@@ -62,27 +62,27 @@ function CPALSWorkspace(
     r::Int;
     mttkrp_method::Symbol = :auto,
 ) where {T<:AbstractFloat,N}
-    Gs = [_cp_als_matrix_workspace_like(A, r, r) for _ = 1:N]
+    Gs = [_cp_als_matrix_workspace_like(A, r, r) for _ in eachindex(dims)]
     V = _cp_als_matrix_workspace_like(A, r, r)
-    transposed_work = [_cp_als_matrix_workspace_like(A, r, dims[n]) for n = 1:N]
-    denom_work = [_cp_als_matrix_workspace_like(A, dims[n], r) for n = 1:N]
-    mttkrp_bufs = [_cp_als_matrix_workspace_like(A, dims[n], r) for n = 1:N]
+    transposed_work = [_cp_als_matrix_workspace_like(A, r, dims[n]) for n in eachindex(dims)]
+    denom_work = [_cp_als_matrix_workspace_like(A, dims[n], r) for n in eachindex(dims)]
+    mttkrp_bufs = [_cp_als_matrix_workspace_like(A, dims[n], r) for n in eachindex(dims)]
     total_dim_prod = prod(dims)
     resolved_mttkrp_methods =
-        [_mttkrp_resolve_method(mttkrp_method, dims, r, n) for n = 1:N]
+        [_mttkrp_resolve_method(mttkrp_method, dims, r, n) for n in eachindex(dims)]
     mttkrp_tmp_work = Any[
         _mttkrp_needs_tmp_workspace(resolved_mttkrp_methods[n]) ?
-        _cp_als_matrix_workspace_like(A, dims[n], r) : nothing for n = 1:N
+        _cp_als_matrix_workspace_like(A, dims[n], r) : nothing for n in eachindex(dims)
     ]
     mttkrp_kr_work = Any[
         _mttkrp_needs_kr_workspace(resolved_mttkrp_methods[n]) ?
         _cp_als_matrix_workspace_like(A, div(total_dim_prod, dims[n]), r) : nothing for
-        n = 1:N
+        n in eachindex(dims)
     ]
     mttkrp_kr_work2 = Any[
         _mttkrp_needs_kr_workspace(resolved_mttkrp_methods[n]) ?
         _cp_als_matrix_workspace_like(A, div(total_dim_prod, dims[n]), r) : nothing for
-        n = 1:N
+        n in eachindex(dims)
     ]
     cross_buf = _cp_als_matrix_workspace_like(A, r, r)
     return CPALSWorkspace(
@@ -189,7 +189,7 @@ function _cp_als_stats(
         copyto!(cross, Gs[1])
     end
 
-    @inbounds for m = 2:length(Gs)
+    @inbounds for m in Iterators.drop(eachindex(Gs), 1)
         cross .*= Gs[m]
     end
     normX2 = zero(T)
@@ -287,7 +287,7 @@ function fit_cp_als(
 
     workspace = CPALSWorkspace(A, dims, r; mttkrp_method = mttkrp_method)
     Gs = workspace.Gs
-    @inbounds for n = 1:N
+    @inbounds for n in eachindex(U)
         _update_G!(Gs[n], U[n])
     end
     V = workspace.V
@@ -307,7 +307,7 @@ function fit_cp_als(
     for iter = 1:maxiter
         pg_sq = zero(T)
         u_sq = zero(T)
-        for n = 1:N
+        for n in eachindex(U)
             _hadamard_G_except!(V, Gs, n)
             M_mttkrp = mttkrp!(
                 mttkrp_bufs[n],

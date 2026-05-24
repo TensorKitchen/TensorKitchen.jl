@@ -70,7 +70,7 @@ function _btd_sequential_tucker_init(model::JoinModel{<:AbstractFloat,<:BTDBacke
     # same full-tensor fit into every block.
     residual = copy(backend.target)
     parts = Vector{Manifolds.TuckerPoint{eltype(backend.target)}}(undef, backend.r)
-    for k = 1:backend.r
+    for k in eachindex(parts)
         pk = _manifold_init(backend.manifolds[k], residual, init)
         parts[k] = pk
         _subtract_ambient_tensor!(
@@ -85,7 +85,7 @@ end
 
 function _btd_block_ranks_by_mode(backend::BTDBackend{T,N}) where {T,N}
     ranks = Vector{NTuple{N,Int}}(undef, backend.r)
-    for b = 1:backend.r
+    for b in eachindex(backend.manifolds)
         M = backend.manifolds[b]
         M isa Manifolds.Tucker || throw(
             ArgumentError(
@@ -131,7 +131,7 @@ end
 
 function _btd_project_core(A::AbstractArray{T,N}, factors) where {T<:AbstractFloat,N}
     core = A
-    for mode = 1:N
+    for mode in eachindex(factors)
         core = mode_n_product(core, factors[mode]', mode)
     end
     return core
@@ -145,14 +145,14 @@ function _btd_hosvd_split_candidate(
     candidate::Int,
 ) where {T<:AbstractFloat,N}
     columns_by_mode = ntuple(N) do mode
-        ranks_m = [ranks_by_block[b][mode] for b = 1:backend.r]
+        ranks_m = [ranks_by_block[b][mode] for b in eachindex(ranks_by_block)]
         _btd_split_columns(rng, size(subspaces[mode], 2), ranks_m, candidate)
     end
 
     residual = copy(backend.target)
     # Candidate blocks are always Tucker points here
     parts = Vector{Manifolds.TuckerPoint{T}}(undef, backend.r)
-    for b = 1:backend.r
+    for b in eachindex(parts)
         factors =
             ntuple(mode -> Matrix(@view subspaces[mode][:, columns_by_mode[mode][b]]), N)
         core = _btd_project_core(residual, factors)
@@ -234,7 +234,7 @@ function initial_point(
     best_cost = Inf
     split_candidate = 1
 
-    for c = 1:init.candidates
+    for c in eachindex(Base.OneTo(init.candidates))
         p_candidate = if init.include_sequential && c == 1
             _btd_sequential_tucker_init(model, :sthosvd)
         else

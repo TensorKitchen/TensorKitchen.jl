@@ -41,12 +41,12 @@ end
 
 function _join_product(base::Manifolds.Segre, r::Int)
     factors = _segre_flat_factors(base)
-    return ProductManifold([deepcopy(f) for _ = 1:r for f in factors]...)
+    return ProductManifold([deepcopy(f) for _ in eachindex(Base.OneTo(r)) for f in factors]...)
 end
 
 function _join_product(base::ProductManifold, r::Int)
     factors = base.manifolds
-    return ProductManifold([deepcopy(f) for _ = 1:r for f in factors]...)
+    return ProductManifold([deepcopy(f) for _ in eachindex(Base.OneTo(r)) for f in factors]...)
 end
 
 function _join_product(base::AbstractManifold, r::Int)

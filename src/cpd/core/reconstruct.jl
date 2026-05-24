@@ -18,8 +18,8 @@ function reconstruct_cp_rank1(
     isempty(U) && throw(ArgumentError("reconstruct_cp_rank1: empty factor vectors"))
     N = length(U)
     # A[i1,...,iN] = λ * u1[i1] * u2[i2] * ... * uN[iN] — outer product scaled by λ
-    tensors = [vec(U[m]) for m = 1:N]
-    return T(λ) .* ncon(tensors, [[-m] for m = 1:N])
+    tensors = [vec(U[m]) for m in eachindex(U)]
+    return T(λ) .* ncon(tensors, [[-m] for m in eachindex(U)])
 end
 
 """Rank-r CP from (λ, U). Batched broadcast + sum over r."""
@@ -27,7 +27,7 @@ function reconstruct_cpd_rankr(λ::Vector{T}, U::Vector{Matrix{T}}) where {T<:Ab
     (isempty(U) || isempty(λ)) &&
         throw(ArgumentError("reconstruct_cpd_rankr: empty factors or λ"))
     r, N = length(λ), length(U)
-    for m = 1:N
+    for m in eachindex(U)
         size(U[m], 2) == r || throw(
             DimensionMismatch(
                 "reconstruct_cpd_rankr: U[$m] has $(size(U[m],2)) cols, expected r=$r",
@@ -56,7 +56,7 @@ function reconstruct_cpd_rankr(
                 "reconstruct_cpd_rankr: component $k has $(length(components[k].vectors)) modes",
             ),
         )
-        for m = 1:N
+        for m in eachindex(components[1].vectors)
             length(components[k].vectors[m]) == length(components[1].vectors[m]) || throw(
                 DimensionMismatch(
                     "reconstruct_cpd_rankr: component $k mode $m incompatible",
@@ -65,7 +65,7 @@ function reconstruct_cpd_rankr(
         end
     end
     λ = [c.λ for c in components]
-    U = [hcat((c.vectors[m] for c in components)...) for m = 1:N]
+    U = [hcat((c.vectors[m] for c in components)...) for m in eachindex(components[1].vectors)]
     return reconstruct_cpd_rankr(λ, U)
 end
 

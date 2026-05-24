@@ -38,7 +38,7 @@ function Rank1CPDModel(
         factors[1] =
             use_softplus_metric ? SoftplusEuclidean(1; ε = pullback_eps) :
             (use_pullback_metric ? SqEuclidean(1; ε = pullback_eps) : Euclidean(1))
-        @inbounds for m = 1:N
+        @inbounds for m in eachindex(dims)
             factors[m+1] =
                 use_softplus_metric ? SoftplusEuclidean(dims[m]; ε = pullback_eps) :
                 (

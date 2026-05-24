@@ -36,11 +36,11 @@ function _cp_core_diag_init(core::AbstractArray{T,N}, r::Int) where {T<:Abstract
     core_dims = size(core)
     λ0 = _tucker_diag(core, r)
     U0 = Vector{Matrix{T}}(undef, N)
-    for m = 1:N
+    for m in eachindex(core_dims)
         rm = core_dims[m]
         Um = fill!(similar(core, rm, r), zero(T))
         n_eye = min(rm, r)
-        for k = 1:n_eye
+        for k in eachindex(Base.OneTo(n_eye))
             Um[k, k] = one(T)
         end
         if rm > 0 && r > n_eye
@@ -77,7 +77,7 @@ function _cp_least_squares_lambda(
 ) where {T<:AbstractFloat,N}
     dlen = length(A)
     Z = similar(A, T, dlen, r)
-    @inbounds for k = 1:r
+    @inbounds for k in axes(Z, 2)
         vecs = [collect(@view U0[m][:, k]) for m in eachindex(U0)]
         Z[:, k] .= vec(reconstruct_cp_rank1(one(T), vecs))
     end
@@ -90,7 +90,8 @@ function init_cpd_factors(
     init::Symbol = :random,
 ) where {T<:AbstractFloat,N}
     dims = size(A)
-    init == :random && return (ones(T, r), [random_unit_matrix(dims[m], r, T) for m = 1:N])
+    init == :random &&
+        return (ones(T, r), [random_unit_matrix(dims[m], r, T) for m in eachindex(dims)])
     init in (:hosvd, :tucker_diag, :tucker) || throw(
         ArgumentError("Unknown init=$init. Use :random, :hosvd, :tucker_diag, or :tucker."),
     )
@@ -101,7 +102,7 @@ function init_cpd_factors(
         hcat(
             factors[m],
             random_unit_matrix(size(factors[m], 1), r - size(factors[m], 2), T),
-        ) : factors[m] for m = 1:N
+        ) : factors[m] for m in eachindex(factors)
     ]
     λ0 = if init == :tucker_diag
         _tucker_diag(core, r)
@@ -118,12 +119,12 @@ function init_cp_rank1(
     init::Symbol = :random,
 ) where {T<:AbstractFloat,N}
     dims = size(A)
-    init == :random && return [random_unit_vector(dims[m], T) for m = 1:N]
+    init == :random && return [random_unit_vector(dims[m], T) for m in eachindex(dims)]
     init in (:hosvd, :tucker_diag, :tucker) || throw(
         ArgumentError("Unknown init=$init. Use :random, :hosvd, :tucker_diag, or :tucker."),
     )
     _, factors = tucker_hosvd(A, ntuple(_ -> 1, N))
-    return [vec(factors[m][:, 1]) for m = 1:N]
+    return [vec(factors[m][:, 1]) for m in eachindex(factors)]
 end
 
 function cp_init_tucker(

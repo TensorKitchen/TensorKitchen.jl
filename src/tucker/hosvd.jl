@@ -20,14 +20,14 @@ the original tensor onto these factor spaces.
 function tucker_hosvd(A::AbstractArray{T}, ranks::NTuple{N,Int}) where {T<:AbstractFloat,N}
     dims = size(A)
     factors = Vector{Matrix{T}}(undef, N)
-    for mode = 1:N
+    for mode in eachindex(factors)
         A_mode = unfold_mode(A, mode)
         U, _, _ = svd(A_mode)
         r = min(ranks[mode], size(U, 2))
         factors[mode] = Matrix(@view U[:, 1:r])
     end
     core = A
-    for mode = 1:N
+    for mode in eachindex(factors)
         core = mode_n_product(core, factors[mode]', mode)
     end
     return core, factors
@@ -65,7 +65,7 @@ function reconstruct_tucker!(
             "reconstruct_tucker!: got $(length(factors)) factors for an order-$N core.",
         ),
     )
-    @inbounds for mode = 1:N
+    @inbounds for mode in eachindex(factors)
         size(out, mode) == size(factors[mode], 1) || throw(
             DimensionMismatch(
                 "reconstruct_tucker!: output mode $mode has size $(size(out, mode)), " *
@@ -84,7 +84,7 @@ function reconstruct_tucker!(
         acc = zero(T)
         for J in CartesianIndices(core)
             val = core[J]
-            for mode = 1:N
+            for mode in eachindex(factors)
                 val *= factors[mode][I[mode], J[mode]]
             end
             acc += val

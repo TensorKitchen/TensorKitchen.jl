@@ -19,7 +19,7 @@ function hooi(
 
     factors0, singular_vals = _hooi_initial_factors(A, ranks, init)
 
-    factors = [copy(factors0[m]) for m = 1:d]
+    factors = [copy(factors0[m]) for m in eachindex(factors0)]
     prev_rel_error = T(Inf)
     converged = false
     iter_final = maxiter
@@ -35,9 +35,9 @@ function hooi(
     for iter = 1:maxiter
         factors_prev = copy(factors)
         prefix = A
-        for k = 1:d
+        for k in eachindex(factors)
             Y = prefix
-            for j = (k+1):d
+            for j in (k+1):d
                 Y = mode_n_product(Y, factors_prev[j]', j)
             end
             Yk = unfold_mode(Y, k)
@@ -69,7 +69,7 @@ function hooi(
 
     if maxiter == 0
         S = copy(A)
-        for k = 1:d
+        for k in eachindex(factors)
             S = mode_n_product(S, factors[k]', k)
         end
     end
@@ -102,7 +102,7 @@ function _hooi_initial_factors(
             "hooi: TuckerResult.core has size $(size(init.core)), expected core size $ranks",
         ),
     )
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(ranks)
         size(init.factors[m], 1) == dims[m] || throw(
             DimensionMismatch(
                 "hooi: TuckerResult factor $m has $(size(init.factors[m], 1)) rows, expected $(dims[m])",
@@ -114,7 +114,7 @@ function _hooi_initial_factors(
             ),
         )
     end
-    return init.factors, [copy(init.singular_values[m]) for m = 1:N]
+    return init.factors, [copy(init.singular_values[m]) for m in eachindex(ranks)]
 end
 
 function _hooi_initial_factors(

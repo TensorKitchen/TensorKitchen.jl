@@ -9,9 +9,9 @@ function unpack_rankr_native(p, dims::NTuple{N,Int}, r::Int) where {N}
     d = length(dims)
     proto = parts[1][2]
     λ = similar(proto, T, r)
-    U = [similar(proto, T, dims[m], r) for m = 1:d]
+    U = [similar(proto, T, dims[m], r) for m in eachindex(dims)]
 
-    @inbounds for k = 1:r
+    @inbounds for k in eachindex(λ)
         comp = parts[k]
         length(comp) == d + 1 || throw(
             DimensionMismatch(
@@ -19,7 +19,7 @@ function unpack_rankr_native(p, dims::NTuple{N,Int}, r::Int) where {N}
             ),
         )
         λ[k] = comp[1][1]
-        for m = 1:d
+        for m in eachindex(dims)
             @views U[m][:, k] .= comp[m+1]
         end
     end
@@ -36,11 +36,11 @@ function unpack_rankr_canonical(p, dims::NTuple{N,Int}, r::Int) where {N}
     λ = parts[1]
     T = eltype(λ)
     U = Vector{Matrix{T}}(undef, d)
-    @inbounds for m = 1:d
+    @inbounds for m in eachindex(dims)
         mode_m = parts[m+1]
         proto = mode_m[1]
         Um = similar(proto, T, dims[m], r)
-        for k = 1:r
+        for k in eachindex(λ)
             uk = mode_m[k]
             length(uk) == dims[m] || throw(
                 DimensionMismatch(
@@ -59,12 +59,12 @@ function unpack_rankr_join(p, dims::NTuple{N,Int}, r::Int) where {N}
     T = eltype(parts[1])
     proto = parts[2]
     λ = similar(proto, T, r)
-    U = [similar(proto, T, dims[m], r) for m = 1:N]
+    U = [similar(proto, T, dims[m], r) for m in eachindex(dims)]
     idx = 1
-    @inbounds for k = 1:r
+    @inbounds for k in eachindex(λ)
         λ[k] = parts[idx][1]
         idx += 1
-        for m = 1:N
+        for m in eachindex(dims)
             @views U[m][:, k] .= parts[idx]
             idx += 1
         end
@@ -167,12 +167,12 @@ function unpack_point_rankr(
     d = length(dims)
     block = 1 + sum(dims)
     λ = similar(p, T, r)
-    U = [similar(p, T, dims[m], r) for m = 1:d]
-    for k = 1:r
+    U = [similar(p, T, dims[m], r) for m in eachindex(dims)]
+    for k in eachindex(λ)
         b = (k - 1) * block
         λ[k] = p[b+1]
         idx = b + 2
-        for m = 1:d
+        for m in eachindex(dims)
             n = dims[m]
             src = @view p[idx:(idx+n-1)]
             @views U[m][:, k] .= src
@@ -187,5 +187,7 @@ function pack_point_rank1_to_vector(λ̃::T, U::Vector{Vector{T}}) where {T}
 end
 
 function pack_point_rankr_to_vector(λ::Vector{T}, U::Vector{Matrix{T}}, r::Int) where {T}
-    return vcat((vcat(λ[k], ((@view U[m][:, k]) for m in eachindex(U))...) for k = 1:r)...)
+    return vcat(
+        (vcat(λ[k], ((@view U[m][:, k]) for m in eachindex(U))...) for k in eachindex(λ))...,
+    )
 end

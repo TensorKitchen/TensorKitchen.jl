@@ -25,7 +25,12 @@ function _btd_tucker_point_to_result(p::Manifolds.TuckerPoint{T}) where {T<:Abst
     N = length(factors)
     d = ndims(core)
     d == N || throw(DimensionMismatch("_btd_tucker_point_to_result: core ndims=$d, N=$N"))
-    return TuckerResult{T,N}(core, collect(factors), collect(1:N), [T[] for _ = 1:N])
+    return TuckerResult{T,N}(
+        core,
+        collect(factors),
+        collect(eachindex(factors)),
+        [T[] for _ in eachindex(factors)],
+    )
 end
 
 function _btd_block_fit_tucker(
@@ -99,10 +104,10 @@ function fit_btd_als(
         parts0 = point_parts(p_start)
         _check_parts_len(parts0, backend.r, "BTD ALS init")
 
-        points = [parts0[k] for k = 1:backend.r]
-        block_tensors = [_btd_block_tensor(points[k]) for k = 1:backend.r]
+        points = [parts0[k] for k in eachindex(parts0)]
+        block_tensors = [_btd_block_tensor(points[k]) for k in eachindex(points)]
         residual = copy(A)
-        @inbounds for k = 1:backend.r
+        @inbounds for k in eachindex(points)
             residual .-= block_tensors[k]
         end
 
@@ -121,7 +126,7 @@ function fit_btd_als(
             ) : NoMethodProgress()
 
         for iter = 1:maxiter
-            @inbounds for b = 1:backend.r
+            @inbounds for b in eachindex(points)
                 residual .+= block_tensors[b]
 
                 ranks_b = _btd_block_ranks(backend, b)

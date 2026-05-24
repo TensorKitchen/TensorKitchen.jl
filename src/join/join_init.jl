@@ -102,10 +102,10 @@ function _tucker_all_except_mode_products(
 ) where {T<:AbstractFloat,N}
     N == 1 && return Array{T,N}[Array(core)]
     products = Vector{Array{T,N}}(undef, N)
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(products)
         # Precompute all "except mode m" contractions once so factor gradients can reuse them.
         B = core
-        for j = 1:N
+        for j in eachindex(products)
             j == m && continue
             B = mode_n_product(B, factors[j], j)
         end
@@ -126,15 +126,15 @@ function _tucker_egrad(M::Manifolds.Tucker, p, R)
     N = length(factors)
 
     grad_core = copy(R)
-    for m = 1:N
+    for m in eachindex(factors)
         grad_core = mode_n_product(grad_core, factors[m]', m)
     end
 
-    residual_unfolds = [unfold_mode(R, m) for m = 1:N]
+    residual_unfolds = [unfold_mode(R, m) for m in eachindex(factors)]
     # Reuse these intermediates across all factor-gradient blocks.
     all_except_mode = _tucker_all_except_mode_products(core, factors)
     grad_factors = Vector{Matrix{eltype(core)}}(undef, N)
-    for m = 1:N
+    for m in eachindex(factors)
         Bm = unfold_mode(all_except_mode[m], m)
         grad_factors[m] = residual_unfolds[m] * transpose(Bm)
     end

@@ -27,7 +27,7 @@ For a Tucker result with core `S` and factors `U_1, ..., U_d`, this returns
 """
 function reconstruct(td::TuckerResult{T,N}) where {T,N}
     A = td.core
-    for k = 1:N
+    for k in eachindex(td.factors)
         A = mode_n_product(A, td.factors[k], k)
     end
     return A
@@ -48,7 +48,7 @@ dimension is a reasonable default.
 """
 function optimal_mode_order(dims::NTuple{N,Int}, ranks::NTuple{N,Int}) where {N}
     # Sort modes by compression ratio nk/rk (ascending = most compressible first)
-    ratios = [dims[k] / ranks[k] for k = 1:N]
+    ratios = [dims[k] / ranks[k] for k in eachindex(dims)]
     return sortperm(ratios)  # most compressible first
 end
 
@@ -105,7 +105,7 @@ function sthosvd(
     d = N
 
     # Validate inputs
-    for k = 1:d
+    for k in eachindex(ranks)
         @assert 1 <= ranks[k] <= dims[k] "Rank r[$k]=$(ranks[k]) must be in [1, $(dims[k])]"
     end
     @assert sort(processing_order) == 1:d "processing_order must be a permutation of 1:$d"
@@ -269,7 +269,7 @@ function thosvd(
     dims = size(A)
     d = N
 
-    for k = 1:d
+    for k in eachindex(ranks)
         @assert 1 <= ranks[k] <= dims[k] "Rank r[$k]=$(ranks[k]) must be in [1, $(dims[k])]"
     end
 
@@ -281,7 +281,7 @@ function thosvd(
     singular_vals = Vector{Vector{T}}(undef, d)
 
     # Step 1: Compute all factor matrices from the ORIGINAL tensor
-    for k = 1:d
+    for k in eachindex(ranks)
         Ak = unfold_mode(A, k)
         F = svd(Ak)
         factors[k] = Matrix(@view F.U[:, 1:ranks[k]])
@@ -296,7 +296,7 @@ function thosvd(
 
     # Step 2: Compute core tensor  S = A ×₁ U₁ᵀ ×₂ U₂ᵀ ⋯ ×_d Udᵀ
     S = copy(A)
-    for k = 1:d
+    for k in eachindex(ranks)
         S = mode_n_product(S, factors[k]', k)
     end
     verbose && finish_progress!(
@@ -318,7 +318,7 @@ end
 """
 function error_bound(td::TuckerResult{T,N}) where {T,N}
     sq_error = zero(T)
-    for k = 1:N
+    for k in eachindex(td.singular_values)
         rk = size(td.core, k)
         sigma = td.singular_values[k]
         if rk < length(sigma)

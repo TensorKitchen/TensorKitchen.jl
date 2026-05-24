@@ -20,7 +20,7 @@ using TensorOperations
     perm = Vector{Int}(undef, N)
     perm[1] = mode
     j = 2
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(perm)
         m == mode && continue
         perm[j] = m
         j += 1
@@ -32,7 +32,7 @@ end
     N = length(U)
     mats = Vector{eltype(U)}(undef, N - 1)
     j = 1
-    @inbounds for m = N:-1:1
+    @inbounds for m in Iterators.reverse(eachindex(U))
         m == mode && continue
         mats[j] = U[m]
         j += 1
@@ -95,7 +95,7 @@ end
     U::Vector{<:AbstractVector{T}},
 ) where {T<:AbstractFloat,N}
     prod_val = one(T)
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(U)
         prod_val *= U[m][I[m]]
     end
     return prod_val
@@ -104,7 +104,7 @@ end
 @inline function _rank1_entry_product_parts(I::CartesianIndex{N}, parts) where {N}
     T = eltype(parts[2])
     prod_val = one(T)
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(Base.tail(parts))
         prod_val *= parts[m+1][I[m]]
     end
     return prod_val
@@ -116,7 +116,7 @@ end
     mode::Int,
 ) where {T<:AbstractFloat,N}
     prod_val = one(T)
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(U)
         m == mode && continue
         prod_val *= U[m][I[m]]
     end
@@ -130,7 +130,7 @@ end
 ) where {N}
     T = eltype(parts[2])
     prod_val = one(T)
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(Base.tail(parts))
         m == mode && continue
         prod_val *= parts[m+1][I[m]]
     end
@@ -144,7 +144,7 @@ end
     k::Int,
 ) where {T<:AbstractFloat,N}
     prod_val = one(T)
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(U)
         m == mode && continue
         prod_val *= U[m][I[m], k]
     end
@@ -316,7 +316,7 @@ function rank1_mode_contract_column!(
     k::Int,
 ) where {T<:AbstractFloat,N}
     fill!(out, zero(T))
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(U)
         size(U[m], 1) == size(A, m) ||
             throw(DimensionMismatch("mode $m factor row count mismatch"))
     end
@@ -399,8 +399,8 @@ end
 function build_cross_matrix(components::Vector{RankOneTensor{T}}) where {T<:AbstractFloat}
     r = length(components)
     cross_mat = zeros(T, r, r)
-    for k = 1:r
-        for l = 1:r
+    for k in eachindex(components)
+        for l in eachindex(components)
             cross_mat[k, l] = cross_component(components[k], components[l])
         end
     end
@@ -412,8 +412,8 @@ function build_cross_matrix_unit(
 ) where {T<:AbstractFloat}
     r = length(components)
     cross_mat = zeros(T, r, r)
-    for k = 1:r
-        for l = 1:r
+    for k in eachindex(components)
+        for l in eachindex(components)
             cross_mat[k, l] = prod(
                 dot(components[k].vectors[m], components[l].vectors[m]) for
                 m in eachindex(components[1].vectors)
@@ -538,7 +538,7 @@ function factors_from_components(
     isempty(components) && return Vector{Matrix{T}}()
     r = length(components)
     N = length(components[1].vectors)
-    return [hcat((components[k].vectors[m] for k = 1:r)...) for m = 1:N]
+    return [hcat((components[k].vectors[m] for k in eachindex(components))...) for m in eachindex(components[1].vectors)]
 end
 
 function components_from_factors(
@@ -547,5 +547,5 @@ function components_from_factors(
 ) where {T<:AbstractFloat}
     r = length(λ)
     N = length(U)
-    return [RankOneTensor(λ[k], [Vector(@view U[m][:, k]) for m = 1:N]) for k = 1:r]
+    return [RankOneTensor(λ[k], [Vector(@view U[m][:, k]) for m in eachindex(U)]) for k in eachindex(λ)]
 end

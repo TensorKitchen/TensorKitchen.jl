@@ -205,7 +205,7 @@ function _sum_backend_parts(
     tflat = vec(tgt)
     tgt_len = length(tgt)
     # One ambient buffer per component lets reconstruction reuse storage across iterations.
-    component_bufs = [_join_vector_workspace_like(tgt, tgt_len) for _ = 1:r]
+    component_bufs = [_join_vector_workspace_like(tgt, tgt_len) for _ in eachindex(manifolds)]
     work_rec = _join_vector_workspace_like(tgt, tgt_len)
     work_residual = _join_vector_workspace_like(tgt, tgt_len)
 
@@ -418,12 +418,12 @@ function extract_components(
     N = length(backend.target_shape)
     point_type = Union{}
     manifold_type = Union{}
-    @inbounds for k = 1:backend.r
+    @inbounds for k in eachindex(parts)
         point_type = typejoin(point_type, typeof(parts[k]))
         manifold_type = typejoin(manifold_type, typeof(backend.manifolds[k]))
     end
     comps = Vector{DecompositionComponent{T,N,point_type,manifold_type}}(undef, backend.r)
-    @inbounds for k = 1:backend.r
+    @inbounds for k in eachindex(comps)
         # Components keep only point/manifold metadata and reconstruct derived tensors on demand.
         comps[k] = DecompositionComponent{T,N,point_type,manifold_type}(
             parts[k],
@@ -529,7 +529,7 @@ function _join_reconstruct!(out::AbstractArray, backend::Union{JoinBackend,BTDBa
 
     fill!(out, zero(eltype(out)))
 
-    @inbounds for k = 1:r
+    @inbounds for k in eachindex(parts)
         # Reconstruct each component into its preallocated workspace.
         _ambient_vector!(bufs[k], manifolds[k], parts[k])
 

@@ -61,12 +61,12 @@ function RankRCPDModel(
         n_factors = r * (Nd + 1)
         manifolds = Vector{AbstractManifold}(undef, n_factors)
         idx = 1
-        @inbounds for k = 1:r
+        @inbounds for k in eachindex(Base.OneTo(r))
             manifolds[idx] =
                 use_pullback_softplus ? SoftplusEuclidean(1; ε = pullback_eps) :
                 (use_pullback_sq ? SqEuclidean(1; ε = pullback_eps) : Euclidean(1))
             idx += 1
-            for m = 1:Nd
+            for m in eachindex(dims)
                 manifolds[idx] =
                     use_pullback_softplus ?
                     SoftplusEuclidean(dims[m]; ε = pullback_eps) :
@@ -185,7 +185,7 @@ function model_cost_egrad_functions(model::RankRCPDModel{T,N}) where {T,N}
             grad_λ = grad_lambda_cp(λ, cache.inner, cache.cross_mat)
             gradU = _rankr_gradU_from_terms(U, λ, cache.contracts, cache.grams)
             if model.scale_by_lambda
-                for k = 1:model.r
+                for k in eachindex(λ)
                     λ_abs = max(abs(λ[k]), model.lambda_eps)
                     for m in eachindex(U)
                         gradU[m][:, k] ./= λ_abs
@@ -193,7 +193,7 @@ function model_cost_egrad_functions(model::RankRCPDModel{T,N}) where {T,N}
                 end
             end
             grad_parts = Vector{Vector{Vector{T}}}(undef, model.r)
-            @inbounds for k = 1:model.r
+            @inbounds for k in eachindex(grad_parts)
                 grad_Uk = [Vector(@view gradU[m][:, k]) for m in eachindex(U)]
                 grad_parts[k] = pack_tangent_rank1_segre(grad_λ[k], grad_Uk)
             end
@@ -218,9 +218,9 @@ function model_cost_egrad_functions(model::RankRCPDModel{T,N}) where {T,N}
             grad_λ = grad_lambda_cp(λ, cache.inner, cache.cross_mat)
             gradU = _rankr_gradU_from_terms(Ubuf, λ, cache.contracts, cache.grams)
             if model.scale_by_lambda
-                for k = 1:model.r
+                for k in eachindex(λ)
                     λ_abs = max(abs(λ[k]), model.lambda_eps)
-                    for m = 1:Nmodes
+                    for m in eachindex(gradU)
                         gradU[m][:, k] ./= λ_abs
                     end
                 end
@@ -294,7 +294,7 @@ cp_als_data(model::RankRCPDModel) = (model.A, model.r)
 @inline function _segre_component_tensorvec(comp)
     parts = parts_tuple(comp)
     λ = parts[1][1]
-    U = [parts[m+1] for m = 1:(length(parts)-1)]
+    U = [parts[m+1] for m in eachindex(Base.OneTo(length(parts) - 1))]
     return vec(reconstruct_cp_rank1(λ, U))
 end
 
@@ -307,12 +307,12 @@ function _segre_tangent_tensorvec(comp, Xcomp)
 
     λ = pparts[1][1]
     ν = xparts[1][1]
-    U = [pparts[m+1] for m = 1:d]
-    Udot = [xparts[m+1] for m = 1:d]
+    U = [pparts[m+1] for m in eachindex(Base.OneTo(d))]
+    Udot = [xparts[m+1] for m in eachindex(Base.OneTo(d))]
 
     v = vec(reconstruct_cp_rank1(ν, U))
-    @inbounds for m = 1:d
-        Um = [j == m ? Udot[j] : U[j] for j = 1:d]
+    @inbounds for m in eachindex(Base.OneTo(d))
+        Um = [j == m ? Udot[j] : U[j] for j in eachindex(Base.OneTo(d))]
         v .+= vec(reconstruct_cp_rank1(λ, Um))
     end
     return v
@@ -384,7 +384,7 @@ function rgrad(model::RankRCPDModel{T,N}, p) where {T,N} # Riemannian gradient f
     r = model.r
 
     contracts = Vector{Matrix{T}}(undef, Nmodes)
-    for m = 1:Nmodes
+    for m in eachindex(U)
         contracts[m] = mttkrp(model.A, U, m; method = :auto)
     end
 
@@ -394,16 +394,16 @@ function rgrad(model::RankRCPDModel{T,N}, p) where {T,N} # Riemannian gradient f
     grad_λ = grad_lambda_cp(λ, inner, cross_mat)
 
     gradU = _rankr_gradU_from_terms(U, λ, contracts, grams)
-    for m = 1:Nmodes
+    for m in eachindex(U)
         Gm = gradU[m]
         if model.scale_by_lambda
-            for k = 1:r
+            for k in eachindex(λ)
                 Gm[:, k] ./= max(abs(λ[k]), model.lambda_eps)
             end
         end
 
         # Tangent projection on each sphere factor (u_{m,k}^T g_{m,k} = 0).
-        for k = 1:r
+        for k in eachindex(λ)
             uk = @view U[m][:, k] # view the k-th column of the m-th mode
             gk = @view Gm[:, k] # view the k-th column of the gradient for the m-th mode
             Gm[:, k] .-= dot(uk, gk) .* uk

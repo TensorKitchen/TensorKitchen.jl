@@ -91,7 +91,7 @@ function normalize_rank1_segre_point(p, dims::NTuple{N,Int}) where {N}
     λ = isfinite(λpart0[1]) ? λpart0[1] : zero(T)
     flip_first = λ < 0
     out[1] = T[abs(λ)]
-    @inbounds for m = 1:N
+    @inbounds for m in eachindex(dims)
         u0 = _unwrap_part(parts[m+1])
         u0 isa AbstractVector || throw(
             DimensionMismatch("Segre mode $m part must be a vector, got $(typeof(u0))"),
@@ -119,7 +119,7 @@ function normalize_rankr_native_point(p, dims::NTuple{N,Int}, r::Int) where {N}
     parts = parts_tuple(p)
     length(parts) == r ||
         throw(DimensionMismatch("expected $r Segre components, got $(length(parts))"))
-    comps = [normalize_rank1_segre_point(parts[k], dims) for k = 1:r]
+    comps = [normalize_rank1_segre_point(parts[k], dims) for k in eachindex(parts)]
     return (comps...,)
 end
 
@@ -150,7 +150,7 @@ function normalize_rankr_canonical_point(p, dims::NTuple{N,Int}, r::Int) where {
                 DimensionMismatch("mode $m has $(length(mode_m)) vectors, expected $r"),
             )
             cols = Vector{Vector{T}}(undef, r)
-            for k = 1:r
+            for k in eachindex(cols)
                 uk0 = _unwrap_part(mode_m[k])
                 uk0 isa AbstractVector || throw(
                     DimensionMismatch(
@@ -192,7 +192,7 @@ function normalize_rankr_join_point(p, dims::NTuple{N,Int}, r::Int) where {N}
 
     out = Vector{Vector{T}}(undef, expected)
     idx = 1
-    @inbounds for k = 1:r
+    @inbounds for k in eachindex(Base.OneTo(r))
         λ0 = _unwrap_part(parts[idx])
         λ0 isa AbstractVector ||
             throw(DimensionMismatch("join λ[$k] must be a vector, got $(typeof(λ0))"))
@@ -200,7 +200,7 @@ function normalize_rankr_join_point(p, dims::NTuple{N,Int}, r::Int) where {N}
             throw(DimensionMismatch("join λ[$k] must have length 1, got $(length(λ0))"))
         out[idx] = Vector{T}(λ0)
         idx += 1
-        for m = 1:N
+        for m in eachindex(dims)
             u0 = _unwrap_part(parts[idx])
             u0 isa AbstractVector || throw(
                 DimensionMismatch(
