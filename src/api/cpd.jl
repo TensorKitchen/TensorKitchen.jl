@@ -224,11 +224,20 @@ function _cpd_component_metric_rgrad_energies(model::RankRCPDModel, p, g)
     if M isa ProductManifold
         nf = length(M.manifolds)
         if nf == r * (d + 1)
-            return [_cpd_join_component_metric_energy(M, p, g, k, d) for k in eachindex(Base.OneTo(r))]
+            return [
+                _cpd_join_component_metric_energy(M, p, g, k, d) for
+                k in eachindex(Base.OneTo(r))
+            ]
         elseif nf == r
-            return [_cpd_native_component_metric_energy(M, p, g, k) for k in eachindex(Base.OneTo(r))]
+            return [
+                _cpd_native_component_metric_energy(M, p, g, k) for
+                k in eachindex(Base.OneTo(r))
+            ]
         elseif nf == d + 1
-            return [_cpd_canonical_component_metric_energy(M, p, g, k, d) for k in eachindex(Base.OneTo(r))]
+            return [
+                _cpd_canonical_component_metric_energy(M, p, g, k, d) for
+                k in eachindex(Base.OneTo(r))
+            ]
         end
     end
     return _cpd_component_coordinate_rgrad_energies(model, g)

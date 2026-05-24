@@ -20,7 +20,8 @@ function _btd_factor_grad_block(backend::BTDBackend, parts, b::Int)
     N = length(Ub)
     grad_factors = Vector{Matrix{T}}(undef, N)
     core_unfolds = [unfold_mode(Gb, m) for m in eachindex(Ub)]
-    core_gram_factors = [core_unfolds[m] * transpose(core_unfolds[m]) for m in eachindex(Ub)]
+    core_gram_factors =
+        [core_unfolds[m] * transpose(core_unfolds[m]) for m in eachindex(Ub)]
     oneT = one(T)
     zeroT = zero(T)
 

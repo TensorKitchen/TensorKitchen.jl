@@ -205,7 +205,8 @@ function _sum_backend_parts(
     tflat = vec(tgt)
     tgt_len = length(tgt)
     # One ambient buffer per component lets reconstruction reuse storage across iterations.
-    component_bufs = [_join_vector_workspace_like(tgt, tgt_len) for _ in eachindex(manifolds)]
+    component_bufs =
+        [_join_vector_workspace_like(tgt, tgt_len) for _ in eachindex(manifolds)]
     work_rec = _join_vector_workspace_like(tgt, tgt_len)
     work_residual = _join_vector_workspace_like(tgt, tgt_len)
 

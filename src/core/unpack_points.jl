@@ -188,6 +188,8 @@ end
 
 function pack_point_rankr_to_vector(λ::Vector{T}, U::Vector{Matrix{T}}, r::Int) where {T}
     return vcat(
-        (vcat(λ[k], ((@view U[m][:, k]) for m in eachindex(U))...) for k in eachindex(λ))...,
+        (
+            vcat(λ[k], ((@view U[m][:, k]) for m in eachindex(U))...) for k in eachindex(λ)
+        )...,
     )
 end

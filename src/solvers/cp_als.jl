@@ -64,7 +64,8 @@ function CPALSWorkspace(
 ) where {T<:AbstractFloat,N}
     Gs = [_cp_als_matrix_workspace_like(A, r, r) for _ in eachindex(dims)]
     V = _cp_als_matrix_workspace_like(A, r, r)
-    transposed_work = [_cp_als_matrix_workspace_like(A, r, dims[n]) for n in eachindex(dims)]
+    transposed_work =
+        [_cp_als_matrix_workspace_like(A, r, dims[n]) for n in eachindex(dims)]
     denom_work = [_cp_als_matrix_workspace_like(A, dims[n], r) for n in eachindex(dims)]
     mttkrp_bufs = [_cp_als_matrix_workspace_like(A, dims[n], r) for n in eachindex(dims)]
     total_dim_prod = prod(dims)

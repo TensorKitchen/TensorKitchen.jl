@@ -104,7 +104,7 @@ end
 @inline function _rank1_entry_product_parts(I::CartesianIndex{N}, parts) where {N}
     T = eltype(parts[2])
     prod_val = one(T)
-    @inbounds for m in eachindex(Base.tail(parts))
+    @inbounds for m in eachindex(Base.OneTo(N))
         prod_val *= parts[m+1][I[m]]
     end
     return prod_val
@@ -130,7 +130,7 @@ end
 ) where {N}
     T = eltype(parts[2])
     prod_val = one(T)
-    @inbounds for m in eachindex(Base.tail(parts))
+    @inbounds for m in eachindex(Base.OneTo(N))
         m == mode && continue
         prod_val *= parts[m+1][I[m]]
     end
@@ -470,8 +470,8 @@ gradU_column_cp(
 
 cp_reconstruction_norm2(components::Vector{RankOneTensor{T}}) where {T<:AbstractFloat} =
     sum(
-        cross_component(components[i], components[j]) for i in eachindex(components),
-        j in eachindex(components)
+        cross_component(components[i], components[j]) for
+        i in eachindex(components), j in eachindex(components)
     )
 
 function cp_inner_AX(
@@ -538,7 +538,10 @@ function factors_from_components(
     isempty(components) && return Vector{Matrix{T}}()
     r = length(components)
     N = length(components[1].vectors)
-    return [hcat((components[k].vectors[m] for k in eachindex(components))...) for m in eachindex(components[1].vectors)]
+    return [
+        hcat((components[k].vectors[m] for k in eachindex(components))...) for
+        m in eachindex(components[1].vectors)
+    ]
 end
 
 function components_from_factors(
@@ -547,5 +550,8 @@ function components_from_factors(
 ) where {T<:AbstractFloat}
     r = length(λ)
     N = length(U)
-    return [RankOneTensor(λ[k], [Vector(@view U[m][:, k]) for m in eachindex(U)]) for k in eachindex(λ)]
+    return [
+        RankOneTensor(λ[k], [Vector(@view U[m][:, k]) for m in eachindex(U)]) for
+        k in eachindex(λ)
+    ]
 end

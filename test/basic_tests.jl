@@ -503,7 +503,10 @@ end
     @test hasproperty(trace_info, :component_trace_delta_history)
     @test hasproperty(trace_info, :component_trace_coordinate_rgrad_top1_share_history)
     @test hasproperty(trace_info, :component_trace_coordinate_rgrad_top3_share_history)
-    @test hasproperty(trace_info, :component_trace_coordinate_rgrad_effective_components_history)
+    @test hasproperty(
+        trace_info,
+        :component_trace_coordinate_rgrad_effective_components_history,
+    )
     @test hasproperty(trace_info, :component_trace_coordinate_rgrad_energy_history)
     @test hasproperty(trace_info, :component_trace_metric_rgrad_energy_history)
     @test hasproperty(trace_info, :component_trace_ambient_component_velocity_history)
@@ -528,8 +531,9 @@ end
           length(trace_info.component_trace_iterations)
     @test length(trace_info.component_trace_coordinate_rgrad_top3_share_history) ==
           length(trace_info.component_trace_iterations)
-    @test length(trace_info.component_trace_coordinate_rgrad_effective_components_history) ==
-          length(trace_info.component_trace_iterations)
+    @test length(
+        trace_info.component_trace_coordinate_rgrad_effective_components_history,
+    ) == length(trace_info.component_trace_iterations)
     @test length(trace_info.component_trace_metric_rgrad_top1_share_history) ==
           length(trace_info.component_trace_iterations)
     @test length(trace_info.component_trace_ambient_velocity_top1_share_history) ==

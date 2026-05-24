@@ -65,7 +65,10 @@ function reconstruct_cpd_rankr(
         end
     end
     λ = [c.λ for c in components]
-    U = [hcat((c.vectors[m] for c in components)...) for m in eachindex(components[1].vectors)]
+    U = [
+        hcat((c.vectors[m] for c in components)...) for
+        m in eachindex(components[1].vectors)
+    ]
     return reconstruct_cpd_rankr(λ, U)
 end
 

@@ -44,7 +44,7 @@ function _cp_core_diag_init(core::AbstractArray{T,N}, r::Int) where {T<:Abstract
             Um[k, k] = one(T)
         end
         if rm > 0 && r > n_eye
-            Um[:, n_eye+1:r] .= random_unit_matrix(rm, r - n_eye, T)
+            Um[:, (n_eye+1):r] .= random_unit_matrix(rm, r - n_eye, T)
         end
         U0[m] = Um
     end

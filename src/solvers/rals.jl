@@ -51,7 +51,9 @@ function fit_cp_rals(
     fit_old = 0.0
     converged = false
     iter_final = maxiter
-    others_indices = [CartesianIndices(Tuple(dims[setdiff(eachindex(dims), n)])) for n in eachindex(dims)]
+    others_indices = [
+        CartesianIndices(Tuple(dims[setdiff(eachindex(dims), n)])) for n in eachindex(dims)
+    ]
     progress =
         maxiter > 0 ?
         (

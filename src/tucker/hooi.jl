@@ -37,7 +37,7 @@ function hooi(
         prefix = A
         for k in eachindex(factors)
             Y = prefix
-            for j in (k+1):d
+            for j = (k+1):d
                 Y = mode_n_product(Y, factors_prev[j]', j)
             end
             Yk = unfold_mode(Y, k)
