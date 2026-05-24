@@ -11,7 +11,10 @@ using TensorOperations
 using LinearAlgebra
 
 """Rank-1 CP: λ · u₁ ⊗ u₂ ⊗ ... ⊗ u_d via ncon."""
-function reconstruct_cp_rank1(λ::T, U::Vector{Vector{T}}) where {T<:AbstractFloat}
+function reconstruct_cp_rank1(
+    λ::T,
+    U::AbstractVector{<:AbstractVector{T}},
+) where {T<:AbstractFloat}
     isempty(U) && throw(ArgumentError("reconstruct_cp_rank1: empty factor vectors"))
     N = length(U)
     # A[i1,...,iN] = λ * u1[i1] * u2[i2] * ... * uN[iN] — outer product scaled by λ
@@ -76,7 +79,7 @@ embed_point_rankr(p, dims::NTuple{N,Int}, r::Int) where {N} =
 
 function embed_point_rank1_nn(p, dims::NTuple{N,Int}) where {N}
     λ̃, Ũ = unpack_point_rank1(p, dims)
-    return reconstruct_cp_rank1(λ̃ .^ 2, [Ũ[m] .^ 2 for m = 1:length(Ũ)])
+    return reconstruct_cp_rank1(λ̃ .^ 2, [Ũ[m] .^ 2 for m in eachindex(Ũ)])
 end
 
 """
@@ -86,5 +89,5 @@ Embed nonnegative rank-r squaring-parameterized point into ambient tensor space.
 """
 function embed_point_rankr_nn(p, dims::NTuple{N,Int}, r::Int) where {N}
     λ̃, Ũ = unpack_point_rankr(p, dims, r)
-    return reconstruct_cpd_rankr(λ̃ .^ 2, [Ũ[m] .^ 2 for m = 1:length(Ũ)])
+    return reconstruct_cpd_rankr(λ̃ .^ 2, [Ũ[m] .^ 2 for m in eachindex(Ũ)])
 end

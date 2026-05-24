@@ -105,7 +105,7 @@ function embed_point(model::RankRCPDModel{T,N}, p) where {T,N}
         λ̃, Ũ = unpack_point_rankr(p, model.dims, model.r)
         if model.geometry == :softplus_metric
             λ = _softplus_value.(λ̃)
-            U = [_softplus_value.(Ũ[m]) for m = 1:length(Ũ)]
+            U = [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)]
             return reconstruct_cpd_rankr(λ, U)
         end
         return embed_point_rankr_nn(p, model.dims, model.r)
@@ -141,8 +141,8 @@ function model_cost_egrad_functions(model::RankRCPDModel{T,N}) where {T,N}
             use_softplus = model.geometry == :softplus_metric
             λ = use_softplus ? _softplus_value.(λ̃) : λ̃ .^ 2
             U =
-                use_softplus ? [_softplus_value.(Ũ[m]) for m = 1:length(Ũ)] :
-                [Ũ[m] .^ 2 for m = 1:length(Ũ)]
+                use_softplus ? [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)] :
+                [Ũ[m] .^ 2 for m in eachindex(Ũ)]
             _cp_rankr_refresh_cache!(cache, model.A, U, p)
             return cp_rankr_cost_value(sum(abs2, model.A), λ, cache.inner, cache.cross_mat)
         end
@@ -152,8 +152,8 @@ function model_cost_egrad_functions(model::RankRCPDModel{T,N}) where {T,N}
             use_softplus = model.geometry == :softplus_metric
             λ = use_softplus ? _softplus_value.(λ̃) : λ̃ .^ 2
             U =
-                use_softplus ? [_softplus_value.(Ũ[m]) for m = 1:length(Ũ)] :
-                [Ũ[m] .^ 2 for m = 1:length(Ũ)]
+                use_softplus ? [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)] :
+                [Ũ[m] .^ 2 for m in eachindex(Ũ)]
             _cp_rankr_refresh_cache!(cache, model.A, U, p)
             grad_λ = grad_lambda_cp(λ, cache.inner, cache.cross_mat)
             gradU = _rankr_gradU_from_terms(U, λ, cache.contracts, cache.grams)
@@ -162,10 +162,10 @@ function model_cost_egrad_functions(model::RankRCPDModel{T,N}) where {T,N}
             # egrad_to_rgrad then applies the regularized metric inverse.
             if use_softplus
                 grad_λ̃ = grad_λ .* _softplus_derivative.(λ̃)
-                grad_Ũ = [gradU[m] .* _softplus_derivative.(Ũ[m]) for m = 1:length(U)]
+                grad_Ũ = [gradU[m] .* _softplus_derivative.(Ũ[m]) for m in eachindex(U)]
             else
                 grad_λ̃ = grad_λ .* 2 .* λ̃
-                grad_Ũ = [gradU[m] .* 2 .* Ũ[m] for m = 1:length(U)]
+                grad_Ũ = [gradU[m] .* 2 .* Ũ[m] for m in eachindex(U)]
             end
             return p isa Vector ? pack_point_rankr_to_vector(grad_λ̃, grad_Ũ, model.r) :
                    pack_point_rankr(grad_λ̃, grad_Ũ, model.r)
@@ -187,14 +187,14 @@ function model_cost_egrad_functions(model::RankRCPDModel{T,N}) where {T,N}
             if model.scale_by_lambda
                 for k = 1:model.r
                     λ_abs = max(abs(λ[k]), model.lambda_eps)
-                    for m = 1:length(U)
+                    for m in eachindex(U)
                         gradU[m][:, k] ./= λ_abs
                     end
                 end
             end
             grad_parts = Vector{Vector{Vector{T}}}(undef, model.r)
             @inbounds for k = 1:model.r
-                grad_Uk = [Vector(@view gradU[m][:, k]) for m = 1:length(U)]
+                grad_Uk = [Vector(@view gradU[m][:, k]) for m in eachindex(U)]
                 grad_parts[k] = pack_tangent_rank1_segre(grad_λ[k], grad_Uk)
             end
             return hasproperty(p, :x) ? ArrayPartition(grad_parts...) : (grad_parts...,)
@@ -425,10 +425,10 @@ function initial_point(
     if model.nonnegative
         if model.geometry == :softplus_metric
             λ̃0 = _invsoftplus.(max.(abs.(λ0), eps(T)))
-            Ũ0 = [_invsoftplus.(max.(abs.(U0[m]), eps(T))) for m = 1:length(U0)]
+            Ũ0 = [_invsoftplus.(max.(abs.(U0[m]), eps(T))) for m in eachindex(U0)]
         else
             λ̃0 = sqrt.(max.(abs.(λ0), eps(T)))
-            Ũ0 = [sqrt.(max.(abs.(U0[m]), eps(T))) for m = 1:length(U0)]
+            Ũ0 = [sqrt.(max.(abs.(U0[m]), eps(T))) for m in eachindex(U0)]
         end
         return pack_point_rankr(λ̃0, Ũ0, model.r) # structured join layout
     end
@@ -440,7 +440,9 @@ initial_point(model::RankRCPDModel, init::PointInit; kwargs...) = init.point
 initial_point(model::RankRCPDModel, init::FunctionInit; kwargs...) = init.f(model)
 
 supports_normalization_policy(model::RankRCPDModel, policy::AbstractNormalizationPolicy) =
-    model.nonnegative || policy isa Union{NoNormalization,SeparateLambdaNormalization}
+    model.nonnegative ?
+    policy isa Union{NoNormalization,NonnegativeSeparateLambdaNormalization} :
+    policy isa Union{NoNormalization,SeparateLambdaNormalization}
 
 function cpd_point(model::RankRCPDModel{T,N}, p) where {T<:AbstractFloat,N}
     if model.nonnegative
@@ -448,10 +450,10 @@ function cpd_point(model::RankRCPDModel{T,N}, p) where {T<:AbstractFloat,N}
         if model.geometry == :softplus_metric
             return CPDPoint(
                 _softplus_value.(λ̃),
-                [_softplus_value.(Ũ[m]) for m = 1:length(Ũ)],
+                [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)],
             )
         end
-        return CPDPoint(λ̃ .^ 2, [Ũ[m] .^ 2 for m = 1:length(Ũ)])
+        return CPDPoint(λ̃ .^ 2, [Ũ[m] .^ 2 for m in eachindex(Ũ)])
     end
     λ, U =
         model.geometry == :native ? unpack_rankr_native(p, model.dims, model.r) :
@@ -495,9 +497,21 @@ function post_step!(
             "Normalization policy $(typeof(policy)) is incompatible with RankRCPDModel geometry=$(model.geometry), nonnegative=$(model.nonnegative).",
         ),
     )
-    if policy isa NoNormalization ||
-       (!model.nonnegative && policy isa SeparateLambdaNormalization)
-        return p
+    policy isa NoNormalization && return p
+    if model.nonnegative
+        policy isa NonnegativeSeparateLambdaNormalization || throw(
+            ArgumentError(
+                "Nonnegative RankRCPDModel supports NoNormalization() and " *
+                "NonnegativeSeparateLambdaNormalization() only.",
+            ),
+        )
+    elseif !(policy isa SeparateLambdaNormalization)
+        throw(
+            ArgumentError(
+                "Signed RankRCPDModel supports NoNormalization() and " *
+                "SeparateLambdaNormalization() only.",
+            ),
+        )
     end
     q = cpd_point(model, p)
     normalize_components!(q, policy)

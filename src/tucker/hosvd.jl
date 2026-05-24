@@ -24,7 +24,7 @@ function tucker_hosvd(A::AbstractArray{T}, ranks::NTuple{N,Int}) where {T<:Abstr
         A_mode = unfold_mode(A, mode)
         U, _, _ = svd(A_mode)
         r = min(ranks[mode], size(U, 2))
-        factors[mode] = U[:, 1:r]
+        factors[mode] = Matrix(@view U[:, 1:r])
     end
     core = A
     for mode = 1:N
@@ -40,7 +40,7 @@ end
 """
 function reconstruct_tucker(core::AbstractArray{T}, factors) where {T<:AbstractFloat}
     A = core
-    for mode = 1:length(factors)
+    for mode in eachindex(factors)
         A = mode_n_product(A, factors[mode], mode)
     end
     return A

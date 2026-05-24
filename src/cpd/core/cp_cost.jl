@@ -18,13 +18,13 @@ This function returns the Euclidean gradient of the cost function.
 """
 function egrad_segre(A::AbstractArray{T,N}, dims::NTuple{N,Int}) where {T<:AbstractFloat,N}
     # Reuse one contraction buffer per mode inside the closure to cut temporary vectors.
-    grad_buf = [Vector{T}(undef, dims[m]) for m = 1:length(dims)]
+    grad_buf = [Vector{T}(undef, dims[m]) for m in eachindex(dims)]
     return function (M, p)
         if M isa Manifolds.Segre
             parts = point_parts(p)
             λ, inner = parts[1][1], rank1_inner_parts(A, parts)
             grad_U = Vector{Vector{T}}(undef, length(dims))
-            for m = 1:length(dims)
+            for m in eachindex(dims)
                 g = grad_buf[m]
                 rank1_mode_contract_parts!(g, A, parts, m)
                 rmul!(g, -λ)
@@ -35,7 +35,7 @@ function egrad_segre(A::AbstractArray{T,N}, dims::NTuple{N,Int}) where {T<:Abstr
             λ, U = unpack_point_rank1(p, dims)
             inner = rank1_inner(A, U)
             grad_U = Vector{Vector{T}}(undef, length(dims))
-            for m = 1:length(dims)
+            for m in eachindex(dims)
                 g = grad_buf[m]
                 rank1_mode_contract!(g, A, U, m)
                 rmul!(g, -λ)
@@ -88,7 +88,7 @@ function cost_segre_nn(
         λ̃, Ũ = unpack_point_rank1(p, dims)
         if _uses_softplus_pullback(M)
             λ = _softplus_value(λ̃)
-            U = [_softplus_value.(Ũ[m]) for m = 1:length(Ũ)]
+            U = [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)]
             X = reconstruct_cp_rank1(λ, U)
         else
             X = embed_point_rank1_nn(p, dims)
@@ -105,26 +105,26 @@ function egrad_segre_nn(
     # the unconstrained case, but the returned egrad is with respect to the
     # latent coordinates p after the chart chain rule, not with respect to the
     # transformed nonnegative variable.
-    grad_buf = [Vector{T}(undef, dims[m]) for m = 1:length(dims)]
+    grad_buf = [Vector{T}(undef, dims[m]) for m in eachindex(dims)]
     return function (M, p)
         _require_vector_for_squaring_metric(M, p)
         λ̃, Ũ = unpack_point_rank1(p, dims)
         use_softplus = _uses_softplus_pullback(M)
         λ = use_softplus ? _softplus_value(λ̃) : λ̃^2
         U =
-            use_softplus ? [_softplus_value.(Ũ[m]) for m = 1:length(Ũ)] :
-            [Ũ[m] .^ 2 for m = 1:length(Ũ)]
+            use_softplus ? [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)] :
+            [Ũ[m] .^ 2 for m in eachindex(Ũ)]
         inner = rank1_inner(A, U)
         normsq = one(T)
         mode_normsq = Vector{T}(undef, length(U))
-        @inbounds for m = 1:length(U)
+        @inbounds for m in eachindex(U)
             nm = sum(abs2, U[m])
             mode_normsq[m] = nm
             normsq *= nm
         end
         grad_λ = λ * normsq - inner
         grad_U = Vector{Vector{T}}(undef, length(dims))
-        for m = 1:length(dims)
+        for m in eachindex(dims)
             g = grad_buf[m]
             rank1_mode_contract!(g, A, U, m)
             rmul!(g, -λ)
@@ -133,10 +133,10 @@ function egrad_segre_nn(
         end
         if use_softplus
             grad_λ̃ = grad_λ * _softplus_derivative(λ̃)
-            grad_Ũ = [grad_U[m] .* _softplus_derivative.(Ũ[m]) for m = 1:length(Ũ)]
+            grad_Ũ = [grad_U[m] .* _softplus_derivative.(Ũ[m]) for m in eachindex(Ũ)]
         else
             grad_λ̃ = grad_λ * 2 * λ̃
-            grad_Ũ = [grad_U[m] .* 2 .* Ũ[m] for m = 1:length(Ũ)]
+            grad_Ũ = [grad_U[m] .* 2 .* Ũ[m] for m in eachindex(Ũ)]
         end
         return p isa Vector ? pack_point_rank1_to_vector(grad_λ̃, grad_Ũ) :
                pack_point_rank1(grad_λ̃, grad_Ũ)
@@ -144,7 +144,7 @@ function egrad_segre_nn(
 end
 
 _gram_matrices(U::Vector{Matrix{T}}) where {T<:AbstractFloat} =
-    [U[m]' * U[m] for m = 1:length(U)]
+    [U[m]' * U[m] for m in eachindex(U)]
 
 function _cross_unit_from_grams(grams::Vector{Matrix{T}}) where {T<:AbstractFloat}
     r = size(grams[1], 1)
@@ -527,8 +527,8 @@ function cost_secant_rankr_nn(
         use_softplus = _uses_softplus_pullback(M)
         λ = use_softplus ? _softplus_value.(λ̃) : λ̃ .^ 2
         U =
-            use_softplus ? [_softplus_value.(Ũ[m]) for m = 1:length(Ũ)] :
-            [Ũ[m] .^ 2 for m = 1:length(Ũ)]
+            use_softplus ? [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)] :
+            [Ũ[m] .^ 2 for m in eachindex(Ũ)]
         _cp_rankr_refresh_cache!(cache, A, U, p)
         return cp_rankr_cost_value(normA2, λ, cache.inner, cache.cross_mat)
     end
@@ -551,22 +551,21 @@ function egrad_secant_rankr_nn(
         use_softplus = _uses_softplus_pullback(M)
         λ = use_softplus ? _softplus_value.(λ̃) : λ̃ .^ 2
         U =
-            use_softplus ? [_softplus_value.(Ũ[m]) for m = 1:length(Ũ)] :
-            [Ũ[m] .^ 2 for m = 1:length(Ũ)]
-        Nmodes = length(U)
+            use_softplus ? [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)] :
+            [Ũ[m] .^ 2 for m in eachindex(Ũ)]
         _cp_rankr_refresh_cache!(cache, A, U, p)
         grad_λ = grad_lambda_cp(λ, cache.inner, cache.cross_mat)
         gradU = _rankr_gradU_from_terms(U, λ, cache.contracts, cache.grams)
         if use_softplus
             grad_λ̃ = grad_λ .* _softplus_derivative.(λ̃)
             grad_Ũ = gradU
-            for m = 1:Nmodes
+            for m in eachindex(U)
                 grad_Ũ[m] .*= _softplus_derivative.(Ũ[m])
             end
         else
             grad_λ̃ = grad_λ .* 2 .* λ̃
             grad_Ũ = gradU
-            for m = 1:Nmodes
+            for m in eachindex(U)
                 grad_Ũ[m] .*= 2 .* Ũ[m]
             end
         end

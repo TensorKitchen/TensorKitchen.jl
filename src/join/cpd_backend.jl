@@ -101,9 +101,9 @@ end
         hasproperty(m, :geometry) ? (m.geometry == :softplus_metric) :
         (hasproperty(m, :M) && _rank1_uses_softplus_metric(m.M))
     if use_softplus
-        return _softplus_value.(λ̃), [_softplus_value.(Ũ[j]) for j = 1:length(Ũ)]
+        return _softplus_value.(λ̃), [_softplus_value.(Ũ[j]) for j in eachindex(Ũ)]
     end
-    return λ̃ .^ 2, [Ũ[j] .^ 2 for j = 1:length(Ũ)]
+    return λ̃ .^ 2, [Ũ[j] .^ 2 for j in eachindex(Ũ)]
 end
 
 function _cpd_result(model::JoinModel{<:AbstractFloat,<:CPDBackend}, result, dims, r)

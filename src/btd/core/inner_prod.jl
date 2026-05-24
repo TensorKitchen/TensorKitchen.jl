@@ -234,7 +234,7 @@ function _target_tucker_inner(A::AbstractArray, p::Manifolds.TuckerPoint)
     end
 
     At = A
-    @inbounds for k = 1:length(U)
+    @inbounds for k in eachindex(U)
         At = mode_n_product(At, U[k]', k)
     end
     return sum(At .* G)
@@ -254,7 +254,7 @@ end
 function _tucker_project_target(p::Manifolds.TuckerPoint, A::AbstractArray)
     G, U = _tucker_data(p)
     At = A
-    @inbounds for k = 1:length(U)
+    @inbounds for k in eachindex(U)
         At = mode_n_product(At, U[k]', k)
     end
     size(At) == size(G) || throw(DimensionMismatch("Projected target/core size mismatch."))
@@ -280,7 +280,7 @@ function _tucker_project_target_except_mode(
 )
     _, U = _tucker_data(p)
     At = A
-    @inbounds for k = 1:length(U)
+    @inbounds for k in eachindex(U)
         k == m && continue
         At = mode_n_product(At, U[k]', k)
     end
@@ -294,7 +294,7 @@ function _tucker_project_target_except_mode(
     m::Int,
 ) where {T,N}
     _, U = _tucker_data(p)
-    mode_mats = Tuple((k, transpose(U[k])) for k = 1:length(U) if k != m)
+    mode_mats = Tuple((k, transpose(U[k])) for k in eachindex(U) if k != m)
     At = _apply_mode_products(backend, A, mode_mats)
     return _workspace_copy_tensor!(backend.workspace, At)
 end
@@ -303,7 +303,7 @@ function _tucker_cross_core(p::Manifolds.TuckerPoint, q::Manifolds.TuckerPoint)
     _, Up = _tucker_data(p)
     Gq, Uq = _tucker_data(q)
     Ht = Gq
-    @inbounds for k = 1:length(Up)
+    @inbounds for k in eachindex(Up)
         Ht = mode_n_product(Ht, Up[k]' * Uq[k], k)
     end
     return Ht
@@ -331,7 +331,7 @@ function _tucker_cross_except_mode(
     _, Up = _tucker_data(p)
     Gq, Uq = _tucker_data(q)
     Ht = Gq
-    @inbounds for k = 1:length(Up)
+    @inbounds for k in eachindex(Up)
         k == m && continue
         Ht = mode_n_product(Ht, Up[k]' * Uq[k], k)
     end
@@ -346,7 +346,7 @@ function _tucker_cross_except_mode(
 ) where {T}
     _, Up = _tucker_data(p)
     Gq, Uq = _tucker_data(q)
-    mode_mats = Tuple((k, Matrix{T}(Up[k]' * Uq[k])) for k = 1:length(Up) if k != m)
+    mode_mats = Tuple((k, Matrix{T}(Up[k]' * Uq[k])) for k in eachindex(Up) if k != m)
     return _workspace_copy_tensor!(
         backend.workspace,
         _apply_mode_products(backend, Gq, mode_mats),

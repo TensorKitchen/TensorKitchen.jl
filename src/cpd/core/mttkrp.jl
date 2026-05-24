@@ -295,7 +295,7 @@ function _mttkrp_contract(
     out = similar(U[1], T, dims[mode], r)
     fill!(out, zero(T))
     for k = 1:r
-        out[:, k] = rank1_mode_contract_column(A, U, mode, k)
+        @views out[:, k] .= rank1_mode_contract_column(A, U, mode, k)
     end
     return out
 end
@@ -308,7 +308,7 @@ function _mttkrp_contract!(
 ) where {T<:AbstractFloat,N}
     r = size(U[1], 2)
     @inbounds for q = 1:r
-        out[:, q] = rank1_mode_contract_column(A, U, mode, q)
+        @views out[:, q] .= rank1_mode_contract_column(A, U, mode, q)
     end
     return out
 end
@@ -321,7 +321,7 @@ function _mttkrp_contract(
     r = size(U[1], 2)
     out = similar(U[1], T, size(A, mode), r)
     @inbounds for q = 1:r
-        out[:, q] = rank1_mode_contract_column(A, U, mode, q)
+        @views out[:, q] .= rank1_mode_contract_column(A, U, mode, q)
     end
     return out
 end
@@ -334,7 +334,7 @@ function _mttkrp_contract(
     r = size(U[1], 2)
     out = similar(U[1], T, size(A, mode), r)
     @inbounds for q = 1:r
-        out[:, q] = rank1_mode_contract_column(A, U, mode, q)
+        @views out[:, q] .= rank1_mode_contract_column(A, U, mode, q)
     end
     return out
 end

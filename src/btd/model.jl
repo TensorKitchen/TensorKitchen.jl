@@ -1,7 +1,5 @@
 # btd/model.jl — BTD backend and model hooks
 
-# Small index-based tensor cache for tight inner loops.
-
 mutable struct _WorkspaceTensorCache{T,N}
     dims::Vector{NTuple{N,Int}}
     bufs::Vector{Array{T,N}}
@@ -105,7 +103,7 @@ function _btd_hosvd_subspaces(backend::BTDBackend{T,N}, ranks_by_block) where {T
         total_rank = sum(r[mode] for r in ranks_by_block)
         kept_rank = min(size(A, mode), total_rank)
         U, _, _ = svd(unfold_mode(A, mode))
-        Matrix(U[:, 1:kept_rank])
+        Matrix(@view U[:, 1:kept_rank])
     end
 end
 
@@ -155,7 +153,8 @@ function _btd_hosvd_split_candidate(
     # Candidate blocks are always Tucker points here
     parts = Vector{Manifolds.TuckerPoint{T}}(undef, backend.r)
     for b = 1:backend.r
-        factors = ntuple(mode -> Matrix(subspaces[mode][:, columns_by_mode[mode][b]]), N)
+        factors =
+            ntuple(mode -> Matrix(@view subspaces[mode][:, columns_by_mode[mode][b]]), N)
         core = _btd_project_core(residual, factors)
         pk = Manifolds.TuckerPoint(core, factors...)
         parts[b] = pk

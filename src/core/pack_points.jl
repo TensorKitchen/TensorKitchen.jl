@@ -3,8 +3,10 @@
 @inline _components_to_lambda_U(cs::Vector{RankOneTensor{T}}) where {T} =
     ([c.λ for c in cs], factors_from_components(cs), length(cs))
 
-_rankr_components_from_λU(λ, U) =
-    [RankOneTensor(λ[k], [Vector(U[m][:, k]) for m = 1:length(U)]) for k = 1:length(λ)]
+_rankr_components_from_λU(λ, U) = [
+    RankOneTensor(λ[k], [Vector(@view U[m][:, k]) for m in eachindex(U)]) for
+    k in eachindex(λ)
+]
 
 function pack_point_rank1_segre(λ::T, U::Vector{Vector{T}}) where {T<:AbstractFloat}
     λ_abs = abs(λ)
@@ -12,7 +14,7 @@ function pack_point_rank1_segre(λ::T, U::Vector{Vector{T}}) where {T<:AbstractF
     s = λ >= 0 ? one(T) : -one(T)
     parts = Vector{Vector{T}}(undef, length(U) + 1)
     parts[1] = T[λ_abs]
-    @inbounds for i = 1:length(U)
+    @inbounds for i in eachindex(U)
         parts[i+1] = i == 1 ? s .* U[1] : U[i]
     end
     return parts
@@ -21,7 +23,7 @@ end
 function pack_tangent_rank1_segre(ν::T, Udot::Vector{Vector{T}}) where {T<:AbstractFloat}
     parts = Vector{Vector{T}}(undef, length(Udot) + 1)
     parts[1] = T[ν]
-    @inbounds for i = 1:length(Udot)
+    @inbounds for i in eachindex(Udot)
         parts[i+1] = Udot[i]
     end
     return parts
@@ -44,7 +46,7 @@ function pack_rankr_native(
         λk = λ[k]
         Uk = Vector{Vector{T}}(undef, d)
         for m = 1:d
-            u = Vector{T}(U[m][:, k])
+            u = Vector{T}(@view U[m][:, k])
             λk = _normalize_column_into_lambda!(u, λk)
             Uk[m] = u
         end
@@ -99,7 +101,7 @@ function pack_rankr_canonical_tuple(
     @inbounds for k = 1:r
         λk = λ[k]
         for m = 1:d
-            u = Vector{T}(U[m][:, k])
+            u = Vector{T}(@view U[m][:, k])
             λk = _normalize_column_into_lambda!(u, λk)
             mode_cols[m][k] = u
         end
@@ -126,7 +128,7 @@ function pack_rankr_join_tuple(
         parts[idx] = T[λ[k]]
         idx += 1
         for m = 1:d
-            parts[idx] = Vector{T}(U[m][:, k])
+            parts[idx] = Vector{T}(@view U[m][:, k])
             idx += 1
         end
     end

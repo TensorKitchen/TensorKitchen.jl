@@ -127,7 +127,7 @@ function sthosvd(
         F = svd(Sk_unfold)
         rk_actual = min(rk, length(F.S))
 
-        Uk = F.U[:, 1:rk_actual]
+        Uk = Matrix(@view F.U[:, 1:rk_actual])
         singular_vals[k] = F.S
 
         factors[k] = Uk
@@ -203,7 +203,7 @@ function sthosvd(
         cum_sq = reverse(cumsum(reverse(sigma .^ 2)))  # cum_sq[j] = Σ_{i≥j} σᵢ²
 
         rk = length(sigma)  # default: keep all
-        for j = 1:length(sigma)
+        for j in eachindex(sigma)
             tail_energy = j < length(cum_sq) ? cum_sq[j+1] : 0.0
             if sqrt(tail_energy) <= tol_per_mode
                 rk = j
@@ -225,7 +225,7 @@ function sthosvd(
             )
         end
 
-        Uk = F.U[:, 1:rk]
+        Uk = Matrix(@view F.U[:, 1:rk])
         singular_vals[k] = sigma
         factors[k] = Uk
         ranks[k] = rk
@@ -284,7 +284,7 @@ function thosvd(
     for k = 1:d
         Ak = unfold_mode(A, k)
         F = svd(Ak)
-        factors[k] = F.U[:, 1:ranks[k]]
+        factors[k] = Matrix(@view F.U[:, 1:ranks[k]])
         singular_vals[k] = F.S
 
         verbose && update_progress!(

@@ -202,8 +202,7 @@ function _rank1tensor_column(vectors::Vector{<:AbstractVector{T}}) where {T<:Abs
 end
 
 _cpd_components(weights::Vector{T}, factors::Vector{Matrix{T}}) where {T<:AbstractFloat} = [
-    RankOneTensor(weights[k], [factors[m][:, k] for m = 1:length(factors)]) for
-    k = 1:length(weights)
+    RankOneTensor(weights[k], [Vector(@view factors[m][:, k]) for m in eachindex(factors)]) for k in eachindex(weights)
 ]
 
 """
@@ -406,9 +405,7 @@ factors(r::NamedTuple) = getproperty(r, :factors)
 
 function Base.show(io::IO, r::CPDResult{T}) where {T}
     comps = components(r)
-    dims =
-        length(comps) > 0 ?
-        Tuple(length(vectors(comps[1])[m]) for m = 1:length(vectors(comps[1]))) : (0,)
+    dims = length(comps) > 0 ? Tuple(length(v) for v in vectors(comps[1])) : (0,)
     println(io, "CPDResult{$T}")
     println(io, "  Order:        $(length(dims))")
     println(io, "  Dimensions:   $dims")
