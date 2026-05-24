@@ -58,8 +58,8 @@ function _mode_n_product!(
         r = size(U, 1)
         Ut = transpose(U)
         @inbounds for k in axes(A, 3)
-            Ak = reshape(view(A,:,:,k), size(A, 1), size(A, 2))
-            Bk = reshape(view(out,:,:,k), size(out, 1), r)
+            Ak = reshape(view(A, :, :, k), size(A, 1), size(A, 2))
+            Bk = reshape(view(out, :, :, k), size(out, 1), r)
             mul!(Bk, Ak, Ut)
         end
         return out
