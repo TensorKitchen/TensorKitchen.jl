@@ -1,5 +1,5 @@
 # cpd/core/mttkrp.jl — CPD-specific MTTKRP kernels and dispatch
-# Improvement of resolving mttkrp bottleneck still in progress
+# Improvement of resolving mttkrp bottleneck
 export mttkrp, mttkrp!, khatri_rao, khatri_rao!
 @inline _mttkrp_needs_kr_workspace(method::Symbol) = method == :khatri_rao
 @inline _mttkrp_needs_tmp_workspace(method::Symbol) = method in (:direct3, :direct4)
