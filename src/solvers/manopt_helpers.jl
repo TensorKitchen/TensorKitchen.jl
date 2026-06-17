@@ -308,6 +308,136 @@ function _relative_solver_functions(model_cost, model_grad, scale::Real)
     )
 end
 
+# Prepare the shared Manopt point, objective, gradient, and tolerance data.
+function _prepare_manopt_solver_functions(
+    model_cost,
+    model_egrad,
+    M,
+    p0;
+    normA2 = nothing,
+    model_grad = nothing,
+    tol,
+    grad_tol = nothing,
+    normalized_objective::Bool,
+)
+    p0_local = _solver_point(M, p0)
+    T = _scalar_eltype(p0_local)
+    model_grad_raw = isnothing(model_grad) ? grad(model_egrad) : model_grad
+    model_grad_local = _layout_adapt_gradient(model_grad_raw)
+    objective_scale =
+        normalized_objective && !isnothing(normA2) && normA2 > 0 ? T(normA2) : one(T)
+    solver_cost, solver_grad, uses_relative_objective =
+        _relative_solver_functions(model_cost, model_grad_local, objective_scale)
+    return (
+        p0 = p0_local,
+        T = T,
+        solver_cost = solver_cost,
+        solver_grad = solver_grad,
+        uses_relative_objective = uses_relative_objective,
+        objective_scale = objective_scale,
+        grad_stop_tol = isnothing(grad_tol) ? T(tol) : T(grad_tol),
+        dual_grad_tol = _dual_stop_grad_tol(T, tol, grad_tol),
+    )
+end
+
+# Build the common Manopt stopping rule for iteration, gradient, and dual criteria.
+function _manopt_stopping(maxiter::Int, grad_stop_tol, dual_stop; extra = ())
+    return StopWhenAny(
+        StopAfterIteration(maxiter),
+        StopWhenGradientNormLess(grad_stop_tol),
+        extra...,
+        dual_stop,
+    )
+end
+
+# Create progress and debug callbacks shared by Manopt-backed solvers.
+function _manopt_callbacks(
+    make_progress::Function,
+    maxiter::Int,
+    verbose::Bool,
+    solver_cost,
+    solver_grad,
+    M;
+    diagnostics_recorder = nothing,
+    post_step_callback = nothing,
+    iteration_callbacks = (),
+)
+    progress = maxiter > 0 ? make_progress(maxiter) : NoMethodProgress()
+    diagnostics_callback =
+        isnothing(diagnostics_recorder) ? nothing :
+        _solver_diagnostics_callback(diagnostics_recorder)
+    progress_callback = _solver_progress_callback(
+        progress,
+        solver_cost,
+        solver_grad,
+        M;
+        diagnostics_recorder,
+    )
+    debug_actions = _solver_debug_actions(
+        verbose,
+        post_step_callback,
+        diagnostics_callback,
+        progress_callback,
+        iteration_callbacks...,
+    )
+    return (
+        progress = progress,
+        diagnostics_callback = diagnostics_callback,
+        progress_callback = progress_callback,
+        debug_actions = debug_actions,
+    )
+end
+
+# Finish progress, collect diagnostics, and return common solver stats.
+function _manopt_finish_result(
+    p_opt,
+    state,
+    progress,
+    diagnostics_recorder,
+    solver_cost,
+    solver_grad,
+    M,
+    normA2;
+    tol_T,
+    maxiter::Int,
+    solver::Symbol,
+    tiny_grad_tol,
+    return_stats::Bool,
+    verbose::Bool,
+    normalized_objective::Bool,
+    solver_info_extra = (;),
+)
+    iterations_done = _solver_iterations(state, maxiter)
+    if verbose
+        finish_progress!(
+            progress;
+            current = iterations_done,
+            showvalues = Any[("Status", "Finished"), ("Iterations", iterations_done)],
+        )
+    end
+    solver_info =
+        isnothing(diagnostics_recorder) ? (;) :
+        _solver_info(diagnostics_recorder, iterations_done)
+    solver_info = merge(solver_info, solver_info_extra)
+    if !return_stats
+        return p_opt
+    end
+    return _solver_stats(
+        solver_cost,
+        solver_grad,
+        M,
+        p_opt,
+        state,
+        normA2;
+        tol_T,
+        maxiter,
+        solver,
+        tiny_grad_tol,
+        solver_info,
+        normalized_objective,
+    )
+end
+
 # Query Manopt's convergence flag through one local compatibility point.
 @inline _solver_has_converged(state) = Manopt.has_converged(state)
 

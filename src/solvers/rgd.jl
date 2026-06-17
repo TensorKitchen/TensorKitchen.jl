@@ -21,26 +21,29 @@ function solve_rgd(
     grad_tol = nothing,
     normalized_objective::Bool = true,
 )
-    p0_local = _solver_point(M, p0)
-    T = _scalar_eltype(p0_local)
-    model_grad_raw = isnothing(model_grad) ? grad(model_egrad) : model_grad
-    model_grad_local = _layout_adapt_gradient(model_grad_raw)
-    objective_scale =
-        normalized_objective && !isnothing(normA2) && normA2 > 0 ? T(normA2) : one(T)
-    solver_cost_base, solver_grad, uses_relative_objective =
-        _relative_solver_functions(model_cost, model_grad_local, objective_scale)
+    setup = _prepare_manopt_solver_functions(
+        model_cost,
+        model_egrad,
+        M,
+        p0;
+        normA2,
+        model_grad,
+        tol,
+        grad_tol,
+        normalized_objective,
+    )
+    p0_local = setup.p0
+    T = setup.T
     retraction_method = _solver_retraction_method(M, p0_local)
-    stepsize_eff_base = T(stepsize) * objective_scale
-    armijo_alpha_min = T(1e-8) * objective_scale
-    grad_stop_tol = isnothing(grad_tol) ? T(tol) : T(grad_tol)
-    tol_g = _dual_stop_grad_tol(T, tol, grad_tol)
+    stepsize_eff_base = T(stepsize) * setup.objective_scale
+    armijo_alpha_min = T(1e-8) * setup.objective_scale
+    tol_g = setup.dual_grad_tol
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
-
-    stopping = StopWhenAny(
-        StopAfterIteration(maxiter),
-        StopWhenGradientNormLess(grad_stop_tol),
-        StopWhenStepsizeLess(armijo_alpha_min),
-        dual_stop,
+    stopping = _manopt_stopping(
+        maxiter,
+        setup.grad_stop_tol,
+        dual_stop;
+        extra = (StopWhenStepsizeLess(armijo_alpha_min),),
     )
 
     use_squaring_armijo = _contains_sqeuclidean_manifold(M)
@@ -50,7 +53,7 @@ function solve_rgd(
         _adaptive_initial_stepsize(
             M,
             p0_local,
-            solver_grad,
+            setup.solver_grad,
             retraction_method,
             stepsize_eff_base;
             alpha_min = armijo_alpha_min,
@@ -64,7 +67,7 @@ function solve_rgd(
     armijo_additional_decrease =
         use_strict_sqeuclidean ? ((M, q) -> _all_finite(q)) : ((M, q) -> true)
     solver_cost =
-        use_strict_sqeuclidean ? _safe_cost_function(solver_cost_base) : solver_cost_base
+        use_strict_sqeuclidean ? _safe_cost_function(setup.solver_cost) : setup.solver_cost
     armijo = Manopt.ArmijoLinesearch(
         M;
         retraction_method = retraction_method,
@@ -78,70 +81,48 @@ function solve_rgd(
         additional_decrease_condition = armijo_additional_decrease,
     )
 
-    progress =
-        maxiter > 0 ?
-        make_rgd_progress(maxiter; enabled = verbose, phase = :refinement, dt = 0.2) :
-        NoMethodProgress()
-    diagnostics_callback =
-        isnothing(diagnostics_recorder) ? nothing :
-        _solver_diagnostics_callback(diagnostics_recorder)
-    progress_callback = _solver_progress_callback(
-        progress,
+    callbacks = _manopt_callbacks(
+        n -> make_rgd_progress(n; enabled = verbose, phase = :refinement, dt = 0.2),
+        maxiter,
+        verbose,
         solver_cost,
-        solver_grad,
+        setup.solver_grad,
         M;
         diagnostics_recorder,
+        post_step_callback,
+        iteration_callbacks,
     )
 
     state = gradient_descent(
         M,
         solver_cost,
-        solver_grad,
+        setup.solver_grad,
         p0_local;
         retraction_method = retraction_method,
         stepsize = armijo,
         stopping_criterion = stopping,
-        debug = _solver_debug_actions(
-            verbose,
-            post_step_callback,
-            diagnostics_callback,
-            progress_callback,
-            iteration_callbacks...,
-        ),
+        debug = callbacks.debug_actions,
         count = [:Cost, :Gradient],
         return_state = true,
     )
 
-    p_opt = get_solver_result(state)
-    iterations_done = _solver_iterations(state, maxiter)
-    if verbose
-        finish_progress!(
-            progress;
-            current = iterations_done,
-            showvalues = Any[("Status", "Finished"), ("Iterations", iterations_done)],
-        )
-    end
-    solver_info =
-        isnothing(diagnostics_recorder) ? (;) :
-        _solver_info(diagnostics_recorder, iterations_done)
-    solver_info =
-        merge(solver_info, (initial_stepsize_eff = Float64(initial_stepsize_eff),))
-    if !return_stats
-        return p_opt
-    end
-    return _solver_stats(
-        solver_cost,
-        solver_grad,
-        M,
-        p_opt,
+    return _manopt_finish_result(
+        get_solver_result(state),
         state,
+        callbacks.progress,
+        diagnostics_recorder,
+        solver_cost,
+        setup.solver_grad,
+        M,
         normA2;
         tol_T = T(tol),
         maxiter,
         solver = :rgd,
         tiny_grad_tol = tol_g,
-        solver_info,
-        normalized_objective = uses_relative_objective,
+        return_stats,
+        verbose,
+        normalized_objective = setup.uses_relative_objective,
+        solver_info_extra = (initial_stepsize_eff = Float64(initial_stepsize_eff),),
     )
 end
 
@@ -163,80 +144,65 @@ function solve_rgd_fixed(
     grad_tol = nothing,
     normalized_objective::Bool = true,
 )
-    p0_local = _solver_point(M, p0)
-    T = _scalar_eltype(p0_local)
-    model_grad_raw = isnothing(model_grad) ? grad(model_egrad) : model_grad
-    model_grad_local = _layout_adapt_gradient(model_grad_raw)
-    objective_scale =
-        normalized_objective && !isnothing(normA2) && normA2 > 0 ? T(normA2) : one(T)
-    solver_cost, solver_grad, uses_relative_objective =
-        _relative_solver_functions(model_cost, model_grad_local, objective_scale)
+    setup = _prepare_manopt_solver_functions(
+        model_cost,
+        model_egrad,
+        M,
+        p0;
+        normA2,
+        model_grad,
+        tol,
+        grad_tol,
+        normalized_objective,
+    )
+    p0_local = setup.p0
+    T = setup.T
     retraction_method = _solver_retraction_method(M, p0_local)
-    grad_stop_tol = isnothing(grad_tol) ? T(tol) : T(grad_tol)
     tiny_grad_tol = isnothing(grad_tol) ? T(1e-5) : T(grad_tol)
-    stopping =
-        StopWhenAny(StopAfterIteration(maxiter), StopWhenGradientNormLess(grad_stop_tol))
-    progress =
-        maxiter > 0 ?
-        make_rgd_fixed_progress(maxiter; enabled = verbose, phase = :refinement, dt = 0.2) :
-        NoMethodProgress()
-    diagnostics_callback =
-        isnothing(diagnostics_recorder) ? nothing :
-        _solver_diagnostics_callback(diagnostics_recorder)
-    progress_callback = _solver_progress_callback(
-        progress,
-        solver_cost,
-        solver_grad,
+    stopping = StopWhenAny(
+        StopAfterIteration(maxiter),
+        StopWhenGradientNormLess(setup.grad_stop_tol),
+    )
+    callbacks = _manopt_callbacks(
+        n -> make_rgd_fixed_progress(n; enabled = verbose, phase = :refinement, dt = 0.2),
+        maxiter,
+        verbose,
+        setup.solver_cost,
+        setup.solver_grad,
         M;
         diagnostics_recorder,
+        post_step_callback,
+        iteration_callbacks,
     )
     state = gradient_descent(
         M,
-        solver_cost,
-        solver_grad,
+        setup.solver_cost,
+        setup.solver_grad,
         p0_local;
         retraction_method = retraction_method,
-        stepsize = Manopt.ConstantStepsize(M, T(stepsize) * objective_scale),
+        stepsize = Manopt.ConstantStepsize(M, T(stepsize) * setup.objective_scale),
         stopping_criterion = stopping,
-        debug = _solver_debug_actions(
-            verbose,
-            post_step_callback,
-            diagnostics_callback,
-            progress_callback,
-            iteration_callbacks...,
-        ),
+        debug = callbacks.debug_actions,
         count = [:Cost, :Gradient],
         return_state = true,
     )
 
-    p_opt = get_solver_result(state)
-    iterations_done = _solver_iterations(state, maxiter)
-    if verbose
-        finish_progress!(
-            progress;
-            current = iterations_done,
-            showvalues = Any[("Status", "Finished"), ("Iterations", iterations_done)],
-        )
-    end
-    solver_info =
-        isnothing(diagnostics_recorder) ? (;) :
-        _solver_info(diagnostics_recorder, iterations_done)
-    if !return_stats
-        return p_opt
-    end
-    return _solver_stats(
-        solver_cost,
-        solver_grad,
-        M,
-        p_opt,
+    return _manopt_finish_result(
+        get_solver_result(state),
         state,
+        callbacks.progress,
+        diagnostics_recorder,
+        setup.solver_cost,
+        setup.solver_grad,
+        M,
         normA2;
         tol_T = T(tol),
         maxiter,
         solver = :rgd_fixed,
         tiny_grad_tol = tiny_grad_tol,
-        solver_info,
-        normalized_objective = uses_relative_objective,
+        return_stats,
+        verbose,
+        normalized_objective = setup.uses_relative_objective,
     )
 end
 
