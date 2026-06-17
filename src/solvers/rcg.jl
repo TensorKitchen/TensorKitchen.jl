@@ -106,7 +106,7 @@ function solve_rcg(
     diagnostics_recorder = nothing,
     iteration_callbacks = (),
     grad_tol = nothing,
-    normalized_objective::Bool = false,
+    normalized_objective::Bool = true,
 )
     p0_local = _solver_point(M, p0)
     T = _scalar_eltype(p0_local)
@@ -223,7 +223,7 @@ function run_first_order_solver(
     diagnostics_recorder,
     iteration_callbacks,
     grad_tol = nothing,
-    normalized_objective::Bool = false,
+    normalized_objective::Bool = true,
 )
     return solve_rcg(
         setup.model_cost,
