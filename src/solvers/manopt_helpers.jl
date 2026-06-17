@@ -331,64 +331,19 @@ end
     return isdefined(Manopt, :stopped_at) ? :stopped_at : :stop_at_iteration_fallback
 end
 
-# Build common solver result stats when no target norm is available.
-function _solver_stats(
-    model_cost,
-    model_grad,
-    M,
-    p_opt,
-    state,
-    ::Nothing;
-    tol_T,
-    maxiter::Int,
-    solver::Symbol,
-    tiny_grad_tol = nothing,
-    solver_info = (;),
-    use_state_gradient::Bool = true,
-)
-    T = typeof(tol_T)
-    final_cost = model_cost(M, p_opt)
-    cost_for_error = max(T(0), T(2) * final_cost)
-    rel_error = sqrt(cost_for_error)
-    grad_state = use_state_gradient ? _solver_gradient(state) : nothing
-    grad_from_state = !isnothing(grad_state)
-    grad_final =
-        isnothing(grad_state) ? model_grad(M, p_opt) :
-        _align_layout_like_point(p_opt, grad_state)
-    grad_norm = norm(M, p_opt, grad_final)
-    iterations = _solver_iterations(state, maxiter)
-    converged_grad =
-        grad_norm < tol_T || (!isnothing(tiny_grad_tol) && grad_norm < tiny_grad_tol)
-    converged_state = _solver_has_converged(state)
-    solver_info = merge(
-        solver_info,
-        (
-            gradient_source = grad_from_state ? :state : :recomputed,
-            has_converged_state = converged_state,
-            converged_by_gradient_threshold = converged_grad,
-            iteration_source = _solver_iteration_source(),
-        ),
-    )
-    return (
-        point = p_opt,
-        cost = final_cost,
-        rel_error = rel_error,
-        grad_norm = grad_norm,
-        iterations = iterations,
-        converged = converged_state,
-        solver = solver,
-        solver_info = solver_info,
-    )
-end
+# Convert a squared residual value to the public relative-error diagnostic.
+_solver_rel_error(cost_for_error, ::Nothing, ::Type) = sqrt(cost_for_error)
+_solver_rel_error(cost_for_error, normA2::Real, ::Type{T}) where {T} =
+    _relative_error_frob_sq(cost_for_error, T(normA2))
 
-# Build common solver result stats and relative error when ||A||^2 is available.
+# Build common solver result stats, with optional ||A||^2 for relative scaling.
 function _solver_stats(
     model_cost,
     model_grad,
     M,
     p_opt,
     state,
-    normA2::Real;
+    normA2::Union{Nothing,Real};
     tol_T,
     maxiter::Int,
     solver::Symbol,
@@ -399,7 +354,7 @@ function _solver_stats(
     T = typeof(tol_T)
     final_cost = model_cost(M, p_opt)
     cost_for_error = max(T(0), T(2) * final_cost)
-    rel_error = _relative_error_frob_sq(cost_for_error, T(normA2))
+    rel_error = _solver_rel_error(cost_for_error, normA2, T)
     grad_state = use_state_gradient ? _solver_gradient(state) : nothing
     grad_from_state = !isnothing(grad_state)
     grad_final =
