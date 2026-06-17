@@ -272,6 +272,32 @@ end
     @test cpd_rgd_object isa CPDResult
     @test cpd_rgd_object.solver == :rgd
 
+    cpd_lbfgs_symbol = cpd(
+        A,
+        2;
+        solver = :lbfgs,
+        init = :alswarm,
+        warm_steps = 2,
+        maxiter = 2,
+        verbose = false,
+    )
+    @test cpd_lbfgs_symbol isa CPDResult
+    @test cpd_lbfgs_symbol.solver == :lbfgs
+    @test cpd_lbfgs_symbol.solver_info.memory_size == 1
+
+    cpd_lbfgs_object = cpd(
+        A,
+        2;
+        solver = LBFGSSolver(memory_size = 3),
+        init = :alswarm,
+        warm_steps = 2,
+        maxiter = 2,
+        verbose = false,
+    )
+    @test cpd_lbfgs_object isa CPDResult
+    @test cpd_lbfgs_object.solver == :lbfgs
+    @test cpd_lbfgs_object.solver_info.memory_size == 3
+
     cpd_als_object =
         cpd(A, 2; solver = ALSSolver(), init = :tucker, maxiter = 1, verbose = false)
     @test cpd_als_object isa CPDResult

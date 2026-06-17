@@ -225,6 +225,7 @@ function solve(
     return_stats::Bool = false,
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
     grad_tol = nothing,
+    normalized_objective::Bool = false,
     iteration_callbacks = (),
 ) where {T<:AbstractFloat}
     setup = _prepare_solver_problem(model; init, p0, gradient_mode, verbose)
@@ -247,6 +248,7 @@ function solve(
         return_stats,
         vector_transport_method,
         grad_tol,
+        normalized_objective,
         post_step_callback,
         diagnostics_recorder,
         iteration_callbacks,
@@ -266,6 +268,7 @@ function solve(
     return_stats::Bool = false,
     vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing} = nothing,
     grad_tol = nothing,
+    normalized_objective::Bool = false,
     iteration_callbacks = (),
 ) where {T<:AbstractFloat}
     setup = _prepare_solver_problem(model; init, p0, gradient_mode)
@@ -288,6 +291,7 @@ function solve(
         return_stats,
         vector_transport_method,
         grad_tol,
+        normalized_objective,
         post_step_callback,
         diagnostics_recorder,
         iteration_callbacks,

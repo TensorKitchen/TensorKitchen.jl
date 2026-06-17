@@ -259,6 +259,32 @@ end
     end
 end
 
+@inline _scale_solver_tangent(x::Number, scale::Real) = x * scale
+_scale_solver_tangent(x::AbstractArray, scale::Real) = x .* scale
+_scale_solver_tangent(x::ArrayPartition, scale::Real) =
+    ArrayPartition(map(part -> _scale_solver_tangent(part, scale), x.x)...)
+_scale_solver_tangent(x::Tuple, scale::Real) =
+    map(part -> _scale_solver_tangent(part, scale), x)
+
+function _scale_solver_tangent(x, scale::Real)
+    try
+        return x .* scale
+    catch
+        return scale * x
+    end
+end
+
+function _relative_solver_functions(model_cost, model_grad, scale::Real)
+    scale > 0 || return model_cost, model_grad, false
+    scale == one(scale) && return model_cost, model_grad, false
+    inv_scale = inv(scale)
+    return (
+        (M, p) -> model_cost(M, p) * inv_scale,
+        (M, p) -> _scale_solver_tangent(model_grad(M, p), inv_scale),
+        true,
+    )
+end
+
 @inline _solver_has_converged(state) = Manopt.has_converged(state)
 
 
@@ -293,12 +319,13 @@ function _solver_stats(
     solver::Symbol,
     tiny_grad_tol = nothing,
     solver_info = (;),
+    use_state_gradient::Bool = true,
 )
     T = typeof(tol_T)
     final_cost = model_cost(M, p_opt)
     cost_for_error = max(T(0), T(2) * final_cost)
     rel_error = sqrt(cost_for_error)
-    grad_state = _solver_gradient(state)
+    grad_state = use_state_gradient ? _solver_gradient(state) : nothing
     grad_from_state = !isnothing(grad_state)
     grad_final =
         isnothing(grad_state) ? model_grad(M, p_opt) :
@@ -341,12 +368,13 @@ function _solver_stats(
     solver::Symbol,
     tiny_grad_tol = nothing,
     solver_info = (;),
+    use_state_gradient::Bool = true,
 )
     T = typeof(tol_T)
     final_cost = model_cost(M, p_opt)
     cost_for_error = max(T(0), T(2) * final_cost)
     rel_error = _relative_error_frob_sq(cost_for_error, T(normA2))
-    grad_state = _solver_gradient(state)
+    grad_state = use_state_gradient ? _solver_gradient(state) : nothing
     grad_from_state = !isnothing(grad_state)
     grad_final =
         isnothing(grad_state) ? model_grad(M, p_opt) :
@@ -414,16 +442,21 @@ function _solver_progress_callback(
     model_cost,
     model_grad,
     M;
+    normA2 = nothing,
     diagnostics_recorder = nothing,
 )
     progress isa NoMethodProgress && return nothing
+    has_relative_scale = !isnothing(normA2) && normA2 > 0
+    target_norm = has_relative_scale ? sqrt(normA2) : nothing
     return function (problem, state, k)
         k <= 0 && return nothing
         p = get_iterate(state)
         c = model_cost(M, p)
         g = model_grad(M, p)
         gnorm = norm(M, p, g)
-        showvalues = Any[("Iter", k), ("Cost", c), ("Grad norm", gnorm)]
+        c_display = has_relative_scale ? sqrt(max(2 * c, zero(c))) : c
+        gnorm_display = has_relative_scale ? gnorm * target_norm : gnorm
+        showvalues = Any[("Iter", k), ("Cost", c_display), ("Grad norm", gnorm_display)]
         if !isnothing(diagnostics_recorder)
             step = diagnostics_recorder.accepted_stepsize_history
             trials = diagnostics_recorder.line_search_trial_history
@@ -580,19 +613,27 @@ function solve_rgd(
     diagnostics_recorder = nothing,
     iteration_callbacks = (),
     grad_tol = nothing,
+    normalized_objective::Bool = false,
 )
     p0_local = _solver_point(M, p0)
     T = _scalar_eltype(p0_local)
     model_grad_raw = isnothing(model_grad) ? grad(model_egrad) : model_grad
     model_grad_local = _layout_adapt_gradient(model_grad_raw)
+    objective_scale =
+        normalized_objective && !isnothing(normA2) && normA2 > 0 ? T(normA2) : one(T)
+    solver_cost_base, solver_grad, uses_relative_objective =
+        _relative_solver_functions(model_cost, model_grad_local, objective_scale)
     retraction_method = _solver_retraction_method(M, p0_local)
-    armijo_alpha_min = T(1e-8)
+    stepsize_eff_base = T(stepsize) * objective_scale
+    armijo_alpha_min = T(1e-8) * objective_scale
+    grad_stop_tol = isnothing(grad_tol) ? T(tol) : T(grad_tol)
     tol_g = _dual_stop_grad_tol(T, tol, grad_tol)
+    tol_g_raw = uses_relative_objective ? tol_g * objective_scale : tol_g
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
 
     stopping = StopWhenAny(
         StopAfterIteration(maxiter),
-        StopWhenGradientNormLess(T(tol)),
+        StopWhenGradientNormLess(grad_stop_tol),
         StopWhenStepsizeLess(armijo_alpha_min),
         dual_stop,
     )
@@ -604,11 +645,11 @@ function solve_rgd(
         _adaptive_initial_stepsize(
             M,
             p0_local,
-            model_grad_local,
+            solver_grad,
             retraction_method,
-            T(stepsize);
+            stepsize_eff_base;
             alpha_min = armijo_alpha_min,
-        ) : T(stepsize)
+        ) : stepsize_eff_base
     armijo_contraction = use_squaring_armijo ? T(0.5) : T(0.85)
     armijo_sufficient_decrease = use_squaring_armijo ? T(1e-4) : T(1e-3)
     armijo_stop_decreasing =
@@ -617,7 +658,8 @@ function solve_rgd(
     armijo_stop_increasing = use_strict_sqeuclidean ? 0 : 100
     armijo_additional_decrease =
         use_strict_sqeuclidean ? ((M, q) -> _all_finite(q)) : ((M, q) -> true)
-    solver_cost = use_strict_sqeuclidean ? _safe_cost_function(model_cost) : model_cost
+    solver_cost =
+        use_strict_sqeuclidean ? _safe_cost_function(solver_cost_base) : solver_cost_base
     armijo = Manopt.ArmijoLinesearch(
         M;
         retraction_method = retraction_method,
@@ -641,15 +683,16 @@ function solve_rgd(
     progress_callback = _solver_progress_callback(
         progress,
         solver_cost,
-        model_grad_local,
+        solver_grad,
         M;
+        normA2 = uses_relative_objective ? normA2 : nothing,
         diagnostics_recorder,
     )
 
     state = gradient_descent(
         M,
         solver_cost,
-        model_grad_local,
+        solver_grad,
         p0_local;
         retraction_method = retraction_method,
         stepsize = armijo,
@@ -684,7 +727,7 @@ function solve_rgd(
     end
     return isnothing(normA2) ?
            _solver_stats(
-        solver_cost,
+        model_cost,
         model_grad_local,
         M,
         p_opt,
@@ -693,11 +736,12 @@ function solve_rgd(
         tol_T = T(tol),
         maxiter,
         solver = :rgd,
-        tiny_grad_tol = tol_g,
+        tiny_grad_tol = tol_g_raw,
         solver_info,
+        use_state_gradient = !uses_relative_objective,
     ) :
            _solver_stats(
-        solver_cost,
+        model_cost,
         model_grad_local,
         M,
         p_opt,
@@ -706,8 +750,9 @@ function solve_rgd(
         tol_T = T(tol),
         maxiter,
         solver = :rgd,
-        tiny_grad_tol = tol_g,
+        tiny_grad_tol = tol_g_raw,
         solver_info,
+        use_state_gradient = !uses_relative_objective,
     )
 end
 
@@ -727,14 +772,22 @@ function solve_rgd_fixed(
     diagnostics_recorder = nothing,
     iteration_callbacks = (),
     grad_tol = nothing,
+    normalized_objective::Bool = false,
 )
     p0_local = _solver_point(M, p0)
     T = _scalar_eltype(p0_local)
     model_grad_raw = isnothing(model_grad) ? grad(model_egrad) : model_grad
     model_grad_local = _layout_adapt_gradient(model_grad_raw)
+    objective_scale =
+        normalized_objective && !isnothing(normA2) && normA2 > 0 ? T(normA2) : one(T)
+    solver_cost, solver_grad, uses_relative_objective =
+        _relative_solver_functions(model_cost, model_grad_local, objective_scale)
     retraction_method = _solver_retraction_method(M, p0_local)
-    tiny_grad_tol = isnothing(grad_tol) ? T(1e-5) : T(grad_tol)
-    stopping = StopWhenAny(StopAfterIteration(maxiter), StopWhenGradientNormLess(T(tol)))
+    grad_stop_tol = isnothing(grad_tol) ? T(tol) : T(grad_tol)
+    tiny_grad_tol =
+        isnothing(grad_tol) ? T(1e-5) :
+        (uses_relative_objective ? T(grad_tol) * objective_scale : T(grad_tol))
+    stopping = StopWhenAny(StopAfterIteration(maxiter), StopWhenGradientNormLess(grad_stop_tol))
     progress =
         maxiter > 0 ?
         make_rgd_fixed_progress(maxiter; enabled = verbose, phase = :refinement, dt = 0.2) :
@@ -744,18 +797,19 @@ function solve_rgd_fixed(
         _solver_diagnostics_callback(diagnostics_recorder)
     progress_callback = _solver_progress_callback(
         progress,
-        model_cost,
-        model_grad_local,
+        solver_cost,
+        solver_grad,
         M;
+        normA2 = uses_relative_objective ? normA2 : nothing,
         diagnostics_recorder,
     )
     state = gradient_descent(
         M,
-        model_cost,
-        model_grad_local,
+        solver_cost,
+        solver_grad,
         p0_local;
         retraction_method = retraction_method,
-        stepsize = Manopt.ConstantStepsize(M, T(stepsize)),
+        stepsize = Manopt.ConstantStepsize(M, T(stepsize) * objective_scale),
         stopping_criterion = stopping,
         debug = _solver_debug_actions(
             verbose,
@@ -796,6 +850,7 @@ function solve_rgd_fixed(
         solver = :rgd_fixed,
         tiny_grad_tol = tiny_grad_tol,
         solver_info,
+        use_state_gradient = !uses_relative_objective,
     ) :
            _solver_stats(
         model_cost,
@@ -809,6 +864,7 @@ function solve_rgd_fixed(
         solver = :rgd_fixed,
         tiny_grad_tol = tiny_grad_tol,
         solver_info,
+        use_state_gradient = !uses_relative_objective,
     )
 end
 
@@ -841,6 +897,7 @@ function run_first_order_solver(
     diagnostics_recorder,
     iteration_callbacks,
     grad_tol = nothing,
+    normalized_objective::Bool = false,
 )
     return solve_rgd(
         setup.model_cost,
@@ -859,6 +916,7 @@ function run_first_order_solver(
         diagnostics_recorder,
         iteration_callbacks,
         grad_tol,
+        normalized_objective,
     )
 end
 
@@ -894,6 +952,7 @@ function run_first_order_solver(
     diagnostics_recorder,
     iteration_callbacks,
     grad_tol = nothing,
+    normalized_objective::Bool = false,
 )
     return solve_rgd_fixed(
         setup.model_cost,
@@ -911,5 +970,6 @@ function run_first_order_solver(
         diagnostics_recorder,
         iteration_callbacks,
         grad_tol,
+        normalized_objective,
     )
 end

@@ -753,10 +753,7 @@ function _cpd_manifold_grad_tol(
     solver::Union{RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver},
     tol::Real,
 )
-    inner = cpd_model(model)
-    inner.nonnegative && return tol
-    T = eltype(tensor(model))
-    return sqrt(T(tol)) * sqrt(sum(abs2, tensor(model)))
+    return tol
 end
 
 function _cpd_point_rel_error(model, p)
@@ -865,6 +862,7 @@ function _run_cpd_solver(
         refinement_verbose = verbose,
         vector_transport_method,
         grad_tol = _cpd_manifold_grad_tol(model, solver, tol),
+        normalized_objective = solver isa Union{RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver},
         iteration_callbacks,
         kwargs...,
     )
