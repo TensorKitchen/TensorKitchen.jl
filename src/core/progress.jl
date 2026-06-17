@@ -176,6 +176,20 @@ end
     p.was_rendered = true
     return nothing
 end
+@inline _meter_was_printed(meter) = getproperty(getproperty(meter, :core), :printed)
+@inline _sync_rendered!(::NoMethodProgress) = nothing
+function _sync_rendered!(p::FamilyProgress)
+    meter = _meter(p)
+    if !isnothing(meter) && _meter_was_printed(meter)
+        _mark_rendered!(p)
+    end
+    return nothing
+end
+function _sync_tracker_rendered!(tracker::PhaseProgress)
+    _sync_rendered!(tracker.initialization)
+    _sync_rendered!(tracker.refinement)
+    return nothing
+end
 
 @inline function _force_visible_phase_finish(tracker::PhaseProgress, progress)
     return tracker.phase == :refinement &&
@@ -226,9 +240,7 @@ function update_progress!(
             Any[("Method", _method_name(progress)); showvalues]
         end
         PM.update!(meter, current; showvalues = showvalues_with_method, force)
-        if force || current < meter.n || _was_rendered(progress)
-            _mark_rendered!(progress)
-        end
+        _sync_rendered!(progress)
     end
     return nothing
 end
@@ -244,6 +256,7 @@ function finish_progress!(
     progress isa NoMethodProgress && return nothing
     meter = _meter(progress)
     isnothing(meter) && return nothing
+    _sync_tracker_rendered!(tracker)
 
     showvalues_with_method = if isnothing(showvalues)
         Any[("Method", _method_name(progress))]
@@ -273,6 +286,7 @@ function finish_progress!(
     isnothing(meter) && return nothing
     tracker = _current_phase_tracker()
     if tracker isa PhaseProgress
+        _sync_tracker_rendered!(tracker)
         set_phase!(tracker, progress.phase)
         if active_progress(tracker) === progress
             return finish_progress!(tracker; current, showvalues)
