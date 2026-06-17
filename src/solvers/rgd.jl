@@ -787,7 +787,8 @@ function solve_rgd_fixed(
     tiny_grad_tol =
         isnothing(grad_tol) ? T(1e-5) :
         (uses_relative_objective ? T(grad_tol) * objective_scale : T(grad_tol))
-    stopping = StopWhenAny(StopAfterIteration(maxiter), StopWhenGradientNormLess(grad_stop_tol))
+    stopping =
+        StopWhenAny(StopAfterIteration(maxiter), StopWhenGradientNormLess(grad_stop_tol))
     progress =
         maxiter > 0 ?
         make_rgd_fixed_progress(maxiter; enabled = verbose, phase = :refinement, dt = 0.2) :

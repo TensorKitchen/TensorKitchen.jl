@@ -862,7 +862,8 @@ function _run_cpd_solver(
         refinement_verbose = verbose,
         vector_transport_method,
         grad_tol = _cpd_manifold_grad_tol(model, solver, tol),
-        normalized_objective = solver isa Union{RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver},
+        normalized_objective = solver isa
+                               Union{RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver},
         iteration_callbacks,
         kwargs...,
     )
