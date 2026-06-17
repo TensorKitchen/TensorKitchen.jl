@@ -92,7 +92,6 @@ function solve_lbfgs(
         vector_transport_method
     grad_stop_tol = isnothing(grad_tol) ? T(tol) : T(grad_tol)
     tol_g = _dual_stop_grad_tol(T, tol, grad_tol)
-    tol_g_raw = uses_relative_objective ? tol_g * objective_scale : tol_g
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
     stopping = StopWhenAny(
         StopAfterIteration(maxiter),
@@ -116,7 +115,6 @@ function solve_lbfgs(
         solver_cost,
         solver_grad,
         M;
-        normA2 = uses_relative_objective ? normA2 : nothing,
         diagnostics_recorder,
     )
 
@@ -173,8 +171,8 @@ function solve_lbfgs(
         ),
     )
     return _solver_stats(
-        model_cost,
-        model_grad_local,
+        solver_cost,
+        solver_grad,
         M,
         p_opt,
         state,
@@ -182,9 +180,9 @@ function solve_lbfgs(
         tol_T = T(tol),
         maxiter,
         solver = :lbfgs,
-        tiny_grad_tol = tol_g_raw,
+        tiny_grad_tol = tol_g,
         solver_info,
-        use_state_gradient = !uses_relative_objective,
+        normalized_objective = uses_relative_objective,
     )
 end
 

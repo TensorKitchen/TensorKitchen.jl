@@ -34,7 +34,6 @@ function solve_rgd(
     armijo_alpha_min = T(1e-8) * objective_scale
     grad_stop_tol = isnothing(grad_tol) ? T(tol) : T(grad_tol)
     tol_g = _dual_stop_grad_tol(T, tol, grad_tol)
-    tol_g_raw = uses_relative_objective ? tol_g * objective_scale : tol_g
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
 
     stopping = StopWhenAny(
@@ -91,7 +90,6 @@ function solve_rgd(
         solver_cost,
         solver_grad,
         M;
-        normA2 = uses_relative_objective ? normA2 : nothing,
         diagnostics_recorder,
     )
 
@@ -132,8 +130,8 @@ function solve_rgd(
         return p_opt
     end
     return _solver_stats(
-        model_cost,
-        model_grad_local,
+        solver_cost,
+        solver_grad,
         M,
         p_opt,
         state,
@@ -141,9 +139,9 @@ function solve_rgd(
         tol_T = T(tol),
         maxiter,
         solver = :rgd,
-        tiny_grad_tol = tol_g_raw,
+        tiny_grad_tol = tol_g,
         solver_info,
-        use_state_gradient = !uses_relative_objective,
+        normalized_objective = uses_relative_objective,
     )
 end
 
@@ -175,9 +173,7 @@ function solve_rgd_fixed(
         _relative_solver_functions(model_cost, model_grad_local, objective_scale)
     retraction_method = _solver_retraction_method(M, p0_local)
     grad_stop_tol = isnothing(grad_tol) ? T(tol) : T(grad_tol)
-    tiny_grad_tol =
-        isnothing(grad_tol) ? T(1e-5) :
-        (uses_relative_objective ? T(grad_tol) * objective_scale : T(grad_tol))
+    tiny_grad_tol = isnothing(grad_tol) ? T(1e-5) : T(grad_tol)
     stopping =
         StopWhenAny(StopAfterIteration(maxiter), StopWhenGradientNormLess(grad_stop_tol))
     progress =
@@ -192,7 +188,6 @@ function solve_rgd_fixed(
         solver_cost,
         solver_grad,
         M;
-        normA2 = uses_relative_objective ? normA2 : nothing,
         diagnostics_recorder,
     )
     state = gradient_descent(
@@ -230,8 +225,8 @@ function solve_rgd_fixed(
         return p_opt
     end
     return _solver_stats(
-        model_cost,
-        model_grad_local,
+        solver_cost,
+        solver_grad,
         M,
         p_opt,
         state,
@@ -241,7 +236,7 @@ function solve_rgd_fixed(
         solver = :rgd_fixed,
         tiny_grad_tol = tiny_grad_tol,
         solver_info,
-        use_state_gradient = !uses_relative_objective,
+        normalized_objective = uses_relative_objective,
     )
 end
 
