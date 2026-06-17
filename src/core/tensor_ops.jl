@@ -470,8 +470,8 @@ gradU_column_cp(
 
 cp_reconstruction_norm2(components::Vector{RankOneTensor{T}}) where {T<:AbstractFloat} =
     sum(
-        cross_component(components[i], components[j]) for i in eachindex(components),
-        j in eachindex(components)
+        cross_component(components[i], components[j]) for
+        i in eachindex(components), j in eachindex(components)
     )
 
 function cp_inner_AX(

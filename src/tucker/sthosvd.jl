@@ -213,7 +213,7 @@ function sthosvd(
         rk = max(rk, 1)  # keep at least rank 1
 
         if verbose
-            discarded = rk < length(sigma) ? sqrt(sum(sigma[rk+1:end] .^ 2)) : 0.0
+            discarded = rk < length(sigma) ? sqrt(sum(sigma[(rk+1):end] .^ 2)) : 0.0
             update_progress!(
                 progress,
                 step;
@@ -322,7 +322,7 @@ function error_bound(td::TuckerResult{T,N}) where {T,N}
         rk = size(td.core, k)
         sigma = td.singular_values[k]
         if rk < length(sigma)
-            sq_error += sum(sigma[rk+1:end] .^ 2)
+            sq_error += sum(sigma[(rk+1):end] .^ 2)
         end
     end
     return sqrt(sq_error)
