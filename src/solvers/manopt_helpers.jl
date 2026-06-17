@@ -1,12 +1,19 @@
 
+######################## 
+# This file contains helper functions for communicating with Manopt
+########################
+
+# Sink Manopt's built-in debug text while still letting debug actions run.
 struct _SolverDebugSink <: IO end
 Base.isopen(::_SolverDebugSink) = true
 Base.write(::_SolverDebugSink, ::UInt8) = 1
 Base.write(::_SolverDebugSink, s::Union{String,SubString{String}}) = sizeof(s)
 Base.unsafe_write(::_SolverDebugSink, ::Ptr{UInt8}, n::UInt) = Int(n)
 
+# Shared no-op IO used by Manopt debug groups.
 const _SOLVER_DEBUG_SINK = _SolverDebugSink()
 
+# Stop when both the relative cost change and Riemannian gradient norm are small.
 mutable struct StopWhenCostRelChangeAndGradientLess{T<:Real} <: Manopt.StoppingCriterion
     tol_cost::T
     tol_grad::T
@@ -16,6 +23,7 @@ mutable struct StopWhenCostRelChangeAndGradientLess{T<:Real} <: Manopt.StoppingC
     at_iteration::Int
 end
 
+# Initialize the dual cost-change/gradient stopping rule with empty history.
 function StopWhenCostRelChangeAndGradientLess(tol_cost::T, tol_grad::T) where {T<:Real}
     return StopWhenCostRelChangeAndGradientLess{T}(
         tol_cost,
@@ -27,6 +35,7 @@ function StopWhenCostRelChangeAndGradientLess(tol_cost::T, tol_grad::T) where {T
     )
 end
 
+# Update the dual stopping rule from the current Manopt problem/state.
 function (c::StopWhenCostRelChangeAndGradientLess)(problem, state, i)
     if i == 0
         c.prev_cost = Manopt.get_cost(problem, Manopt.get_iterate(state))
@@ -51,6 +60,7 @@ function (c::StopWhenCostRelChangeAndGradientLess)(problem, state, i)
     return false
 end
 
+# Explain why the dual stopping rule stopped, for Manopt status reporting.
 function Manopt.get_reason(c::StopWhenCostRelChangeAndGradientLess)
     if c.at_iteration >= 0
         return "At iteration $(c.at_iteration) the relative cost change ($(c.last_cost_rel_change)) " *
@@ -60,14 +70,17 @@ function Manopt.get_reason(c::StopWhenCostRelChangeAndGradientLess)
     return ""
 end
 
+# Summarize the current dual stopping-rule state for Manopt displays.
 function Manopt.status_summary(c::StopWhenCostRelChangeAndGradientLess)
     has_stopped = c.at_iteration >= 0
     status = has_stopped ? "reached" : "not reached"
     return "cost rel change < $(c.tol_cost) and |grad f| < $(c.tol_grad): $status"
 end
 
+# Mark the dual stopping rule as convergence, not failure or exhaustion.
 Manopt.indicates_convergence(::StopWhenCostRelChangeAndGradientLess) = true
 
+# Print the dual stopping rule compactly in Manopt diagnostics.
 function Base.show(io::IO, c::StopWhenCostRelChangeAndGradientLess)
     return print(
         io,
@@ -76,6 +89,7 @@ function Base.show(io::IO, c::StopWhenCostRelChangeAndGradientLess)
 end
 
 
+# Extract the final iterate across Manopt versions and nested state wrappers.
 function _tk_get_solver_result(state)
     try
         return Manopt.get_solver_result(state)
@@ -95,12 +109,14 @@ function _tk_get_solver_result(state)
 end
 
 
+# Match gradients/tangents to the point container Manopt is currently using.
 @inline _align_layout_like_point(p, x) =
     hasproperty(p, :x) ?
     (hasproperty(x, :x) ? x : (x isa Tuple ? ArrayPartition(x...) : x)) :
     (hasproperty(x, :x) ? Tuple(getproperty(x, :x)) : x)
 
 
+# Recursively convert tuple-like product points to ArrayPartition layout.
 function _to_array_partition(x)
     if x isa ArrayPartition
         return ArrayPartition(map(_to_array_partition, x.x)...)
@@ -113,12 +129,14 @@ function _to_array_partition(x)
 end
 
 
+# Adapt an initial point to the layout expected by the solver manifold.
 function _solver_point(M, p0)
     M2 = _unwrap_solver_manifold(M)
     return M2 isa ProductManifold ? _to_array_partition(p0) : p0
 end
 
 
+# Detect pullback nonnegative geometries that need conservative line search.
 function _contains_sqeuclidean_manifold(M)
     M2 = _unwrap_solver_manifold(M)
     if M2 isa SqEuclidean || M2 isa SoftplusEuclidean
@@ -134,6 +152,7 @@ function _contains_sqeuclidean_manifold(M)
     return false
 end
 
+# Detect strict squaring geometries that require extra Armijo safeguards.
 function _contains_strict_sqeuclidean_manifold(M)
     M2 = _unwrap_solver_manifold(M)
     if M2 isa SqEuclidean
@@ -147,6 +166,7 @@ function _contains_strict_sqeuclidean_manifold(M)
 end
 
 
+# Compute how many Armijo contractions are needed before alpha_min is reached.
 function _armijo_max_decreases(initial_stepsize::Real, contraction::Real, alpha_min::Real)
     initial_stepsize <= alpha_min && return 0
     (contraction <= 0 || contraction >= 1) && return 1000
@@ -155,6 +175,7 @@ function _armijo_max_decreases(initial_stepsize::Real, contraction::Real, alpha_
 end
 
 
+# Estimate a guarded initial RGD step from a one-sided curvature probe.
 function _adaptive_initial_stepsize(
     M,
     p0,
@@ -194,6 +215,7 @@ function _adaptive_initial_stepsize(
     return α
 end
 
+# Check recursively that points, tangents, and nested manifold containers are finite.
 function _all_finite(x)
     if x isa Number
         return isfinite(x)
@@ -216,6 +238,7 @@ function _all_finite(x)
 end
 
 
+# Wrap a cost so invalid points return Inf instead of poisoning line search.
 function _safe_cost_function(model_cost)
     return function (M, p)
         _all_finite(p) || return Inf
@@ -225,6 +248,7 @@ function _safe_cost_function(model_cost)
 end
 
 
+# Wrap a gradient so its container layout follows the queried point layout.
 function _layout_adapt_gradient(model_grad)
     return function (M, p)
         g = model_grad(M, p)
@@ -232,6 +256,7 @@ function _layout_adapt_gradient(model_grad)
     end
 end
 
+# Infer the scalar element type from nested points/tangents used by solvers.
 function _scalar_eltype(p)
     if hasproperty(p, :x) || p isa AbstractVector || p isa Tuple
         parts = point_parts(p)
@@ -248,6 +273,7 @@ function _scalar_eltype(p)
     end
 end
 
+# Read Manopt's cached gradient when the current state exposes it.
 @inline function _solver_gradient(state)
     try
         return Manopt.get_gradient(state)
@@ -256,13 +282,13 @@ end
     end
 end
 
+# Scale cost and gradient when using relative error  
 @inline _scale_solver_tangent(x::Number, scale::Real) = x * scale
 _scale_solver_tangent(x::AbstractArray, scale::Real) = x .* scale
 _scale_solver_tangent(x::ArrayPartition, scale::Real) =
     ArrayPartition(map(part -> _scale_solver_tangent(part, scale), x.x)...)
 _scale_solver_tangent(x::Tuple, scale::Real) =
     map(part -> _scale_solver_tangent(part, scale), x)
-
 function _scale_solver_tangent(x, scale::Real)
     try
         return x .* scale
@@ -270,7 +296,6 @@ function _scale_solver_tangent(x, scale::Real)
         return scale * x
     end
 end
-
 function _relative_solver_functions(model_cost, model_grad, scale::Real)
     scale > 0 || return model_cost, model_grad, false
     scale == one(scale) && return model_cost, model_grad, false
@@ -282,9 +307,10 @@ function _relative_solver_functions(model_cost, model_grad, scale::Real)
     )
 end
 
+# Query Manopt's convergence flag through one local compatibility point.
 @inline _solver_has_converged(state) = Manopt.has_converged(state)
 
-
+# Recover the stopping iteration across Manopt versions and wrapped states.
 function _solver_iterations(state, maxiter::Int)
     if isdefined(Manopt, :stopped_at)
         try
@@ -300,10 +326,12 @@ function _solver_iterations(state, maxiter::Int)
            state.stop.at_iteration : maxiter
 end
 
+# Report which Manopt iteration API was used for solver metadata.
 @inline function _solver_iteration_source()
     return isdefined(Manopt, :stopped_at) ? :stopped_at : :stop_at_iteration_fallback
 end
 
+# Build common solver result stats when no target norm is available.
 function _solver_stats(
     model_cost,
     model_grad,
@@ -353,6 +381,7 @@ function _solver_stats(
     )
 end
 
+# Build common solver result stats and relative error when ||A||^2 is available.
 function _solver_stats(
     model_cost,
     model_grad,
@@ -402,11 +431,14 @@ function _solver_stats(
     )
 end
 
+# Collect only active Manopt debug callbacks, dropping omitted hooks.
 _solver_debug_callbacks(callbacks...) = Any[cb for cb in callbacks if !isnothing(cb)]
 
 # Allow callers to pass `nothing` (e.g., when verbose/debug is omitted)
+# Build debug actions when the verbose flag was omitted.
 _solver_debug_actions(::Nothing, callbacks...) = _solver_debug_callbacks(callbacks...)
 
+# Build Manopt debug actions and attach TensorKitchen callback hooks.
 function _solver_debug_actions(verbose::Bool, callbacks...)
     callback_actions = _solver_debug_callbacks(callbacks...)
     if verbose
@@ -434,6 +466,7 @@ function _solver_debug_actions(verbose::Bool, callbacks...)
     return callback_actions
 end
 
+# Create a Manopt iteration callback that updates TensorKitchen progress output.
 function _solver_progress_callback(
     progress,
     model_cost,
@@ -465,6 +498,7 @@ function _solver_progress_callback(
     end
 end
 
+# Accumulate line-search, step-size, and evaluation diagnostics during solving.
 mutable struct _SolverDiagnosticsRecorder
     first_accepted_stepsize::Float64
     min_accepted_stepsize::Float64
@@ -480,6 +514,7 @@ mutable struct _SolverDiagnosticsRecorder
     line_search_trial_history::Vector{Int}
 end
 
+# Initialize a diagnostics recorder for solvers with or without line search.
 function _SolverDiagnosticsRecorder(;
     line_search_enabled::Bool,
     fallback_stepsize::Real = NaN,
@@ -500,6 +535,7 @@ function _SolverDiagnosticsRecorder(;
     )
 end
 
+# Read Manopt objective evaluation counters defensively across configurations.
 function _solver_eval_count(problem, sym::Symbol)
     try
         count = get_count(get_objective(problem), sym)
@@ -509,6 +545,7 @@ function _solver_eval_count(problem, sym::Symbol)
     end
 end
 
+# Create a Manopt callback that records per-iteration solver diagnostics.
 function _solver_diagnostics_callback(recorder::_SolverDiagnosticsRecorder)
     return function (problem, state, k)
         fe = _solver_eval_count(problem, :Cost)
@@ -542,6 +579,7 @@ function _solver_diagnostics_callback(recorder::_SolverDiagnosticsRecorder)
     end
 end
 
+# Convert recorded diagnostics to the public solver_info named tuple.
 function _solver_info(recorder::_SolverDiagnosticsRecorder, iterations::Int)
     return (
         total_iterations = iterations,
@@ -556,6 +594,7 @@ function _solver_info(recorder::_SolverDiagnosticsRecorder, iterations::Int)
     )
 end
 
+# Create a callback that normalizes/postprocesses iterates after each solver step.
 function _solver_post_step_callback(
     model::AbstractDecompositionModel,
     M,
