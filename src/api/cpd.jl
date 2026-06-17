@@ -9,7 +9,7 @@ function _pullback_eps_value(::Type{T}, pullback_eps) where {T<:AbstractFloat}
 end
 
 function _merge_res_solver_info(res, patch::NamedTuple)
-    si0 = hasproperty(res, :solver_info) ? solver_info(res) : (;)
+    si0 = _result_solver_info(res)
     return (
         point = point(res),
         cost = cost(res),

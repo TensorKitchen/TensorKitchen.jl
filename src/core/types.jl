@@ -363,9 +363,7 @@ solver_info(r::Union{CPDResult,ApproxResult,BTDResult}) = r.solver_info
 
 Return the decoded components stored in a decomposition result.
 """
-components(r::CPDResult) = r.components
-components(r::ApproxResult) = r.components
-components(r::BTDResult) = r.components
+components(r::Union{CPDResult,ApproxResult,BTDResult}) = r.components
 components(r::NamedTuple) = getproperty(r, :components)
 
 """
