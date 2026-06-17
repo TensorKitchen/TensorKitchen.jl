@@ -212,6 +212,50 @@ function solve(solver::AbstractSolver, model::AbstractDecompositionModel; kwargs
     error("solve not implemented for $(typeof(solver))")
 end
 
+function _solve_ro_solver(
+    solver::AbstractROSolver,
+    model::AbstractDecompositionModel;
+    init,
+    p0,
+    maxiter::Int,
+    tol::Real,
+    gradient_mode,
+    normalization::Union{AbstractNormalizationPolicy,Symbol,Nothing},
+    verbose::Bool,
+    return_stats::Bool,
+    vector_transport_method::Union{ManifoldsBase.AbstractVectorTransportMethod,Nothing},
+    grad_tol,
+    normalized_objective::Bool,
+    iteration_callbacks,
+    diagnostics_recorder,
+    run_solver::Function,
+)
+    setup = _prepare_solver_problem(model; init, p0, gradient_mode, verbose)
+    normalization_policy = _normalization_policy(normalization)
+    supports_normalization_policy(model, normalization_policy) || throw(
+        ArgumentError(
+            "Normalization policy $(typeof(normalization_policy)) is not supported for model $(typeof(model)).",
+        ),
+    )
+    solver_sym = solver_symbol(solver)
+    post_step_callback =
+        _solver_post_step_callback(model, setup.M, normalization_policy, solver_sym)
+    return run_solver(
+        solver,
+        setup;
+        maxiter,
+        tol,
+        verbose,
+        return_stats,
+        vector_transport_method,
+        grad_tol,
+        normalized_objective,
+        post_step_callback,
+        diagnostics_recorder,
+        iteration_callbacks,
+    )
+end
+
 function solve(
     solver::AbstractFirstOrderROSolver,
     model::AbstractDecompositionModel{T};
@@ -228,30 +272,23 @@ function solve(
     normalized_objective::Bool = true,
     iteration_callbacks = (),
 ) where {T<:AbstractFloat}
-    setup = _prepare_solver_problem(model; init, p0, gradient_mode, verbose)
-    normalization_policy = _normalization_policy(normalization)
-    supports_normalization_policy(model, normalization_policy) || throw(
-        ArgumentError(
-            "Normalization policy $(typeof(normalization_policy)) is not supported for model $(typeof(model)).",
-        ),
-    )
-    solver_sym = solver_symbol(solver)
-    post_step_callback =
-        _solver_post_step_callback(model, setup.M, normalization_policy, solver_sym)
-    diagnostics_recorder = first_order_diagnostics_recorder(solver)
-    return run_first_order_solver(
+    return _solve_ro_solver(
         solver,
-        setup;
+        model;
+        init,
+        p0,
         maxiter,
         tol,
+        gradient_mode,
+        normalization,
         verbose,
         return_stats,
         vector_transport_method,
         grad_tol,
         normalized_objective,
-        post_step_callback,
-        diagnostics_recorder,
         iteration_callbacks,
+        diagnostics_recorder = first_order_diagnostics_recorder(solver),
+        run_solver = run_first_order_solver,
     )
 end
 
@@ -271,30 +308,23 @@ function solve(
     normalized_objective::Bool = true,
     iteration_callbacks = (),
 ) where {T<:AbstractFloat}
-    setup = _prepare_solver_problem(model; init, p0, gradient_mode)
-    normalization_policy = _normalization_policy(normalization)
-    supports_normalization_policy(model, normalization_policy) || throw(
-        ArgumentError(
-            "Normalization policy $(typeof(normalization_policy)) is not supported for model $(typeof(model)).",
-        ),
-    )
-    solver_sym = solver_symbol(solver)
-    post_step_callback =
-        _solver_post_step_callback(model, setup.M, normalization_policy, solver_sym)
-    diagnostics_recorder = second_order_diagnostics_recorder(solver)
-    return run_second_order_solver(
+    return _solve_ro_solver(
         solver,
-        setup;
+        model;
+        init,
+        p0,
         maxiter,
         tol,
+        gradient_mode,
+        normalization,
         verbose,
         return_stats,
         vector_transport_method,
         grad_tol,
         normalized_objective,
-        post_step_callback,
-        diagnostics_recorder,
         iteration_callbacks,
+        diagnostics_recorder = second_order_diagnostics_recorder(solver),
+        run_solver = run_second_order_solver,
     )
 end
 

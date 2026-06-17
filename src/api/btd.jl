@@ -24,7 +24,7 @@ function _polish_btd_with_als(
         max_stagnation_restarts = 0,
     )
     rel_error(als_res) < rel_error(result) || return result
-    si0 = hasproperty(result, :solver_info) ? solver_info(result) : (;)
+    si0 = _result_solver_info(result)
     si = merge(
         si0,
         (
@@ -127,7 +127,7 @@ function _btd_warm_start_result(
 end
 
 function _merge_btd_solver_info(result, extra::NamedTuple)
-    si0 = hasproperty(result, :solver_info) ? result.solver_info : (;)
+    si0 = _result_solver_info(result)
     return (
         point = result.point,
         cost = result.cost,

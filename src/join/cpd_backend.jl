@@ -109,7 +109,7 @@ end
 function _cpd_result(model::JoinModel{<:AbstractFloat,<:CPDBackend}, result, dims, r)
     m = cpd_model(model)
     solver_sym = _result_solver_symbol(solver(result))
-    si = hasproperty(result, :solver_info) ? solver_info(result) : (;)
+    si = _result_solver_info(result)
     als_family = solver_sym in _CP_ALS_FAMILY_SOLVERS
 
     if r == 1
