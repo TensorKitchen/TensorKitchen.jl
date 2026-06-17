@@ -441,12 +441,6 @@ function _solver_progress_callback(
         g = model_grad(M, p)
         gnorm = norm(M, p, g)
         showvalues = Any[("Iter", k), ("Cost", c), ("Grad norm", gnorm)]
-        if !isnothing(diagnostics_recorder)
-            step = diagnostics_recorder.accepted_stepsize_history
-            trials = diagnostics_recorder.line_search_trial_history
-            !isempty(step) && push!(showvalues, ("Accepted α", step[end]))
-            !isempty(trials) && push!(showvalues, ("Line-search trials", trials[end]))
-        end
         update_progress!(progress, k; showvalues)
         return nothing
     end
