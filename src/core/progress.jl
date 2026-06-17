@@ -200,13 +200,7 @@ end
 function _render_unrendered_completion!(meter, showvalues)
     # ProgressMeter does not render a meter that reaches 100% before its first
     # visible update. Give it one display-only step before completion.
-    PM.update!(
-        meter,
-        meter.n;
-        showvalues,
-        force = true,
-        max_steps = meter.n + 1,
-    )
+    PM.update!(meter, meter.n; showvalues, force = true, max_steps = meter.n + 1)
     return nothing
 end
 
