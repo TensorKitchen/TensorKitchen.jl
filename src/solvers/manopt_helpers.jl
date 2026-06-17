@@ -296,6 +296,7 @@ function _scale_solver_tangent(x, scale::Real)
         return scale * x
     end
 end
+# Build the Manopt objective as squared residual cost, optionally divided by ||target||^2.
 function _relative_solver_functions(model_cost, model_grad, scale::Real)
     scale > 0 || return model_cost, model_grad, false
     scale == one(scale) && return model_cost, model_grad, false
@@ -331,12 +332,19 @@ end
     return isdefined(Manopt, :stopped_at) ? :stopped_at : :stop_at_iteration_fallback
 end
 
-function _solver_rel_error(cost_for_error, normA2::Union{Nothing,Real}, ::Type{T}) where {T}
-    return isnothing(normA2) ? sqrt(cost_for_error) :
-           _relative_error_frob_sq(cost_for_error, T(normA2))
+function _solver_rel_error(
+    final_cost,
+    normA2::Union{Nothing,Real},
+    normalized_objective::Bool,
+    ::Type{T},
+) where {T}
+    cost_for_error = max(T(0), T(2) * final_cost)
+    normalized_objective && return sqrt(cost_for_error)
+    return isnothing(normA2) || normA2 <= 0 ? sqrt(cost_for_error) :
+           sqrt(cost_for_error / T(normA2))
 end
 
-# Build common solver result stats, with optional ||A||^2 for relative scaling.
+# Build common solver result stats
 function _solver_stats(
     model_cost,
     model_grad,
@@ -350,11 +358,11 @@ function _solver_stats(
     tiny_grad_tol = nothing,
     solver_info = (;),
     use_state_gradient::Bool = true,
+    normalized_objective::Bool = false,
 )
     T = typeof(tol_T)
     final_cost = model_cost(M, p_opt)
-    cost_for_error = max(T(0), T(2) * final_cost)
-    rel_error = _solver_rel_error(cost_for_error, normA2, T)
+    rel_error = _solver_rel_error(final_cost, normA2, normalized_objective, T)
     grad_state = use_state_gradient ? _solver_gradient(state) : nothing
     grad_from_state = !isnothing(grad_state)
     grad_final =
@@ -423,21 +431,16 @@ function _solver_progress_callback(
     model_cost,
     model_grad,
     M;
-    normA2 = nothing,
     diagnostics_recorder = nothing,
 )
     progress isa NoMethodProgress && return nothing
-    has_relative_scale = !isnothing(normA2) && normA2 > 0
-    target_norm = has_relative_scale ? sqrt(normA2) : nothing
     return function (problem, state, k)
         k <= 0 && return nothing
         p = get_iterate(state)
         c = model_cost(M, p)
         g = model_grad(M, p)
         gnorm = norm(M, p, g)
-        c_display = has_relative_scale ? sqrt(max(2 * c, zero(c))) : c
-        gnorm_display = has_relative_scale ? gnorm * target_norm : gnorm
-        showvalues = Any[("Iter", k), ("Cost", c_display), ("Grad norm", gnorm_display)]
+        showvalues = Any[("Iter", k), ("Cost", c), ("Grad norm", gnorm)]
         if !isnothing(diagnostics_recorder)
             step = diagnostics_recorder.accepted_stepsize_history
             trials = diagnostics_recorder.line_search_trial_history
