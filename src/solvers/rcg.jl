@@ -181,22 +181,7 @@ function solve_rcg(
     if !return_stats
         return p_opt
     end
-    return isnothing(normA2) ?
-           _solver_stats(
-        model_cost,
-        model_grad_local,
-        M,
-        p_opt,
-        state,
-        nothing;
-        tol_T = T(tol),
-        maxiter,
-        solver = :rcg,
-        tiny_grad_tol = tol_g_raw,
-        solver_info,
-        use_state_gradient = !uses_relative_objective,
-    ) :
-           _solver_stats(
+    return _solver_stats(
         model_cost,
         model_grad_local,
         M,

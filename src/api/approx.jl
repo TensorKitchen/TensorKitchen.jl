@@ -324,8 +324,7 @@ function approx(
     return _approx_tucker_rank(approx_dispatch(dispatch), base, r, target; kwargs...)
 end
 
-_reject_generic_rank_dispatch(::AutoApproxDispatch) = nothing
-_reject_generic_rank_dispatch(::GenericApproxDispatch) = nothing
+_reject_generic_rank_dispatch(::Union{AutoApproxDispatch,GenericApproxDispatch}) = nothing
 
 function _reject_generic_rank_dispatch(::CPDApproxDispatch)
     throw(ArgumentError("approx(...; dispatch=:cpd) requires Manifolds.Segre inputs."))

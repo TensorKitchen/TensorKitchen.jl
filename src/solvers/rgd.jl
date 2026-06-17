@@ -131,22 +131,7 @@ function solve_rgd(
     if !return_stats
         return p_opt
     end
-    return isnothing(normA2) ?
-           _solver_stats(
-        model_cost,
-        model_grad_local,
-        M,
-        p_opt,
-        state,
-        nothing;
-        tol_T = T(tol),
-        maxiter,
-        solver = :rgd,
-        tiny_grad_tol = tol_g_raw,
-        solver_info,
-        use_state_gradient = !uses_relative_objective,
-    ) :
-           _solver_stats(
+    return _solver_stats(
         model_cost,
         model_grad_local,
         M,
@@ -244,22 +229,7 @@ function solve_rgd_fixed(
     if !return_stats
         return p_opt
     end
-    return isnothing(normA2) ?
-           _solver_stats(
-        model_cost,
-        model_grad_local,
-        M,
-        p_opt,
-        state,
-        nothing;
-        tol_T = T(tol),
-        maxiter,
-        solver = :rgd_fixed,
-        tiny_grad_tol = tiny_grad_tol,
-        solver_info,
-        use_state_gradient = !uses_relative_objective,
-    ) :
-           _solver_stats(
+    return _solver_stats(
         model_cost,
         model_grad_local,
         M,
