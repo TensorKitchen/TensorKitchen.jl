@@ -331,10 +331,10 @@ end
     return isdefined(Manopt, :stopped_at) ? :stopped_at : :stop_at_iteration_fallback
 end
 
-# Convert a squared residual value to the public relative-error diagnostic.
-_solver_rel_error(cost_for_error, ::Nothing, ::Type) = sqrt(cost_for_error)
-_solver_rel_error(cost_for_error, normA2::Real, ::Type{T}) where {T} =
-    _relative_error_frob_sq(cost_for_error, T(normA2))
+function _solver_rel_error(cost_for_error, normA2::Union{Nothing,Real}, ::Type{T}) where {T}
+    return isnothing(normA2) ? sqrt(cost_for_error) :
+           _relative_error_frob_sq(cost_for_error, T(normA2))
+end
 
 # Build common solver result stats, with optional ||A||^2 for relative scaling.
 function _solver_stats(
@@ -389,14 +389,10 @@ end
 # Collect only active Manopt debug callbacks, dropping omitted hooks.
 _solver_debug_callbacks(callbacks...) = Any[cb for cb in callbacks if !isnothing(cb)]
 
-# Allow callers to pass `nothing` (e.g., when verbose/debug is omitted)
-# Build debug actions when the verbose flag was omitted.
-_solver_debug_actions(::Nothing, callbacks...) = _solver_debug_callbacks(callbacks...)
-
 # Build Manopt debug actions and attach TensorKitchen callback hooks.
-function _solver_debug_actions(verbose::Bool, callbacks...)
+function _solver_debug_actions(verbose::Union{Nothing,Bool}, callbacks...)
     callback_actions = _solver_debug_callbacks(callbacks...)
-    if verbose
+    if verbose === true
         io = _SOLVER_DEBUG_SINK
         init_group = Manopt.DebugGroup([
             Manopt.DebugDivider("Initial "; io, at_init = true),
