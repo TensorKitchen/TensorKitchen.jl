@@ -15,7 +15,8 @@ end
 _solver_object(solver::AbstractSolver, ::Real; kwargs...) = solver
 
 _solver_object(::Val{:als}, ::Real; kwargs...) = ALSSolver()
-_solver_object(::Val{:rgd}, stepsize::Real; kwargs...) = RGDSolver(stepsize)
+_solver_object(::Val{:rgd}, stepsize::Real; kwargs...) =
+    RGDSolver(stepsize; armijo_alpha_min = get(kwargs, :armijo_alpha_min, 1e-8))
 _solver_object(::Val{:rgd_fixed}, stepsize::Real; kwargs...) = RGDFixedSolver(stepsize)
 
 function _solver_object(::Val{:rcg}, ::Real; kwargs...)
