@@ -35,11 +35,6 @@ function _solver_object(::Val{:lbfgs}, ::Real; kwargs...)
         memory_size = get(kwargs, :memory_size, 1),
         cautious_update = get(kwargs, :cautious_update, true),
         initial_scale = get(kwargs, :initial_scale, 1.0),
-        nonpositive_curvature_behavior = get(
-            kwargs,
-            :nonpositive_curvature_behavior,
-            :ignore,
-        ),
         linesearch = get(kwargs, :linesearch, :wolfe),
         preconditioner = get(kwargs, :preconditioner, nothing),
     )
