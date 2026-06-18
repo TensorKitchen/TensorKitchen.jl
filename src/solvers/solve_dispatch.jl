@@ -17,7 +17,17 @@ _solver_object(solver::AbstractSolver, ::Real; kwargs...) = solver
 _solver_object(::Val{:als}, ::Real; kwargs...) = ALSSolver()
 _solver_object(::Val{:rgd}, stepsize::Real; kwargs...) = RGDSolver(stepsize)
 _solver_object(::Val{:rgd_fixed}, stepsize::Real; kwargs...) = RGDFixedSolver(stepsize)
-_solver_object(::Val{:rcg}, ::Real; kwargs...) = RCGSolver()
+
+function _solver_object(::Val{:rcg}, ::Real; kwargs...)
+    return RCGSolver(;
+        coefficient = get(kwargs, :coefficient, :hager_zhang),
+        restart = get(kwargs, :restart, :non_descent),
+        restart_threshold = Float64(get(kwargs, :restart_threshold, 0.2)),
+        sufficient_descent_kappa = Float64(get(kwargs, :sufficient_descent_kappa, 1e-4)),
+        denom_threshold = Float64(get(kwargs, :denom_threshold, 1e-10)),
+        beale_restart = Bool(get(kwargs, :beale_restart, false)),
+    )
+end
 
 function _solver_object(::Val{:lbfgs}, ::Real; kwargs...)
     return LBFGSSolver(;
