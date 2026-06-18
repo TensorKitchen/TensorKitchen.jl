@@ -22,9 +22,8 @@ function solve_rgd(
     normalized_objective::Bool = true,
     armijo_alpha_min::Real = 1e-8,
 )
-    armijo_alpha_min > 0 || throw(
-        ArgumentError("armijo_alpha_min must be > 0, got $armijo_alpha_min"),
-    )
+    armijo_alpha_min > 0 ||
+        throw(ArgumentError("armijo_alpha_min must be > 0, got $armijo_alpha_min"))
     setup = _prepare_manopt_solver_functions(
         model_cost,
         model_egrad,
@@ -226,9 +225,8 @@ struct RGDSolver <: AbstractFirstOrderSolver
 end
 function RGDSolver(stepsize::Real = 1.0; armijo_alpha_min::Real = 1e-8)
     stepsize > 0 || throw(ArgumentError("stepsize must be > 0, got $stepsize"))
-    armijo_alpha_min > 0 || throw(
-        ArgumentError("armijo_alpha_min must be > 0, got $armijo_alpha_min"),
-    )
+    armijo_alpha_min > 0 ||
+        throw(ArgumentError("armijo_alpha_min must be > 0, got $armijo_alpha_min"))
     return RGDSolver(Float64(stepsize), Float64(armijo_alpha_min))
 end
 
