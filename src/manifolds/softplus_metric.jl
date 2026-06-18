@@ -7,7 +7,7 @@
 
 export SoftplusEuclidean, softplus_metric_inverse
 
-@inline _sp_sigmoid(x::Real) = x >= 0 ? inv(one(x) + exp(-x)) : begin
+@inline _sp_sigmoid(x::Real) = x >= 0 ? one(x) / (one(x) + exp(-x)) : begin
     ex = exp(x)
     ex / (one(x) + ex)
 end
@@ -57,8 +57,7 @@ function softplus_metric_diag(M::SoftplusEuclidean, p::AbstractVector)
 end
 
 function softplus_metric_inverse(M::SoftplusEuclidean, p::AbstractVector, X::AbstractVector)
-    g_inv = inv.(softplus_metric_diag(M, p))
-    return g_inv .* X
+    return X ./ softplus_metric_diag(M, p)
 end
 
 pullback_metric_inverse(M::SoftplusEuclidean, p::AbstractVector, X::AbstractVector) =

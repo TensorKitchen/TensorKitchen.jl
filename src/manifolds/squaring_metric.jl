@@ -72,8 +72,7 @@ function pullback_metric_diag(M::SqEuclidean, p::AbstractVector)
 end
 
 function pullback_metric_inverse(M::SqEuclidean, p::AbstractVector, X::AbstractVector)
-    g_inv = 1.0 ./ pullback_metric_diag(M, p)
-    return g_inv .* X
+    return X ./ pullback_metric_diag(M, p)
 end
 
 function ManifoldsBase.inner(M::SqEuclidean, p, X::AbstractVector, Y::AbstractVector)
