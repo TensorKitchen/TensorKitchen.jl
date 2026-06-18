@@ -75,47 +75,51 @@ function solve_lbfgs(
     linesearch::Symbol = :wolfe,
     preconditioner = nothing,
     grad_tol = nothing,
+    normalized_objective::Bool = true,
 )
-    p0_local = _solver_point(M, p0)
-    T = _scalar_eltype(p0_local)
-    model_grad_raw = isnothing(model_grad) ? grad(model_egrad) : model_grad
-    model_grad_local = _layout_adapt_gradient(model_grad_raw)
+    setup = _prepare_manopt_solver_functions(
+        model_cost,
+        model_egrad,
+        M,
+        p0;
+        normA2,
+        model_grad,
+        tol,
+        grad_tol,
+        normalized_objective,
+    )
+    p0_local = setup.p0
+    T = setup.T
     retraction_method = _solver_retraction_method(M, p0_local)
     transport =
         isnothing(vector_transport_method) ?
         _default_vector_transport_method(M, p0_local, retraction_method) :
         vector_transport_method
-    tol_g = _dual_stop_grad_tol(T, tol, grad_tol)
+    tol_g = setup.dual_grad_tol
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
-    stopping = StopWhenAny(
-        StopAfterIteration(maxiter),
-        StopWhenGradientNormLess(T(tol)),
-        dual_stop,
-    )
-    progress =
-        maxiter > 0 ?
-        make_manopt_family_progress(
-            maxiter;
+    stopping = _manopt_stopping(maxiter, setup.grad_stop_tol, dual_stop)
+    callbacks = _manopt_callbacks(
+        n -> make_manopt_family_progress(
+            n;
             enabled = verbose,
             phase = :refinement,
             method = "L-BFGS",
             dt = 0.2,
-        ) : NoMethodProgress()
-    diagnostics_callback =
-        isnothing(diagnostics_recorder) ? nothing :
-        _solver_diagnostics_callback(diagnostics_recorder)
-    progress_callback = _solver_progress_callback(
-        progress,
-        model_cost,
-        model_grad_local,
+        ),
+        maxiter,
+        verbose,
+        setup.solver_cost,
+        setup.solver_grad,
         M;
         diagnostics_recorder,
+        post_step_callback,
+        iteration_callbacks,
     )
 
     state = Manopt.quasi_Newton(
         M,
-        model_cost,
-        model_grad_local,
+        setup.solver_cost,
+        setup.solver_grad,
         p0_local;
         cautious_update = cautious_update,
         direction_update = Manopt.InverseBFGS(),
@@ -126,35 +130,28 @@ function solve_lbfgs(
         vector_transport_method = transport,
         stepsize = _lbfgs_linesearch(linesearch),
         stopping_criterion = stopping,
-        debug = _solver_debug_actions(
-            verbose,
-            post_step_callback,
-            diagnostics_callback,
-            progress_callback,
-            iteration_callbacks...,
-        ),
+        debug = callbacks.debug_actions,
         count = [:Cost, :Gradient],
         return_state = true,
     )
 
-    p_opt = _tk_get_solver_result(state)
-    iterations_done = _solver_iterations(state, maxiter)
-    if verbose
-        finish_progress!(
-            progress;
-            current = iterations_done,
-            showvalues = Any[("Status", "Finished"), ("Iterations", iterations_done)],
-        )
-    end
-    solver_info =
-        isnothing(diagnostics_recorder) ? (;) :
-        _solver_info(diagnostics_recorder, iterations_done)
-    if !return_stats
-        return p_opt
-    end
-    solver_info = merge(
-        solver_info,
-        (
+    return _manopt_finish_result(
+        _tk_get_solver_result(state),
+        state,
+        callbacks.progress,
+        diagnostics_recorder,
+        setup.solver_cost,
+        setup.solver_grad,
+        M,
+        normA2;
+        tol_T = T(tol),
+        maxiter,
+        solver = :lbfgs,
+        tiny_grad_tol = tol_g,
+        return_stats,
+        verbose,
+        normalized_objective = setup.uses_relative_objective,
+        solver_info_extra = (
             memory_size = memory_size,
             cautious_update = cautious_update,
             initial_scale = initial_scale,
@@ -163,33 +160,6 @@ function solve_lbfgs(
             has_preconditioner = !isnothing(preconditioner),
             uses_nonpositive_curvature_behavior = false,
         ),
-    )
-    return isnothing(normA2) ?
-           _solver_stats(
-        model_cost,
-        model_grad_local,
-        M,
-        p_opt,
-        state,
-        nothing;
-        tol_T = T(tol),
-        maxiter,
-        solver = :lbfgs,
-        tiny_grad_tol = tol_g,
-        solver_info,
-    ) :
-           _solver_stats(
-        model_cost,
-        model_grad_local,
-        M,
-        p_opt,
-        state,
-        normA2;
-        tol_T = T(tol),
-        maxiter,
-        solver = :lbfgs,
-        tiny_grad_tol = tol_g,
-        solver_info,
     )
 end
 
@@ -205,6 +175,7 @@ function run_second_order_solver(
     diagnostics_recorder,
     iteration_callbacks,
     grad_tol = nothing,
+    normalized_objective::Bool = true,
 )
     return solve_lbfgs(
         setup.model_cost,
@@ -228,5 +199,6 @@ function run_second_order_solver(
         nonpositive_curvature_behavior = solver.nonpositive_curvature_behavior,
         linesearch = solver.linesearch,
         preconditioner = solver.preconditioner,
+        normalized_objective,
     )
 end

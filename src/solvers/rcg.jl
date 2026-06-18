@@ -106,98 +106,71 @@ function solve_rcg(
     diagnostics_recorder = nothing,
     iteration_callbacks = (),
     grad_tol = nothing,
+    normalized_objective::Bool = true,
 )
-    p0_local = _solver_point(M, p0)
-    T = _scalar_eltype(p0_local)
-    model_grad_raw = isnothing(model_grad) ? grad(model_egrad) : model_grad
-    model_grad_local = _layout_adapt_gradient(model_grad_raw)
+    setup = _prepare_manopt_solver_functions(
+        model_cost,
+        model_egrad,
+        M,
+        p0;
+        normA2,
+        model_grad,
+        tol,
+        grad_tol,
+        normalized_objective,
+    )
+    p0_local = setup.p0
+    T = setup.T
     retraction_method = _solver_retraction_method(M, p0_local)
-    stopping = StopWhenAny(StopAfterIteration(maxiter), StopWhenGradientNormLess(T(tol)))
     transport =
         isnothing(vector_transport_method) ?
         _default_vector_transport_method(M, p0_local, retraction_method) :
         vector_transport_method
-    tol_g = _dual_stop_grad_tol(T, tol, grad_tol)
+    tol_g = setup.dual_grad_tol
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
 
-    stopping = StopWhenAny(
-        StopAfterIteration(maxiter),
-        StopWhenGradientNormLess(T(tol)),
-        dual_stop,
-    )
-    progress =
-        maxiter > 0 ?
-        make_rcg_progress(maxiter; enabled = verbose, phase = :refinement, dt = 0.2) :
-        NoMethodProgress()
-    diagnostics_callback =
-        isnothing(diagnostics_recorder) ? nothing :
-        _solver_diagnostics_callback(diagnostics_recorder)
-    progress_callback = _solver_progress_callback(
-        progress,
-        model_cost,
-        model_grad_local,
+    stopping = _manopt_stopping(maxiter, setup.grad_stop_tol, dual_stop)
+    callbacks = _manopt_callbacks(
+        n -> make_rcg_progress(n; enabled = verbose, phase = :refinement, dt = 0.2),
+        maxiter,
+        verbose,
+        setup.solver_cost,
+        setup.solver_grad,
         M;
         diagnostics_recorder,
+        post_step_callback,
+        iteration_callbacks,
     )
 
     state = conjugate_gradient_descent(
         M,
-        model_cost,
-        model_grad_local,
+        setup.solver_cost,
+        setup.solver_grad,
         p0_local;
         retraction_method = retraction_method,
         vector_transport_method = transport,
         stopping_criterion = stopping,
-        debug = _solver_debug_actions(
-            verbose,
-            post_step_callback,
-            diagnostics_callback,
-            progress_callback,
-            iteration_callbacks...,
-        ),
+        debug = callbacks.debug_actions,
         count = [:Cost, :Gradient],
         return_state = true,
     )
 
-    p_opt = get_solver_result(state)
-    iterations_done = _solver_iterations(state, maxiter)
-    if verbose
-        finish_progress!(
-            progress;
-            current = iterations_done,
-            showvalues = Any[("Status", "Finished"), ("Iterations", iterations_done)],
-        )
-    end
-    solver_info =
-        isnothing(diagnostics_recorder) ? (;) :
-        _solver_info(diagnostics_recorder, iterations_done)
-    if !return_stats
-        return p_opt
-    end
-    return isnothing(normA2) ?
-           _solver_stats(
-        model_cost,
-        model_grad_local,
-        M,
-        p_opt,
+    return _manopt_finish_result(
+        get_solver_result(state),
         state,
-        nothing;
-        tol_T = T(tol),
-        maxiter,
-        solver = :rcg,
-        solver_info,
-    ) :
-           _solver_stats(
-        model_cost,
-        model_grad_local,
+        callbacks.progress,
+        diagnostics_recorder,
+        setup.solver_cost,
+        setup.solver_grad,
         M,
-        p_opt,
-        state,
         normA2;
         tol_T = T(tol),
         maxiter,
         solver = :rcg,
-        solver_info,
+        tiny_grad_tol = tol_g,
+        return_stats,
+        verbose,
+        normalized_objective = setup.uses_relative_objective,
     )
 end
 
@@ -227,6 +200,7 @@ function run_first_order_solver(
     diagnostics_recorder,
     iteration_callbacks,
     grad_tol = nothing,
+    normalized_objective::Bool = true,
 )
     return solve_rcg(
         setup.model_cost,
@@ -244,5 +218,6 @@ function run_first_order_solver(
         diagnostics_recorder,
         iteration_callbacks,
         grad_tol,
+        normalized_objective,
     )
 end

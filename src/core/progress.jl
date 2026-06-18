@@ -176,6 +176,40 @@ end
     p.was_rendered = true
     return nothing
 end
+@inline _meter_was_printed(meter) = getproperty(getproperty(meter, :core), :printed)
+@inline _sync_rendered!(::NoMethodProgress) = nothing
+function _sync_rendered!(p::FamilyProgress)
+    meter = _meter(p)
+    if !isnothing(meter) && _meter_was_printed(meter)
+        _mark_rendered!(p)
+    end
+    return nothing
+end
+function _sync_tracker_rendered!(tracker::PhaseProgress)
+    _sync_rendered!(tracker.initialization)
+    _sync_rendered!(tracker.refinement)
+    return nothing
+end
+
+@inline function _force_visible_phase_finish(tracker::PhaseProgress, progress)
+    return tracker.phase == :refinement &&
+           _was_rendered(tracker.initialization) &&
+           !_was_rendered(progress)
+end
+
+function _render_unrendered_completion!(meter, showvalues)
+    # ProgressMeter does not render a meter that reaches 100% before its first
+    # visible update. Give it one display-only step before completion.
+    PM.update!(meter, meter.n; showvalues, force = true, max_steps = meter.n + 1)
+    return nothing
+end
+
+function _force_visible_unrendered_progress!(progress, meter, showvalues)
+    _was_rendered(progress) && return nothing
+    _render_unrendered_completion!(meter, showvalues)
+    _mark_rendered!(progress)
+    return nothing
+end
 
 update_progress!(::NoMethodProgress, args...; kwargs...) = nothing
 
@@ -192,14 +226,15 @@ function update_progress!(
         set_phase!(tracker, progress.phase)
     end
     t = time()
-    if force || current >= meter.n || t > meter.tlast + meter.dt
+    renders_by_time = t > meter.tlast + meter.dt
+    if force || current >= meter.n || renders_by_time
         showvalues_with_method = if isnothing(showvalues)
             Any[("Method", _method_name(progress))]
         else
             Any[("Method", _method_name(progress)); showvalues]
         end
-        PM.update!(meter, current; showvalues = showvalues_with_method)
-        _mark_rendered!(progress)
+        PM.update!(meter, current; showvalues = showvalues_with_method, force)
+        _sync_rendered!(progress)
     end
     return nothing
 end
@@ -215,6 +250,7 @@ function finish_progress!(
     progress isa NoMethodProgress && return nothing
     meter = _meter(progress)
     isnothing(meter) && return nothing
+    _sync_tracker_rendered!(tracker)
 
     showvalues_with_method = if isnothing(showvalues)
         Any[("Method", _method_name(progress))]
@@ -222,16 +258,13 @@ function finish_progress!(
         Any[("Method", _method_name(progress)); showvalues]
     end
 
-    force_refinement_finish =
-        tracker.phase == :refinement &&
-        _was_rendered(tracker.initialization) &&
-        !_was_rendered(progress)
-
-    if force_refinement_finish
-        PM.update!(meter, meter.n; showvalues = showvalues_with_method)
-        _mark_rendered!(progress)
+    if _force_visible_phase_finish(tracker, progress)
+        _force_visible_unrendered_progress!(progress, meter, showvalues_with_method)
+        PM.finish!(meter; showvalues = showvalues_with_method)
         return nothing
     end
+
+    _was_rendered(progress) || return nothing
 
     PM.finish!(meter; showvalues = showvalues_with_method)
     _mark_rendered!(progress)
@@ -247,9 +280,20 @@ function finish_progress!(
     isnothing(meter) && return nothing
     tracker = _current_phase_tracker()
     if tracker isa PhaseProgress
+        _sync_tracker_rendered!(tracker)
         set_phase!(tracker, progress.phase)
         if active_progress(tracker) === progress
             return finish_progress!(tracker; current, showvalues)
+        end
+        if _force_visible_phase_finish(tracker, progress)
+            showvalues_with_method = if isnothing(showvalues)
+                Any[("Method", _method_name(progress))]
+            else
+                Any[("Method", _method_name(progress)); showvalues]
+            end
+            _force_visible_unrendered_progress!(progress, meter, showvalues_with_method)
+            PM.finish!(meter; showvalues = showvalues_with_method)
+            return nothing
         end
     end
     showvalues_with_method = if isnothing(showvalues)
@@ -257,6 +301,7 @@ function finish_progress!(
     else
         Any[("Method", _method_name(progress)); showvalues]
     end
+    _was_rendered(progress) || return nothing
     PM.finish!(meter; showvalues = showvalues_with_method)
     _mark_rendered!(progress)
     return nothing

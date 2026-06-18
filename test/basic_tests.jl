@@ -136,6 +136,45 @@ end
     @test out.solver_info.gradient_evaluations >= 1
 end
 
+@testset "Manopt normalized_objective controls objective units" begin
+    A = randn(6, 5, 4)
+    r = 2
+    model = JoinModel(A, r; geometry = :canonical)
+    p0 = TensorKitchen.initial_point(model, TuckerInit(); verbose = false)
+    target_norm = norm(A)
+
+    rel_out = solve(
+        RGDFixedSolver(0.0),
+        model;
+        p0,
+        maxiter = 1,
+        tol = 0.0,
+        verbose = false,
+        return_stats = true,
+        normalized_objective = true,
+    )
+    abs_out = solve(
+        RGDFixedSolver(0.0),
+        model;
+        p0,
+        maxiter = 1,
+        tol = 0.0,
+        verbose = false,
+        return_stats = true,
+        normalized_objective = false,
+    )
+
+    @test isapprox(2 * rel_out.cost, rel_out.rel_error^2; rtol = 1e-12, atol = 1e-12)
+    @test isapprox(abs_out.rel_error, rel_out.rel_error; rtol = 1e-12, atol = 1e-12)
+    @test isapprox(abs_out.cost, rel_out.cost * target_norm^2; rtol = 1e-12, atol = 1e-12)
+    @test isapprox(
+        abs_out.grad_norm,
+        rel_out.grad_norm * target_norm^2;
+        rtol = 1e-10,
+        atol = 1e-10,
+    )
+end
+
 # =========================================================================
 # cpd/cp_rank.jl (cost/egrad functions)
 # =========================================================================
@@ -272,6 +311,32 @@ end
     @test cpd_rgd_object isa CPDResult
     @test cpd_rgd_object.solver == :rgd
 
+    cpd_lbfgs_symbol = cpd(
+        A,
+        2;
+        solver = :lbfgs,
+        init = :alswarm,
+        warm_steps = 2,
+        maxiter = 2,
+        verbose = false,
+    )
+    @test cpd_lbfgs_symbol isa CPDResult
+    @test cpd_lbfgs_symbol.solver == :lbfgs
+    @test cpd_lbfgs_symbol.solver_info.memory_size == 1
+
+    cpd_lbfgs_object = cpd(
+        A,
+        2;
+        solver = LBFGSSolver(memory_size = 3),
+        init = :alswarm,
+        warm_steps = 2,
+        maxiter = 2,
+        verbose = false,
+    )
+    @test cpd_lbfgs_object isa CPDResult
+    @test cpd_lbfgs_object.solver == :lbfgs
+    @test cpd_lbfgs_object.solver_info.memory_size == 3
+
     cpd_als_object =
         cpd(A, 2; solver = ALSSolver(), init = :tucker, maxiter = 1, verbose = false)
     @test cpd_als_object isa CPDResult
@@ -407,6 +472,7 @@ end
         rel = norm(A) > 0 ? norm(X .- A) / norm(A) : norm(X .- A)
         cost, rel
     end
+    expected_solver_cost(solver, cost, rel) = solver == :als ? cost : 0.5 * rel^2
     public_columns_unit(res) = all(
         isapprox(norm(TensorKitchen.factors(res)[m][:, k]), 1; atol = 1e-8, rtol = 1e-8) for m in eachindex(TensorKitchen.factors(res)) for
         k in eachindex(TensorKitchen.weights(res))
@@ -417,7 +483,7 @@ end
     for solver in (:rgd, :rcg)
         res = cpd(A1, 1; solver = solver, nonnegative = true, maxiter = 4, verbose = false)
         cost, rel = explicit_stats(A1, res)
-        @test res.cost ≈ cost atol = 1e-8 rtol = 1e-8
+        @test res.cost ≈ expected_solver_cost(solver, cost, rel) atol = 1e-8 rtol = 1e-8
         @test res.rel_error ≈ rel atol = 1e-8 rtol = 1e-8
         @test public_columns_unit(res)
     end
@@ -427,7 +493,7 @@ end
     for solver in (:als, :rgd, :rcg)
         res = cpd(Ar, 3; solver = solver, nonnegative = true, maxiter = 4, verbose = false)
         cost, rel = explicit_stats(Ar, res)
-        @test res.cost ≈ cost atol = 1e-8 rtol = 1e-8
+        @test res.cost ≈ expected_solver_cost(solver, cost, rel) atol = 1e-8 rtol = 1e-8
         @test res.rel_error ≈ rel atol = 1e-8 rtol = 1e-8
         @test public_columns_unit(res)
     end

@@ -9,7 +9,7 @@ function _pullback_eps_value(::Type{T}, pullback_eps) where {T<:AbstractFloat}
 end
 
 function _merge_res_solver_info(res, patch::NamedTuple)
-    si0 = hasproperty(res, :solver_info) ? solver_info(res) : (;)
+    si0 = _result_solver_info(res)
     return (
         point = point(res),
         cost = cost(res),
@@ -579,13 +579,14 @@ end
 function _validate_cpd_solver_supported(solver::AbstractSolver)
     throw(
         ArgumentError(
-            "Unsupported CPD solver $(typeof(solver)). Use :als, :rgd, :rgd_fixed, or :rcg.",
+            "Unsupported CPD solver $(typeof(solver)). Use :als, :rgd, :rgd_fixed, :rcg, or :lbfgs.",
         ),
     )
 end
 
-_validate_cpd_solver_supported(::Union{ALSSolver,RGDSolver,RGDFixedSolver,RCGSolver}) =
-    nothing
+_validate_cpd_solver_supported(
+    ::Union{ALSSolver,RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver},
+) = nothing
 
 function _validate_cpd_solver_options(
     solver::AbstractSolver,
@@ -752,8 +753,6 @@ function _cpd_manifold_grad_tol(
     solver::Union{RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver},
     tol::Real,
 )
-    inner = cpd_model(model)
-    inner.nonnegative || return nothing
     return tol
 end
 
@@ -992,6 +991,7 @@ If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
     - `rgd` (default): Riemannian gradient descent
     - `rgd_fixed`: Riemannian gradient descent with fixed step size
     - `rcg`: Riemannian conjugate gradient
+    - `lbfgs`: Limited-memory Riemannian quasi-Newton
     - `als`: Alternating Least Squares
 
 ## Extended Options

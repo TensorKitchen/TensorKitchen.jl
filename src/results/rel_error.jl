@@ -18,19 +18,10 @@ function rel_error(A::AbstractArray, Ahat::AbstractArray)
     return relative_frobenius_error(A, Ahat)
 end
 
-function rel_error(A::AbstractArray, res::CPDResult)
-    return relative_frobenius_error(A, reconstruct(res))
-end
-
-function rel_error(A::AbstractArray, tucker_res::TuckerResult)
-    return relative_frobenius_error(A, reconstruct(tucker_res))
-end
-
-function rel_error(A::AbstractArray, res::ApproxResult)
-    return relative_frobenius_error(A, reconstruct(res))
-end
-
-function rel_error(A::AbstractArray, res::BTDResult)
+function rel_error(
+    A::AbstractArray,
+    res::Union{CPDResult,TuckerResult,ApproxResult,BTDResult},
+)
     return relative_frobenius_error(A, reconstruct(res))
 end
 
