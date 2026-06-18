@@ -134,7 +134,7 @@ function _component_energy_summary(energies::AbstractVector{<:Real})
         top1 = ordered[1],
         top2 = sum(@view ordered[1:min(2, r)]),
         top3 = sum(@view ordered[1:min(3, r)]),
-        effective = hhi > 0 ? inv(hhi) : NaN,
+        effective = hhi > 0 ? one(hhi) / hhi : NaN,
         argmax_component = argmax(shares),
     )
 end

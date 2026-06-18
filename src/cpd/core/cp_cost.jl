@@ -69,7 +69,7 @@ end
 end
 
 @inline function _softplus_derivative(x::Real)
-    x >= 0 ? inv(one(x) + exp(-x)) : begin
+    x >= 0 ? one(x) / (one(x) + exp(-x)) : begin
         ex = exp(x)
         ex / (one(x) + ex)
     end
