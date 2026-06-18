@@ -1000,7 +1000,8 @@ If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
     - `warm_init = TuckerInit()`: Before finding the warm start initial point, this sets the good starting point for ALS.
     - `warm_steps = 500`: Once finding the best initial point from warm_init, it runs this many ALS iterations to refine the initial point.
 * `maxiter = 500`: Maximum number of Riemannian gradient descent iterations.
-* `stepsize = 1.0`: Initial step size for line search in Riemannian gradient descent.
+* `stepsize`: Initial step size for line search in Riemannian gradient descent. Defaults to `1.0` for ordinary CPD and `0.01` for the nonnegative route.
+* `armijo_alpha_min = 1e-8`: Minimum Armijo line-search step size for `solver = :rgd`.
 * `tol = 1e-6`: Convergence tolerance.
 * `gradient_mode = :riemannian`: Gradient rule for manifold solvers. 
     - If the model has a direct rgrad, it uses that.
@@ -1022,7 +1023,7 @@ If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
 * `:squaring_metric` and `:softplus_metric` require `nonnegative = true`.
 * When `nonnegative = true`, `cpd(...)` routes to `nncpd(...)`. In that route:
     - if `solver != :als` and `geometry` is left at `:canonical`, the effective geometry becomes `:softplus_metric`
-    - if `stepsize` is left at `1.0`, the effective default becomes `0.01`
+    - if `stepsize` is left as `nothing`, the effective default becomes `0.01`
     - if `init = :tucker`, the effective initializer becomes `:alswarm`
     
 ## Example 
@@ -1046,7 +1047,7 @@ function cpd(
     solver = :rgd,
     geometry = :canonical,
     maxiter = 500,
-    stepsize = 1.0,
+    stepsize = nothing,
     tol = 1e-6,
     gradient_mode = :riemannian,
     normalization = :auto,
@@ -1060,13 +1061,12 @@ function cpd(
     kwargs...,
 ) where {T<:AbstractFloat,N}
     if nonnegative
-        solver_obj = _solver_object(solver, stepsize; kwargs...)
         # Align effective defaults with nncpd() on the nonnegative route.
-        # Explicitly passed non-default values are preserved.
+        stepsize_nn = isnothing(stepsize) ? 0.01 : stepsize
+        solver_obj = _solver_object(solver, stepsize_nn; kwargs...)
         init_nn = _cpd_nonnegative_init(init)
         warm_steps_nn = warm_steps
         geometry_nn = _cpd_nonnegative_geometry(solver_obj, geometry)
-        stepsize_nn = stepsize == 1.0 ? 0.01 : stepsize
         return nncpd(
             A,
             r;
@@ -1090,6 +1090,7 @@ function cpd(
             kwargs...,
         )
     end
+    stepsize_eff = isnothing(stepsize) ? 1.0 : stepsize
     return _cpd_impl(
         A,
         r;
@@ -1100,7 +1101,7 @@ function cpd(
         solver = solver,
         geometry = geometry,
         maxiter = maxiter,
-        stepsize = stepsize,
+        stepsize = stepsize_eff,
         tol = tol,
         gradient_mode = gradient_mode,
         normalization = normalization,
