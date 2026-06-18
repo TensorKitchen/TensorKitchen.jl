@@ -48,30 +48,23 @@ function _rcg_coefficient_rule(
 )
     rule =
         coefficient in (:conjugate_descent, :cd) ? Manopt.ConjugateDescentCoefficient() :
-        coefficient in (:hager_zhang, :hz) ? Manopt.HagerZhangCoefficient(
+        coefficient in (:hager_zhang, :hz) ?
+        Manopt.HagerZhangCoefficient(
             M;
             vector_transport_method = transport,
             denom_threshold = denom_threshold,
         ) :
-        coefficient in (:polak_ribiere, :pr, :prp) ? Manopt.PolakRibiereCoefficient(
-            M;
-            vector_transport_method = transport,
-        ) :
+        coefficient in (:polak_ribiere, :pr, :prp) ?
+        Manopt.PolakRibiereCoefficient(M; vector_transport_method = transport) :
         coefficient in (:fletcher_reeves, :fr) ? Manopt.FletcherReevesCoefficient() :
-        coefficient in (:dai_yuan, :dy) ? Manopt.DaiYuanCoefficient(
-            M;
-            vector_transport_method = transport,
-        ) :
-        coefficient in (:hestenes_stiefel, :hs) ? Manopt.HestenesStiefelCoefficient(
-            M;
-            vector_transport_method = transport,
-        ) :
-        coefficient in (:liu_storey, :ls) ? Manopt.LiuStoreyCoefficient(
-            M;
-            vector_transport_method = transport,
-        ) :
+        coefficient in (:dai_yuan, :dy) ?
+        Manopt.DaiYuanCoefficient(M; vector_transport_method = transport) :
+        coefficient in (:hestenes_stiefel, :hs) ?
+        Manopt.HestenesStiefelCoefficient(M; vector_transport_method = transport) :
+        coefficient in (:liu_storey, :ls) ?
+        Manopt.LiuStoreyCoefficient(M; vector_transport_method = transport) :
         coefficient in (:steepest, :steepest_descent, :gd, :gradient_descent) ?
-            Manopt.SteepestDescentCoefficient() :
+        Manopt.SteepestDescentCoefficient() :
         throw(ArgumentError("Unknown RCG coefficient=$(coefficient)."))
 
     if beale_restart
@@ -90,7 +83,7 @@ function _rcg_restart_condition(restart::Symbol; κ::Real = 1e-4)
     return restart in (:never, :none, :no_restart) ? Manopt.NeverRestart() :
            restart in (:non_descent, :nondescent) ? Manopt.RestartOnNonDescent() :
            restart in (:non_sufficient_descent, :sufficient_descent) ?
-               Manopt.RestartOnNonSufficientDescent(κ) :
+           Manopt.RestartOnNonSufficientDescent(κ) :
            throw(ArgumentError("Unknown RCG restart=$(restart)."))
 end
 
@@ -147,10 +140,7 @@ function solve_rcg(
         beale_restart,
         restart_threshold,
     )
-    restart_rule = _rcg_restart_condition(
-        restart;
-        κ = sufficient_descent_kappa,
-    )
+    restart_rule = _rcg_restart_condition(restart; κ = sufficient_descent_kappa)
 
     tol_g = setup.dual_grad_tol
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
