@@ -35,8 +35,7 @@ function solve_rgd(
     p0_local = setup.p0
     T = setup.T
     retraction_method = _solver_retraction_method(M, p0_local)
-    stepsize_eff_base = T(stepsize) * setup.objective_scale
-    armijo_alpha_min = T(1e-8) * setup.objective_scale
+    armijo_alpha_min = T(1e-8)
     tol_g = setup.dual_grad_tol
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
     stopping = _manopt_stopping(
@@ -55,9 +54,9 @@ function solve_rgd(
             p0_local,
             setup.solver_grad,
             retraction_method,
-            stepsize_eff_base;
+            T(stepsize);
             alpha_min = armijo_alpha_min,
-        ) : stepsize_eff_base
+        ) : T(stepsize)
     armijo_contraction = use_squaring_armijo ? T(0.5) : T(0.85)
     armijo_sufficient_decrease = use_squaring_armijo ? T(1e-4) : T(1e-3)
     armijo_stop_decreasing =
@@ -180,7 +179,7 @@ function solve_rgd_fixed(
         setup.solver_grad,
         p0_local;
         retraction_method = retraction_method,
-        stepsize = Manopt.ConstantStepsize(M, T(stepsize) * setup.objective_scale),
+        stepsize = Manopt.ConstantStepsize(M, T(stepsize)),
         stopping_criterion = stopping,
         debug = callbacks.debug_actions,
         count = [:Cost, :Gradient],
