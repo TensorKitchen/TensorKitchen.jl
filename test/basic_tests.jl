@@ -252,6 +252,48 @@ end
     @test res_approx.solver == :lm
 end
 
+@testset "BTD accepts LMSolver on nested Tucker layouts" begin
+    A = randn(7, 6, 5)
+    ranks = (2, 2, 2)
+    manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(size(A), ranks, 2))
+    backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
+    model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
+    p0 = TensorKitchen.initial_point(model, :random; verbose = false)
+
+    @test p0 isa ArrayPartition
+    @test TensorKitchen.point_parts(p0)[1] isa Manifolds.TuckerPoint
+
+    low = solve(
+        LMSolver(),
+        model;
+        p0,
+        maxiter = 2,
+        tol = 1e-6,
+        verbose = false,
+        return_stats = true,
+    )
+    low_parts = TensorKitchen.point_parts(low.point)
+    @test low.solver == :lm
+    @test low.point isa ArrayPartition
+    @test length(low_parts) == 2
+    @test low_parts[1] isa Manifolds.TuckerPoint
+
+    res_btd = btd(
+        A,
+        2,
+        ranks;
+        solver = :lm,
+        warm_rel_error_gate = nothing,
+        maxiter = 2,
+        tol = 1e-6,
+        verbose = false,
+    )
+    @test res_btd isa BTDResult
+    @test res_btd.solver == :lm
+    @test length(res_btd.components) == 2
+    @test !get(res_btd.solver_info, :btd_skipped_manifold_polish, false)
+end
+
 # =========================================================================
 # cpd/cp_rank.jl (cost/egrad functions)
 # =========================================================================

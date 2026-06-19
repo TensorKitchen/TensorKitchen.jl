@@ -31,13 +31,9 @@ end
 
 solver_symbol(::LMSolver) = :lm
 
-@inline function _lm_objective_scale(
-    ::Type{T},
-    normA2,
-    normalized_objective::Bool,
-) where {T}
-    return normalized_objective && !isnothing(normA2) && normA2 > 0 ?
-           one(T) / sqrt(T(normA2)) : one(T)
+@inline function _lm_scaling_factor(::Type{T}, normA2, normalized_objective::Bool) where {T}
+    return normalized_objective && !isnothing(normA2) && normA2 > 0 ? inv(sqrt(T(normA2))) :
+           one(T)
 end
 
 function _ambient_tangent_vector!(out::AbstractVector, M, p, X)
@@ -48,11 +44,6 @@ function _ambient_tangent_vector!(out::AbstractVector, M, p, X)
         ),
     )
     copyto!(out, vec(emb))
-    return out
-end
-
-function _ambient_tangent_vector!(out::AbstractVector, M::Manifolds.Segre, p, X)
-    copyto!(out, _segre_tangent_tensorvec(p, X))
     return out
 end
 
@@ -92,8 +83,7 @@ function _lm_raw_jacobian_matrix(
     p;
     basis = ManifoldsBase.DefaultOrthonormalBasis(),
 )
-    p_work = _solver_point(M, p)
-    T = _scalar_eltype(p_work)
+    T = _scalar_eltype(p)
     ambient_dim = length(tensor(model))
     d = manifold_dimension(M)
     J = Matrix{T}(undef, ambient_dim, d)
@@ -102,8 +92,8 @@ function _lm_raw_jacobian_matrix(
     @inbounds for j = 1:d
         fill!(coeff, zero(T))
         coeff[j] = one(T)
-        Xj = ManifoldsBase.get_vector(M, p_work, coeff, basis)
-        _join_tangent_ambient_vector!(column, model.backend, p_work, Xj)
+        Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
+        _join_tangent_ambient_vector!(column, model.backend, p, Xj)
         J[:, j] .= column
     end
     return J
@@ -182,17 +172,16 @@ function _lm_raw_jacobian_matrix(
     p;
     basis = ManifoldsBase.DefaultOrthonormalBasis(),
 ) where {T<:AbstractFloat}
-    p_work = _solver_point(M, p)
     ambient_dim = length(model.A)
     d = manifold_dimension(M)
     J = Matrix{T}(undef, ambient_dim, d)
     coeff = zeros(T, d)
-    λp, Up = unpack_point_rank1(p_work, model.dims)
+    λp, Up = unpack_point_rank1(p, model.dims)
     column = Vector{T}(undef, ambient_dim)
     @inbounds for j = 1:d
         fill!(coeff, zero(T))
         coeff[j] = one(T)
-        Xj = ManifoldsBase.get_vector(M, p_work, coeff, basis)
+        Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
         if model.nonnegative
             λ̇p, U̇p = unpack_point_rank1(Xj, model.dims)
             kind = _rank1_uses_softplus_metric(model.M) ? Val(:softplus) : Val(:square)
@@ -207,7 +196,7 @@ function _lm_raw_jacobian_matrix(
             U̇_vec = [Vector(@view U̇[m][:, 1]) for m in eachindex(U̇)]
             _cp_rank1_tangent_tensorvec!(column, λ[1], U_vec, λ̇[1], U̇_vec)
         else
-            copyto!(column, vec(ManifoldsBase.embed(M, p_work, Xj)))
+            copyto!(column, vec(ManifoldsBase.embed(M, p, Xj)))
         end
         J[:, j] .= column
     end
@@ -224,18 +213,17 @@ function _lm_raw_jacobian_matrix(
     p;
     basis = ManifoldsBase.DefaultOrthonormalBasis(),
 ) where {T<:AbstractFloat}
-    p_work = _solver_point(M, p)
     ambient_dim = length(model.A)
     d = manifold_dimension(M)
     J = Matrix{T}(undef, ambient_dim, d)
     coeff = zeros(T, d)
     column = Vector{T}(undef, ambient_dim)
     if model.geometry == :native && !model.nonnegative
-        pparts = point_parts(p_work)
+        pparts = point_parts(p)
         @inbounds for j = 1:d
             fill!(coeff, zero(T))
             coeff[j] = one(T)
-            Xj = ManifoldsBase.get_vector(M, p_work, coeff, basis)
+            Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
             xparts = point_parts(Xj)
             fill!(column, zero(T))
             for k = 1:model.r
@@ -247,8 +235,8 @@ function _lm_raw_jacobian_matrix(
     end
 
     λp, Up =
-        model.nonnegative ? unpack_point_rankr(p_work, model.dims, model.r) :
-        unpack_rankr_canonical(p_work, model.dims, model.r)
+        model.nonnegative ? unpack_point_rankr(p, model.dims, model.r) :
+        unpack_rankr_canonical(p, model.dims, model.r)
     kind =
         model.nonnegative ?
         (model.geometry == :softplus_metric ? Val(:softplus) : Val(:square)) :
@@ -256,7 +244,7 @@ function _lm_raw_jacobian_matrix(
     @inbounds for j = 1:d
         fill!(coeff, zero(T))
         coeff[j] = one(T)
-        Xj = ManifoldsBase.get_vector(M, p_work, coeff, basis)
+        Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
         λ̇p, U̇p =
             model.nonnegative ? unpack_point_rankr(Xj, model.dims, model.r) :
             unpack_rankr_canonical(Xj, model.dims, model.r)
@@ -281,7 +269,7 @@ function _lm_residual_function(
     normA2,
     normalized_objective::Bool,
 ) where {T<:AbstractFloat}
-    scale = _lm_objective_scale(T, normA2, normalized_objective)
+    scale = _lm_scaling_factor(T, normA2, normalized_objective)
     return (M, p) -> scale .* _lm_raw_residual_vector(model, p)
 end
 
@@ -292,7 +280,7 @@ function _lm_jacobian_function(
     normalized_objective::Bool;
     basis = ManifoldsBase.DefaultOrthonormalBasis(),
 ) where {T<:AbstractFloat}
-    scale = _lm_objective_scale(T, normA2, normalized_objective)
+    scale = _lm_scaling_factor(T, normA2, normalized_objective)
     return (M, p) -> scale .* _lm_raw_jacobian_matrix(model, M, p; basis)
 end
 
@@ -376,6 +364,7 @@ function solve_lm(
         expect_zero_residual = expect_zero_residual,
         linear_subsolver! = linear_subsolver,
         debug = callbacks.debug_actions,
+        count = [:Cost, :Gradient],
         return_state = true,
     )
 
