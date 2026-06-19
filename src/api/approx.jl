@@ -127,11 +127,12 @@ For the generic join path:
     - `rgd_fixed`: Riemannian gradient descent with fixed step size
     - `rcg`: Riemannian conjugate gradient
     - `lbfgs`: Limited-memory quasi-Newton
+    - `lm`: Levenberg-Marquardt on residual/Jacobian least squares
 
 ##Notes##
 * `:als` is not a solver option for `approx(...)`. However, if `approx(...)` auto-routes to `cpd(...)` or `btd(...)`, then those specialized pipelines may support ALS separately.
 * `warm_steps` and `warm_init` are not part of the generic `approx(...)` path. Generic joins start from random initial point and then use manifold solvers for refinement.
-* For generic mixed joins, use manifold solvers such as `:rgd`, `:rcg`, or `:lbfgs`.
+* For generic mixed joins, use manifold solvers such as `:rgd`, `:rcg`, `:lbfgs`, or `:lm`.
 """
 function _approx_manifold_collection(
     dispatch::AutoApproxDispatch,

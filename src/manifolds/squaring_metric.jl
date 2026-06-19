@@ -80,6 +80,46 @@ function ManifoldsBase.inner(M::SqEuclidean, p, X::AbstractVector, Y::AbstractVe
     return dot(X, g .* Y)
 end
 
+function ManifoldsBase.get_coordinates_orthonormal(
+    M::SqEuclidean,
+    p::AbstractVector,
+    X::AbstractVector,
+    ::ManifoldsBase.RealNumbers,
+)
+    return sqrt.(pullback_metric_diag(M, p)) .* X
+end
+
+function ManifoldsBase.get_coordinates_orthonormal!(
+    M::SqEuclidean,
+    c,
+    p::AbstractVector,
+    X::AbstractVector,
+    ::ManifoldsBase.RealNumbers,
+)
+    c .= sqrt.(pullback_metric_diag(M, p)) .* X
+    return c
+end
+
+function ManifoldsBase.get_vector_orthonormal(
+    M::SqEuclidean,
+    p::AbstractVector,
+    c::AbstractVector,
+    ::ManifoldsBase.RealNumbers,
+)
+    return c ./ sqrt.(pullback_metric_diag(M, p))
+end
+
+function ManifoldsBase.get_vector_orthonormal!(
+    M::SqEuclidean,
+    X,
+    p::AbstractVector,
+    c::AbstractVector,
+    ::ManifoldsBase.RealNumbers,
+)
+    X .= c ./ sqrt.(pullback_metric_diag(M, p))
+    return X
+end
+
 # -----------------------------
 # 2D benchmark objectives for squaring/nonnegative experiments
 # p = [x, y]

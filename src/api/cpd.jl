@@ -579,13 +579,13 @@ end
 function _validate_cpd_solver_supported(solver::AbstractSolver)
     throw(
         ArgumentError(
-            "Unsupported CPD solver $(typeof(solver)). Use :als, :rgd, :rgd_fixed, :rcg, or :lbfgs.",
+            "Unsupported CPD solver $(typeof(solver)). Use :als, :rgd, :rgd_fixed, :rcg, :lbfgs, or :lm.",
         ),
     )
 end
 
 _validate_cpd_solver_supported(
-    ::Union{ALSSolver,RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver},
+    ::Union{ALSSolver,RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver,LMSolver},
 ) = nothing
 
 function _validate_cpd_solver_options(
@@ -750,7 +750,7 @@ end
 
 function _cpd_manifold_grad_tol(
     model::JoinModel{<:AbstractFloat,<:CPDBackend},
-    solver::Union{RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver},
+    solver::Union{RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver,LMSolver},
     tol::Real,
 )
     return tol
@@ -992,6 +992,7 @@ If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
     - `rgd_fixed`: Riemannian gradient descent with fixed step size
     - `rcg`: Riemannian conjugate gradient
     - `lbfgs`: Limited-memory Riemannian quasi-Newton
+    - `lm`: Levenberg-Marquardt using residual/Jacobian least squares
     - `als`: Alternating Least Squares
 
 ## Extended Options

@@ -67,3 +67,43 @@ function ManifoldsBase.inner(M::SoftplusEuclidean, p, X::AbstractVector, Y::Abst
     g = softplus_metric_diag(M, p)
     return dot(X, g .* Y)
 end
+
+function ManifoldsBase.get_coordinates_orthonormal(
+    M::SoftplusEuclidean,
+    p::AbstractVector,
+    X::AbstractVector,
+    ::ManifoldsBase.RealNumbers,
+)
+    return sqrt.(softplus_metric_diag(M, p)) .* X
+end
+
+function ManifoldsBase.get_coordinates_orthonormal!(
+    M::SoftplusEuclidean,
+    c,
+    p::AbstractVector,
+    X::AbstractVector,
+    ::ManifoldsBase.RealNumbers,
+)
+    c .= sqrt.(softplus_metric_diag(M, p)) .* X
+    return c
+end
+
+function ManifoldsBase.get_vector_orthonormal(
+    M::SoftplusEuclidean,
+    p::AbstractVector,
+    c::AbstractVector,
+    ::ManifoldsBase.RealNumbers,
+)
+    return c ./ sqrt.(softplus_metric_diag(M, p))
+end
+
+function ManifoldsBase.get_vector_orthonormal!(
+    M::SoftplusEuclidean,
+    X,
+    p::AbstractVector,
+    c::AbstractVector,
+    ::ManifoldsBase.RealNumbers,
+)
+    X .= c ./ sqrt.(softplus_metric_diag(M, p))
+    return X
+end

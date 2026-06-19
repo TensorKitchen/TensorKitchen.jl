@@ -159,6 +159,7 @@ refines it. Returns a [`BTDResult`](@ref).
     - `:als`: Alternating least squares.
     - `:rcg`: Riemannian conjugate gradient.
     - `:lbfgs`: Limited-memory quasi-Newton refinement.
+    - `:lm`: Levenberg-Marquardt refinement.
 
 ## Extended Options
 

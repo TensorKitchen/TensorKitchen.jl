@@ -175,6 +175,83 @@ end
     )
 end
 
+@testset "LM residual/Jacobian smoke check matches gradient" begin
+    cases = (
+        JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), randn(5, 4, 3)),
+        JoinModel(abs.(randn(5, 4, 3)), 2; geometry = :softplus_metric, nonnegative = true),
+    )
+    for model in cases
+        M = TensorKitchen.manifold(model)
+        p = TensorKitchen._solver_point(
+            M,
+            TensorKitchen.initial_point(model, :random; verbose = false),
+        )
+        basis = ManifoldsBase.DefaultOrthonormalBasis()
+        r = TensorKitchen._lm_raw_residual_vector(model, p)
+        J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
+        g_coord = transpose(J) * r
+        g_from_J = ManifoldsBase.get_vector(M, p, g_coord, basis)
+        g_model = TensorKitchen.rgrad(model, p)
+        @test norm(M, p, g_from_J - g_model) ≤ 1e-7 * max(1.0, norm(M, p, g_model))
+    end
+end
+
+@testset "LM normalized and unnormalized objectives take the same step" begin
+    A = randn(6, 5, 4)
+    model = JoinModel((Manifolds.Segre((6, 5, 4)), Manifolds.Segre((6, 5, 4))), A)
+    p0 = TensorKitchen._solver_point(
+        TensorKitchen.manifold(model),
+        TensorKitchen.initial_point(model, :random; verbose = false),
+    )
+    res_rel = solve(
+        LMSolver(),
+        model;
+        p0,
+        maxiter = 1,
+        tol = 0.0,
+        verbose = false,
+        return_stats = true,
+        normalized_objective = true,
+    )
+    res_abs = solve(
+        LMSolver(),
+        model;
+        p0,
+        maxiter = 1,
+        tol = 0.0,
+        verbose = false,
+        return_stats = true,
+        normalized_objective = false,
+    )
+    buf_rel = similar(model.backend.work_rec)
+    buf_abs = similar(model.backend.work_rec)
+    TensorKitchen._join_reconstruct!(buf_rel, model.backend, TensorKitchen.point(res_rel))
+    TensorKitchen._join_reconstruct!(buf_abs, model.backend, TensorKitchen.point(res_abs))
+    @test maximum(abs.(buf_rel .- buf_abs)) ≤ 1e-10
+    @test isapprox(res_rel.rel_error, res_abs.rel_error; rtol = 1e-10, atol = 1e-10)
+end
+
+@testset "cpd/approx accept LMSolver" begin
+    A = randn(5, 4, 3)
+    res_cpd_symbol = cpd(A, 2; solver = :lm, maxiter = 2, tol = 1e-6, verbose = false)
+    @test res_cpd_symbol.solver == :lm
+
+    res_cpd_object = cpd(
+        A,
+        2;
+        solver = LMSolver(damping_term_min = 1e-2),
+        maxiter = 2,
+        tol = 1e-6,
+        verbose = false,
+    )
+    @test res_cpd_object.solver == :lm
+
+    target = [1.2, -0.4, 0.8]
+    res_approx =
+        approx(Manifolds.Sphere(2), target; solver = :lm, maxiter = 2, verbose = false)
+    @test res_approx.solver == :lm
+end
+
 # =========================================================================
 # cpd/cp_rank.jl (cost/egrad functions)
 # =========================================================================
