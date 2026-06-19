@@ -3,7 +3,7 @@
 function _solver_object(solver, ::Real; kwargs...)
     throw(
         ArgumentError(
-            "Unsupported solver specification $(typeof(solver)). Use a solver symbol such as :als, :rgd, :rgd_fixed, :rcg, :lbfgs, or :btd_tsd, or pass an AbstractSolver object.",
+            "Unsupported solver specification $(typeof(solver)). Use a solver symbol such as :als, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, or :btd_tsd, or pass an AbstractSolver object.",
         ),
     )
 end
@@ -44,6 +44,16 @@ function _solver_object(::Val{:lbfgs}, ::Real; kwargs...)
     )
 end
 
+function _solver_object(::Val{:lm}, ::Real; kwargs...)
+    return LMSolver(;
+        η = get(kwargs, :η, 0.2),
+        damping_term_min = get(kwargs, :damping_term_min, 0.1),
+        β = get(kwargs, :β, 5.0),
+        expect_zero_residual = get(kwargs, :expect_zero_residual, false),
+        linear_subsolver = get(kwargs, :linear_subsolver, Manopt.default_lm_lin_solve!),
+    )
+end
+
 function _solver_object(::Val{:btd_tsd}, stepsize::Real; kwargs...)
     return BTDTSDSolver(;
         stepsize,
@@ -58,7 +68,7 @@ end
 function _solver_object(::Val{S}, ::Real; kwargs...) where {S}
     throw(
         ArgumentError(
-            "Unknown solver=$S. Use :als, :rgd, :rgd_fixed, :rcg, :lbfgs, or :btd_tsd.",
+            "Unknown solver=$S. Use :als, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, or :btd_tsd.",
         ),
     )
 end

@@ -471,6 +471,7 @@ function _prepare_solver_problem(
     )
 
     return (
+        model = model,
         M = M,
         p0 = p0_local,
         model_cost = model_cost,

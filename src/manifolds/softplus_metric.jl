@@ -7,7 +7,7 @@
 
 export SoftplusEuclidean, softplus_metric_inverse
 
-@inline _sp_sigmoid(x::Real) = x >= 0 ? inv(one(x) + exp(-x)) : begin
+@inline _sp_sigmoid(x::Real) = x >= 0 ? one(x) / (one(x) + exp(-x)) : begin
     ex = exp(x)
     ex / (one(x) + ex)
 end
@@ -57,8 +57,7 @@ function softplus_metric_diag(M::SoftplusEuclidean, p::AbstractVector)
 end
 
 function softplus_metric_inverse(M::SoftplusEuclidean, p::AbstractVector, X::AbstractVector)
-    g_inv = inv.(softplus_metric_diag(M, p))
-    return g_inv .* X
+    return X ./ softplus_metric_diag(M, p)
 end
 
 pullback_metric_inverse(M::SoftplusEuclidean, p::AbstractVector, X::AbstractVector) =
@@ -67,4 +66,44 @@ pullback_metric_inverse(M::SoftplusEuclidean, p::AbstractVector, X::AbstractVect
 function ManifoldsBase.inner(M::SoftplusEuclidean, p, X::AbstractVector, Y::AbstractVector)
     g = softplus_metric_diag(M, p)
     return dot(X, g .* Y)
+end
+
+function ManifoldsBase.get_coordinates_orthonormal(
+    M::SoftplusEuclidean,
+    p::AbstractVector,
+    X::AbstractVector,
+    ::ManifoldsBase.RealNumbers,
+)
+    return sqrt.(softplus_metric_diag(M, p)) .* X
+end
+
+function ManifoldsBase.get_coordinates_orthonormal!(
+    M::SoftplusEuclidean,
+    c,
+    p::AbstractVector,
+    X::AbstractVector,
+    ::ManifoldsBase.RealNumbers,
+)
+    c .= sqrt.(softplus_metric_diag(M, p)) .* X
+    return c
+end
+
+function ManifoldsBase.get_vector_orthonormal(
+    M::SoftplusEuclidean,
+    p::AbstractVector,
+    c::AbstractVector,
+    ::ManifoldsBase.RealNumbers,
+)
+    return c ./ sqrt.(softplus_metric_diag(M, p))
+end
+
+function ManifoldsBase.get_vector_orthonormal!(
+    M::SoftplusEuclidean,
+    X,
+    p::AbstractVector,
+    c::AbstractVector,
+    ::ManifoldsBase.RealNumbers,
+)
+    X .= c ./ sqrt.(softplus_metric_diag(M, p))
+    return X
 end

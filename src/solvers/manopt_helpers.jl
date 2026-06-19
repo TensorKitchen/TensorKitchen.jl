@@ -300,7 +300,7 @@ end
 function _relative_solver_functions(model_cost, model_grad, scale::Real)
     scale > 0 || return model_cost, model_grad, false
     scale == one(scale) && return model_cost, model_grad, false
-    inv_scale = inv(scale)
+    inv_scale = one(scale) / scale
     return (
         (M, p) -> model_cost(M, p) * inv_scale,
         (M, p) -> _scale_solver_tangent(model_grad(M, p), inv_scale),

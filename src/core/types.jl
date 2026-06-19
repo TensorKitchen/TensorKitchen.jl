@@ -446,7 +446,7 @@ function LinearAlgebra.cond(R::CPDResult{T}) where {T<:AbstractFloat}
     U = hcat(Us...)
     s = svdvals(U)
     smin = minimum(s)
-    return iszero(smin) ? T(Inf) : inv(smin)
+    return iszero(smin) ? T(Inf) : one(T) / smin
 end
 
 """
