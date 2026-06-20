@@ -1,5 +1,6 @@
 # core/model.jl — Top-level decomposition model interface
-export AbstractDecompositionModel, rgrad, supports_rgrad, tensor, cost, post_step!
+export AbstractDecompositionModel,
+    manifold, initial_point, egrad, rgrad, supports_rgrad, tensor, cost, post_step!
 """
     AbstractDecompositionModel{T}
 

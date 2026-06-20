@@ -22,6 +22,16 @@ function _as_join_manifold_tuple(manifolds::AbstractVector)
 end
 
 _as_join_manifold_tuple(M::ProductManifold) = Tuple(M.manifolds)
+
+function _uniform_segre_dims(manifolds::Tuple)
+    isempty(manifolds) && return nothing
+    first_manifold = first(manifolds)
+    first_manifold isa Manifolds.Segre || return nothing
+    dims = factor_dims(first_manifold)
+    all(M -> M isa Manifolds.Segre && factor_dims(M) == dims, manifolds) || return nothing
+    return dims
+end
+
 @inline function _check_parts_len(parts, expected::Int, where_fn::AbstractString)
     length(parts) == expected || throw(
         DimensionMismatch(
@@ -342,6 +352,29 @@ function initial_point(
     parts =
         ntuple(k -> _manifold_init(backend.manifolds[k], backend.target, init), backend.r)
     return ArrayPartition(parts...)
+end
+
+function initial_point(
+    model::JoinModel{<:AbstractFloat,<:JoinBackend},
+    init::ALSWarmStartInit;
+    verbose::Bool = false,
+    kwargs...,
+)
+    backend = model.backend
+    dims = _uniform_segre_dims(backend.manifolds)
+    isnothing(dims) && throw(
+        ArgumentError(
+            "ALSWarmStartInit for a generic JoinModel requires all component manifolds to be Manifolds.Segre with identical factor_dims.",
+        ),
+    )
+    dims == backend.target_shape || throw(
+        DimensionMismatch(
+            "Uniform Segre factor_dims $dims must match target size $(backend.target_shape) for ALS warm start.",
+        ),
+    )
+    warm_model = JoinModel(backend.target, backend.r; geometry = :canonical)
+    p_canonical = initial_point(warm_model, init; verbose, kwargs...)
+    return canonical_to_joinpoint(p_canonical, backend.target_shape, backend.r)
 end
 
 # Gradient path: always recomputes the ambient reconstruction and marks the

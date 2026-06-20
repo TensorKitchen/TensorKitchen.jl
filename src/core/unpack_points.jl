@@ -1,6 +1,11 @@
 # core/unpack_points.jl — Point unpacking and legacy/vector interop
 export pack_point_rank1,
-    unpack_point_rank1, pack_point_rankr, unpack_point_rankr, unpack_point_rankr_components
+    unpack_point_rank1,
+    pack_point_rankr,
+    unpack_point_rankr,
+    unpack_point_rankr_components,
+    canonical_to_joinpoint,
+    joinpoint_to_canonical
 
 function unpack_rankr_native(p, dims::NTuple{N,Int}, r::Int) where {N}
     parts = normalize_rankr_native_point(p, dims, r)
@@ -70,6 +75,43 @@ function unpack_rankr_join(p, dims::NTuple{N,Int}, r::Int) where {N}
         end
     end
     return λ, U
+end
+
+"""
+    canonical_to_joinpoint(λ, U)
+    canonical_to_joinpoint(p_canonical, dims, r)
+
+Convert a CPD point from canonical factor-matrix storage to the native
+rank-`r` Segre join point layout used by generic `JoinModel((Segre, ...), A)`.
+
+The conversion preserves the represented tensor but may renormalize component
+gauges the same way `pack_rankr_native` does.
+"""
+function canonical_to_joinpoint(
+    λ::AbstractVector{T},
+    U::Vector{<:AbstractMatrix{T}},
+) where {T<:AbstractFloat}
+    r = length(λ)
+    return pack_rankr_native(λ, U, r)
+end
+
+function canonical_to_joinpoint(p, dims::NTuple{N,Int}, r::Int) where {N}
+    λ, U = unpack_rankr_canonical(p, dims, r)
+    return canonical_to_joinpoint(λ, U)
+end
+
+"""
+    joinpoint_to_canonical(p_join, dims, r)
+
+Convert a native Segre join point layout back to the canonical CPD point
+layout `(λ, (u₁¹, …, uᵣ¹), …, (u₁ᴺ, …, uᵣᴺ))`.
+
+The conversion preserves the represented tensor but may renormalize component
+gauges the same way `pack_rankr_canonical` does.
+"""
+function joinpoint_to_canonical(p, dims::NTuple{N,Int}, r::Int) where {N}
+    λ, U = unpack_rankr_native(p, dims, r)
+    return pack_rankr_canonical(λ, U, r)
 end
 
 function pack_point_rank1(λ::T, U::Vector{Vector{T}}) where {T<:AbstractFloat}
