@@ -58,22 +58,15 @@ end
 tensor(model::Rank1CPDModel) = model.A
 manifold(model::Rank1CPDModel) = model.M
 
+_cp_parameterization(model::Rank1CPDModel) =
+    model.nonnegative ?
+    (
+        _rank1_uses_softplus_metric(model.M) ? SoftplusNonnegativeCPEmbedding() :
+        SquaredNonnegativeCPEmbedding()
+    ) : NativeCPEmbedding()
+
 function embed_point(model::Rank1CPDModel{T,N}, p) where {T,N}
-    if model.nonnegative
-        if _rank1_uses_softplus_metric(model.M)
-            λ̃, Ũ = unpack_point_rank1(p, model.dims)
-            λ = _softplus_value(λ̃)
-            U = [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)]
-            return reconstruct_cp_rank1(λ, U)
-        end
-        return embed_point_rank1_nn(p, model.dims)
-    end
-    M = manifold(model)
-    M isa Manifolds.Segre || return embed_point_rank1(p, model.dims)
-    return reshape(
-        ManifoldsBase.embed!(M, Vector{eltype(p[1])}(undef, prod(model.dims)), p),
-        model.dims,
-    )
+    return _cp_rank1_embed_tensor(_cp_parameterization(model), model.dims, p)
 end
 
 function cost(model::Rank1CPDModel{T,N}, p) where {T,N}
@@ -166,16 +159,7 @@ function initial_point(
     init == :alswarm && return initial_point(model, ALSWarmStartInit(); verbose)
     init_sym = _builtin_initializer_symbol(init)
     U0 = init_cp_rank1(model.A; init = init_sym)
-    if model.nonnegative
-        λ̃0 = _rank1_uses_softplus_metric(model.M) ? _invsoftplus(one(T)) : one(T)
-        Ũ = if _rank1_uses_softplus_metric(model.M)
-            [_invsoftplus.(max.(abs.(u), eps(T))) for u in U0]
-        else
-            [sqrt.(max.(abs.(u), eps(T))) for u in U0]
-        end
-        return pack_point_rank1(λ̃0, Ũ)
-    end
-    return pack_point_rank1_segre(one(T), U0)
+    return _cp_rank1_seed_point(_cp_parameterization(model), one(T), U0)
 end
 
 initial_point(model::Rank1CPDModel, init::PointInit; kwargs...) = init.point
@@ -196,17 +180,7 @@ nonnegative squared parameterization so backend postprocessing can work with a
 uniform `lambda + factors` representation.
 """
 function cpd_point(model::Rank1CPDModel{T,N}, p) where {T<:AbstractFloat,N}
-    if model.nonnegative
-        λ̃, Ũ = unpack_point_rank1(p, model.dims)
-        if _rank1_uses_softplus_metric(model.M)
-            return CPDPoint(
-                T[_softplus_value(λ̃)],
-                [reshape(_softplus_value.(Ũ[m]), :, 1) for m in eachindex(Ũ)],
-            )
-        end
-        return CPDPoint(T[λ̃^2], [reshape(Ũ[m] .^ 2, :, 1) for m in eachindex(Ũ)])
-    end
-    λ, U = unpack_point_rank1(p, model.dims)
+    λ, U = _cp_rank1_decode_factors(_cp_parameterization(model), model.dims, p)
     return CPDPoint(T[λ], [reshape(U[m], :, 1) for m in eachindex(U)])
 end
 
@@ -221,16 +195,7 @@ function pack_cpd_point(
     )
     λ = lambda(point)[1]
     U = [Vector(@view F[:, 1]) for F in factors(point)]
-    if model.nonnegative
-        if _rank1_uses_softplus_metric(model.M)
-            return pack_point_rank1(
-                _invsoftplus(max(λ, zero(T))),
-                [_invsoftplus.(max.(u, zero(T))) for u in U],
-            )
-        end
-        return pack_point_rank1(sqrt(max(λ, zero(T))), [sqrt.(max.(u, zero(T))) for u in U])
-    end
-    return pack_point_rank1_segre(λ, U)
+    return _cp_rank1_encode_point(_cp_parameterization(model), λ, U)
 end
 
 function post_step!(

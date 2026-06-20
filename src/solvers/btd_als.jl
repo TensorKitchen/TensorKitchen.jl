@@ -2,7 +2,7 @@
 export fit_btd_als
 
 @inline function _btd_block_ranks(backend::BTDBackend, b::Int)
-    M = backend.manifolds[b]
+    M = _backend_manifold(backend, b)
     M isa Manifolds.Tucker || throw(
         ArgumentError(
             "BTD ALSSolver expects Tucker manifolds, got $(typeof(M)) at block $b.",

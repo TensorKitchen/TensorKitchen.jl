@@ -89,56 +89,6 @@ function _lm_raw_jacobian_matrix(
     return J
 end
 
-@inline function _cp_scaled_tangent_factors(λ, U, λ̇, U̇, ::Val{:identity})
-    return λ, U, λ̇, U̇
-end
-
-@inline function _cp_scaled_tangent_factors(λ̃, Ũ, λ̇̃, U̇̃, ::Val{:square})
-    λ = λ̃ .^ 2
-    U = [Ũ[m] .^ 2 for m in eachindex(Ũ)]
-    λ̇ = 2 .* λ̃ .* λ̇̃
-    U̇ = [2 .* Ũ[m] .* U̇̃[m] for m in eachindex(Ũ)]
-    return λ, U, λ̇, U̇
-end
-
-@inline function _cp_scaled_tangent_factors(λ̃, Ũ, λ̇̃, U̇̃, ::Val{:softplus})
-    λ = _softplus_value.(λ̃)
-    U = [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)]
-    λ̇ = _softplus_derivative.(λ̃) .* λ̇̃
-    U̇ = [_softplus_derivative.(Ũ[m]) .* U̇̃[m] for m in eachindex(Ũ)]
-    return λ, U, λ̇, U̇
-end
-
-function _cp_rankr_tangent_tensorvec!(
-    out::AbstractVector{T},
-    λ::AbstractVector{T},
-    U::Vector{<:AbstractMatrix{T}},
-    λ̇::AbstractVector{T},
-    U̇::Vector{<:AbstractMatrix{T}},
-) where {T<:AbstractFloat}
-    fill!(out, zero(T))
-    r = length(λ)
-    @inbounds for k = 1:r
-        comp = ([λ[k]], [Vector(@view U[m][:, k]) for m in eachindex(U)]...)
-        xcomp = ([λ̇[k]], [Vector(@view U̇[m][:, k]) for m in eachindex(U̇)]...)
-        out .+= _segre_tangent_tensorvec(comp, xcomp)
-    end
-    return out
-end
-
-function _cp_rank1_tangent_tensorvec!(
-    out::AbstractVector{T},
-    λ::T,
-    U::Vector{<:AbstractVector{T}},
-    λ̇::T,
-    U̇::Vector{<:AbstractVector{T}},
-) where {T<:AbstractFloat}
-    comp = ([λ], U...)
-    xcomp = ([λ̇], U̇...)
-    copyto!(out, _segre_tangent_tensorvec(comp, xcomp))
-    return out
-end
-
 function _lm_raw_residual_vector(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p)
     return _lm_raw_residual_vector(cpd_model(model), p)
 end
@@ -166,28 +116,14 @@ function _lm_raw_jacobian_matrix(
     d = manifold_dimension(M)
     J = Matrix{T}(undef, ambient_dim, d)
     coeff = zeros(T, d)
-    λp, Up = unpack_point_rank1(p, model.dims)
+    embedding = _cp_parameterization(model)
     column = Vector{T}(undef, ambient_dim)
     @inbounds for j = 1:d
         fill!(coeff, zero(T))
         coeff[j] = one(T)
         Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-        if model.nonnegative
-            λ̇p, U̇p = unpack_point_rank1(Xj, model.dims)
-            kind = _rank1_uses_softplus_metric(model.M) ? Val(:softplus) : Val(:square)
-            λ, U, λ̇, U̇ = _cp_scaled_tangent_factors(
-                [λp],
-                [reshape(u, :, 1) for u in Up],
-                [λ̇p],
-                [reshape(u, :, 1) for u in U̇p],
-                kind,
-            )
-            U_vec = [Vector(@view U[m][:, 1]) for m in eachindex(U)]
-            U̇_vec = [Vector(@view U̇[m][:, 1]) for m in eachindex(U̇)]
-            _cp_rank1_tangent_tensorvec!(column, λ[1], U_vec, λ̇[1], U̇_vec)
-        else
-            copyto!(column, vec(ManifoldsBase.embed(M, p, Xj)))
-        end
+        λ, U, λ̇, U̇ = _cp_rank1_decode_tangent_factors(embedding, model.dims, p, Xj)
+        _cp_rank1_tangent_tensorvec!(column, λ, U, λ̇, U̇)
         J[:, j] .= column
     end
     return J
@@ -208,37 +144,13 @@ function _lm_raw_jacobian_matrix(
     J = Matrix{T}(undef, ambient_dim, d)
     coeff = zeros(T, d)
     column = Vector{T}(undef, ambient_dim)
-    if model.geometry == :native && !model.nonnegative
-        pparts = point_parts(p)
-        @inbounds for j = 1:d
-            fill!(coeff, zero(T))
-            coeff[j] = one(T)
-            Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-            xparts = point_parts(Xj)
-            fill!(column, zero(T))
-            for k = 1:model.r
-                column .+= _segre_tangent_tensorvec(pparts[k], xparts[k])
-            end
-            J[:, j] .= column
-        end
-        return J
-    end
-
-    λp, Up =
-        model.nonnegative ? unpack_point_rankr(p, model.dims, model.r) :
-        unpack_rankr_canonical(p, model.dims, model.r)
-    kind =
-        model.nonnegative ?
-        (model.geometry == :softplus_metric ? Val(:softplus) : Val(:square)) :
-        Val(:identity)
+    embedding = _cp_parameterization(model)
     @inbounds for j = 1:d
         fill!(coeff, zero(T))
         coeff[j] = one(T)
         Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-        λ̇p, U̇p =
-            model.nonnegative ? unpack_point_rankr(Xj, model.dims, model.r) :
-            unpack_rankr_canonical(Xj, model.dims, model.r)
-        λ, U, λ̇, U̇ = _cp_scaled_tangent_factors(λp, Up, λ̇p, U̇p, kind)
+        λ, U, λ̇, U̇ =
+            _cp_rankr_decode_tangent_factors(embedding, model.dims, model.r, p, Xj)
         _cp_rankr_tangent_tensorvec!(column, λ, U, λ̇, U̇)
         J[:, j] .= column
     end

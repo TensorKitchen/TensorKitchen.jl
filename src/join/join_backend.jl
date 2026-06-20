@@ -11,7 +11,9 @@ _wrap_join_component(manifold::AbstractManifold) = JoinComponent(manifold)
 _component_manifold(component::JoinComponent) = component.manifold
 _component_manifold(manifold::AbstractManifold) = manifold
 _backend_components(backend::JoinBackend) = backend.components
-_backend_components(backend::BTDBackend) = backend.manifolds
+_backend_components(backend::BTDBackend) = backend.components
+_backend_component(backend, k::Int) = _backend_components(backend)[k]
+_backend_manifold(backend, k::Int) = _component_manifold(_backend_component(backend, k))
 
 function _as_join_manifold_tuple(manifolds::Tuple)
     all(_is_manifold_like, manifolds) || throw(
@@ -251,10 +253,11 @@ function _sum_backend_parts(
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
-    r = length(components)
+    components_tuple = _as_join_component_tuple(components)
+    r = length(components_tuple)
     # Keep the original target representation instead of eagerly materializing Array.
     tgt = target
-    _validate_join_ambient_compatibility(components, tgt)
+    _validate_join_ambient_compatibility(components_tuple, tgt)
 
     tflat = vec(tgt)
     tgt_len = length(tgt)
@@ -262,10 +265,10 @@ function _sum_backend_parts(
     component_bufs = [_join_vector_workspace_like(tgt, tgt_len) for _ = 1:r]
     work_rec = _join_vector_workspace_like(tgt, tgt_len)
     work_residual = _join_vector_workspace_like(tgt, tgt_len)
-    manifolds = ntuple(k -> _component_manifold(components[k]), r)
+    manifolds = ntuple(k -> _component_manifold(components_tuple[k]), r)
 
     return (;
-        components,
+        components = components_tuple,
         manifolds,
         r,
         target = tgt,
@@ -310,6 +313,7 @@ function _sum_backend_instance(
 ) where {T<:AbstractFloat,N}
     parts = _sum_backend_parts(components, target; init_point)
     return BTDBackend(
+        parts.components,
         parts.manifolds,
         parts.r,
         parts.target,

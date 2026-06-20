@@ -285,6 +285,110 @@ end
     end
 end
 
+@testset "LM CPD rank-r Jacobian matches finite differences across geometries" begin
+    A = randn(5, 4, 3)
+    r = 2
+    cases = (
+        (JoinModel(A, r; geometry = :canonical), 1e-7),
+        (JoinModel(A, r; geometry = :native), 1e-7),
+        (JoinModel(abs.(A), r; nonnegative = true, geometry = :squaring_metric), 5e-6),
+        (JoinModel(abs.(A), r; nonnegative = true, geometry = :softplus_metric), 5e-6),
+    )
+
+    for (model, tol_fd) in cases
+        M = TensorKitchen.manifold(model)
+        p = TensorKitchen._solver_point(
+            M,
+            TensorKitchen.initial_point(model, :random; verbose = false),
+        )
+        basis = ManifoldsBase.DefaultOrthonormalBasis()
+        J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
+        @test all(isfinite, J)
+
+        retraction_method = TensorKitchen._solver_retraction_method(M, p)
+        ϵ = 1e-6
+        d = manifold_dimension(M)
+        for j = 1:min(d, 3)
+            coeff = zeros(Float64, d)
+            coeff[j] = 1.0
+            Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
+            p_plus = ManifoldsBase.retract(M, p, ϵ * Xj, retraction_method)
+            p_minus = ManifoldsBase.retract(M, p, -ϵ * Xj, retraction_method)
+            r_plus = TensorKitchen._lm_raw_residual_vector(model, p_plus)
+            r_minus = TensorKitchen._lm_raw_residual_vector(model, p_minus)
+            fd = (r_plus .- r_minus) ./ (2 * ϵ)
+            @test maximum(abs.(fd .- J[:, j])) ≤ tol_fd
+        end
+    end
+end
+
+@testset "LM CPD Jacobian finite differences across direct parameterizations" begin
+    dims = (5, 4, 3)
+    A = randn(dims...)
+    r = 2
+    cases = (
+        ("rank1 native", TensorKitchen.Rank1CPDModel(A), 5e-7),
+        ("rank1 squared", TensorKitchen.Rank1CPDModel(abs.(A); nonnegative = true), 5e-6),
+        (
+            "rank1 softplus",
+            TensorKitchen.Rank1CPDModel(
+                abs.(A);
+                nonnegative = true,
+                use_softplus_metric = true,
+            ),
+            5e-6,
+        ),
+        ("rankr native", TensorKitchen.RankRCPDModel(A, r; geometry = :native), 5e-7),
+        ("rankr canonical", TensorKitchen.RankRCPDModel(A, r; geometry = :canonical), 5e-7),
+        (
+            "rankr squared",
+            TensorKitchen.RankRCPDModel(
+                abs.(A),
+                r;
+                nonnegative = true,
+                geometry = :squaring_metric,
+            ),
+            5e-6,
+        ),
+        (
+            "rankr softplus",
+            TensorKitchen.RankRCPDModel(
+                abs.(A),
+                r;
+                nonnegative = true,
+                geometry = :softplus_metric,
+            ),
+            5e-6,
+        ),
+    )
+
+    for (label, model, tol_fd) in cases
+        M = TensorKitchen.manifold(model)
+        p = TensorKitchen._solver_point(
+            M,
+            TensorKitchen.initial_point(model, :random; verbose = false),
+        )
+        basis = ManifoldsBase.DefaultOrthonormalBasis()
+        J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
+        @testset "$label" begin
+            @test all(isfinite, J)
+            retraction_method = TensorKitchen._solver_retraction_method(M, p)
+            ϵ = 1e-6
+            d = manifold_dimension(M)
+            r0 = TensorKitchen._lm_raw_residual_vector(model, p)
+            for j = 1:min(d, 3)
+                coeff = zeros(Float64, d)
+                coeff[j] = 1.0
+                Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
+                p_plus = ManifoldsBase.retract(M, p, ϵ * Xj, retraction_method)
+                r_plus = TensorKitchen._lm_raw_residual_vector(model, p_plus)
+                fd = (r_plus .- r0) ./ ϵ
+                @test maximum(abs.(fd .- J[:, j])) ≤ tol_fd
+            end
+        end
+    end
+end
+
 @testset "LM normalized and unnormalized objectives take the same step" begin
     A = randn(6, 5, 4)
     model = JoinModel(A, 2; geometry = :canonical)
@@ -317,6 +421,57 @@ end
     X_abs = TensorKitchen.embed_point(rawmodel, TensorKitchen.point(res_abs))
     @test maximum(abs.(X_rel .- X_abs)) ≤ 1e-10
     @test isapprox(res_rel.rel_error, res_abs.rel_error; rtol = 1e-10, atol = 1e-10)
+end
+
+@testset "CP parameterization tangent decode helpers" begin
+    dims = (3, 2, 2)
+    r = 2
+    λ̃ = [1.5, -0.4]
+    Ũ = [randn(dims[m], r) for m = 1:length(dims)]
+    λ̇̃ = randn(r)
+    U̇̃ = [randn(dims[m], r) for m = 1:length(dims)]
+    p = TensorKitchen.pack_point_rankr(λ̃, Ũ, r)
+    X = TensorKitchen.pack_point_rankr(λ̇̃, U̇̃, r)
+
+    λ_sq, U_sq, λ̇_sq, U̇_sq = TensorKitchen._cp_rankr_decode_tangent_factors(
+        TensorKitchen.SquaredNonnegativeCPEmbedding(),
+        dims,
+        r,
+        p,
+        X,
+    )
+    @test λ_sq ≈ λ̃ .^ 2
+    @test all(U_sq[m] ≈ Ũ[m] .^ 2 for m in eachindex(U_sq))
+    @test λ̇_sq ≈ 2 .* λ̃ .* λ̇̃
+    @test all(U̇_sq[m] ≈ 2 .* Ũ[m] .* U̇̃[m] for m in eachindex(U̇_sq))
+
+    λ_sp, U_sp, λ̇_sp, U̇_sp = TensorKitchen._cp_rankr_decode_tangent_factors(
+        TensorKitchen.SoftplusNonnegativeCPEmbedding(),
+        dims,
+        r,
+        p,
+        X,
+    )
+    @test λ_sp ≈ TensorKitchen._softplus_value.(λ̃)
+    @test all(U_sp[m] ≈ TensorKitchen._softplus_value.(Ũ[m]) for m in eachindex(U_sp))
+    @test λ̇_sp ≈ TensorKitchen._softplus_derivative.(λ̃) .* λ̇̃
+    @test all(
+        U̇_sp[m] ≈ TensorKitchen._softplus_derivative.(Ũ[m]) .* U̇̃[m] for
+        m in eachindex(U̇_sp)
+    )
+
+    model_sp = TensorKitchen.RankRCPDModel(
+        randn(dims...),
+        r;
+        nonnegative = true,
+        geometry = :softplus_metric,
+    )
+    q_zero =
+        CPDPoint(zeros(Float64, r), [zeros(Float64, dims[m], r) for m = 1:length(dims)])
+    p_zero = TensorKitchen.pack_cpd_point(model_sp, q_zero)
+    λ_lat, U_lat = TensorKitchen.unpack_point_rankr(p_zero, dims, r)
+    @test all(isfinite, λ_lat)
+    @test all(F -> all(isfinite, F), U_lat)
 end
 
 @testset "cpd/approx accept LMSolver" begin
@@ -2215,6 +2370,9 @@ end
 
     manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(size(A), (2, 2, 2), 2))
     backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
+    @test length(backend.components) == 2
+    @test all(c -> c isa TensorKitchen.JoinComponent, backend.components)
+    @test map(TensorKitchen._component_manifold, backend.components) == manifolds
     model_btd = JoinModel{Float64,typeof(backend)}(backend)
     M_btd = TensorKitchen.manifold(model_btd)
     p_btd =
@@ -2230,8 +2388,11 @@ end
     end
     for b = 1:backend.r
         fast_eg = TensorKitchen._btd_block_egrad(backend, parts_btd, b)
-        residual_eg =
-            TensorKitchen._tucker_egrad(backend.manifolds[b], parts_btd[b], residual_btd)
+        residual_eg = TensorKitchen._tucker_egrad(
+            TensorKitchen._backend_manifold(backend, b),
+            parts_btd[b],
+            residual_btd,
+        )
         @test norm(getproperty(fast_eg, :Ċ) - getproperty(residual_eg, :Ċ)) < 1e-10
         @test all(
             norm(F - R) < 1e-10 for
@@ -2243,7 +2404,11 @@ end
         q_btd = TensorKitchen._replace_block_part(
             p_btd,
             b,
-            retract(backend.manifolds[b], parts_btd[b], (-h) * block_grad),
+            retract(
+                TensorKitchen._backend_manifold(backend, b),
+                parts_btd[b],
+                (-h) * block_grad,
+            ),
         )
         fd =
             (TensorKitchen.cost(model_btd, q_btd) - TensorKitchen.cost(model_btd, p_btd)) /

@@ -116,7 +116,7 @@ end
     _check_parts_len(parts, backend.r, "BTD block descent direction")
     pk = parts[b]
     eg_b = _btd_block_egrad(backend, parts, b)
-    rg_b = egrad_to_rgrad(backend.manifolds[b], pk, eg_b)
+    rg_b = egrad_to_rgrad(_backend_manifold(backend, b), pk, eg_b)
     decrease = _btd_tangent_dot(eg_b, rg_b)
     return pk, rg_b, decrease
 end
@@ -135,7 +135,7 @@ function _btd_tsd_block_step(
         return p, c0, zero(T), 0, false
     end
 
-    Mk = backend.manifolds[b]
+    Mk = _backend_manifold(backend, b)
     α = T(solver.stepsize)
     α_min = T(solver.armijo_alpha_min)
     contraction = T(solver.armijo_contraction)
