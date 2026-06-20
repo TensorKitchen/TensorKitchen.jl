@@ -200,7 +200,10 @@ end
     A = randn(5, 4, 3)
     model = JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), A)
     M = TensorKitchen.manifold(model)
-    p = TensorKitchen._solver_point(M, TensorKitchen.initial_point(model, :random; verbose = false))
+    p = TensorKitchen._solver_point(
+        M,
+        TensorKitchen.initial_point(model, :random; verbose = false),
+    )
     basis = ManifoldsBase.DefaultOrthonormalBasis()
     J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
     @test all(isfinite, J)
