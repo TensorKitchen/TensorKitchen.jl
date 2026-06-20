@@ -495,7 +495,7 @@ end
     X = TensorKitchen.pack_point_rankr(λ̇̃, U̇̃, r)
 
     λ_sq, U_sq, λ̇_sq, U̇_sq = TensorKitchen._cp_rankr_decode_tangent_factors(
-        TensorKitchen.SquaredNonnegativeCPEmbedding(),
+        TensorKitchen.SquaredNNCPParam(),
         dims,
         r,
         p,
@@ -507,7 +507,7 @@ end
     @test all(U̇_sq[m] ≈ 2 .* Ũ[m] .* U̇̃[m] for m in eachindex(U̇_sq))
 
     λ_sp, U_sp, λ̇_sp, U̇_sp = TensorKitchen._cp_rankr_decode_tangent_factors(
-        TensorKitchen.SoftplusNonnegativeCPEmbedding(),
+        TensorKitchen.SoftplusNNCPParam(),
         dims,
         r,
         p,

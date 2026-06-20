@@ -60,10 +60,8 @@ manifold(model::Rank1CPDModel) = model.M
 
 _cp_parameterization(model::Rank1CPDModel) =
     model.nonnegative ?
-    (
-        _rank1_uses_softplus_metric(model.M) ? SoftplusNonnegativeCPEmbedding() :
-        SquaredNonnegativeCPEmbedding()
-    ) : NativeCPEmbedding()
+    (_rank1_uses_softplus_metric(model.M) ? SoftplusNNCPParam() : SquaredNNCPParam()) :
+    NativeCPParam()
 
 function embed_point(model::Rank1CPDModel{T,N}, p) where {T,N}
     return _cp_rank1_embed_tensor(_cp_parameterization(model), model.dims, p)

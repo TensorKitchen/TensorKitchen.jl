@@ -102,10 +102,8 @@ manifold(model::RankRCPDModel) = model.M
 
 _cp_parameterization(model::RankRCPDModel) =
     model.nonnegative ?
-    (
-        model.geometry == :softplus_metric ? SoftplusNonnegativeCPEmbedding() :
-        SquaredNonnegativeCPEmbedding()
-    ) : (model.geometry == :native ? NativeCPEmbedding() : CanonicalCPEmbedding())
+    (model.geometry == :softplus_metric ? SoftplusNNCPParam() : SquaredNNCPParam()) :
+    (model.geometry == :native ? NativeCPParam() : CanonicalCPParam())
 
 function embed_point(model::RankRCPDModel{T,N}, p) where {T,N}
     return _cp_rankr_embed_tensor(_cp_parameterization(model), model.dims, model.r, p)

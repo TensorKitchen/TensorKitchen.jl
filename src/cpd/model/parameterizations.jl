@@ -2,40 +2,40 @@
 
 abstract type AbstractCPParameterization end
 
-struct NativeCPEmbedding <: AbstractCPParameterization end
-struct CanonicalCPEmbedding <: AbstractCPParameterization end
-struct SquaredNonnegativeCPEmbedding <: AbstractCPParameterization end
-struct SoftplusNonnegativeCPEmbedding <: AbstractCPParameterization end
+struct NativeCPParam <: AbstractCPParameterization end
+struct CanonicalCPParam <: AbstractCPParameterization end
+struct SquaredNNCPParam <: AbstractCPParameterization end
+struct SoftplusNNCPParam <: AbstractCPParameterization end
 
 @inline _cp_softplus_encode_value(x::T) where {T<:AbstractFloat} =
     _invsoftplus(max(x, eps(T)))
 
-function _cp_rank1_decode_factors(::NativeCPEmbedding, dims, p)
+function _cp_rank1_decode_factors(::NativeCPParam, dims, p)
     return unpack_point_rank1(p, dims)
 end
 
-function _cp_rank1_decode_factors(::SquaredNonnegativeCPEmbedding, dims, p)
+function _cp_rank1_decode_factors(::SquaredNNCPParam, dims, p)
     λ̃, Ũ = unpack_point_rank1(p, dims)
     return λ̃^2, [Ũ[m] .^ 2 for m in eachindex(Ũ)]
 end
 
-function _cp_rank1_decode_factors(::SoftplusNonnegativeCPEmbedding, dims, p)
+function _cp_rank1_decode_factors(::SoftplusNNCPParam, dims, p)
     λ̃, Ũ = unpack_point_rank1(p, dims)
     return _softplus_value(λ̃), [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)]
 end
 
-function _cp_rank1_encode_point(::NativeCPEmbedding, λ, U)
+function _cp_rank1_encode_point(::NativeCPParam, λ, U)
     return pack_point_rank1_segre(λ, U)
 end
 
-function _cp_rank1_encode_point(::SquaredNonnegativeCPEmbedding, λ, U)
+function _cp_rank1_encode_point(::SquaredNNCPParam, λ, U)
     return pack_point_rank1(
         sqrt(max(λ, zero(λ))),
         [sqrt.(max.(u, zero(eltype(u)))) for u in U],
     )
 end
 
-function _cp_rank1_encode_point(::SoftplusNonnegativeCPEmbedding, λ, U)
+function _cp_rank1_encode_point(::SoftplusNNCPParam, λ, U)
     T = typeof(λ)
     return pack_point_rank1(
         _cp_softplus_encode_value(max(λ, zero(T))),
@@ -43,11 +43,11 @@ function _cp_rank1_encode_point(::SoftplusNonnegativeCPEmbedding, λ, U)
     )
 end
 
-function _cp_rank1_seed_point(::NativeCPEmbedding, λ, U)
+function _cp_rank1_seed_point(::NativeCPParam, λ, U)
     return pack_point_rank1_segre(λ, U)
 end
 
-function _cp_rank1_seed_point(::SquaredNonnegativeCPEmbedding, λ, U)
+function _cp_rank1_seed_point(::SquaredNNCPParam, λ, U)
     T = typeof(λ)
     return pack_point_rank1(
         sqrt(max(abs(λ), eps(T))),
@@ -55,7 +55,7 @@ function _cp_rank1_seed_point(::SquaredNonnegativeCPEmbedding, λ, U)
     )
 end
 
-function _cp_rank1_seed_point(::SoftplusNonnegativeCPEmbedding, λ, U)
+function _cp_rank1_seed_point(::SoftplusNNCPParam, λ, U)
     T = typeof(λ)
     return pack_point_rank1(
         _invsoftplus(max(abs(λ), eps(T))),
@@ -81,13 +81,13 @@ function _cp_rank1_tangent_tensorvec!(
     return out
 end
 
-function _cp_rank1_decode_tangent_factors(::NativeCPEmbedding, dims, p, X)
+function _cp_rank1_decode_tangent_factors(::NativeCPParam, dims, p, X)
     λ, U = unpack_point_rank1(p, dims)
     λ̇, U̇ = unpack_point_rank1(X, dims)
     return λ, U, λ̇, U̇
 end
 
-function _cp_rank1_decode_tangent_factors(::SquaredNonnegativeCPEmbedding, dims, p, X)
+function _cp_rank1_decode_tangent_factors(::SquaredNNCPParam, dims, p, X)
     λ̃, Ũ = unpack_point_rank1(p, dims)
     λ̇̃, U̇̃ = unpack_point_rank1(X, dims)
     λ = λ̃^2
@@ -97,7 +97,7 @@ function _cp_rank1_decode_tangent_factors(::SquaredNonnegativeCPEmbedding, dims,
     return λ, U, λ̇, U̇
 end
 
-function _cp_rank1_decode_tangent_factors(::SoftplusNonnegativeCPEmbedding, dims, p, X)
+function _cp_rank1_decode_tangent_factors(::SoftplusNNCPParam, dims, p, X)
     λ̃, Ũ = unpack_point_rank1(p, dims)
     λ̇̃, U̇̃ = unpack_point_rank1(X, dims)
     λ = _softplus_value(λ̃)
@@ -107,33 +107,33 @@ function _cp_rank1_decode_tangent_factors(::SoftplusNonnegativeCPEmbedding, dims
     return λ, U, λ̇, U̇
 end
 
-function _cp_rankr_decode_factors(::NativeCPEmbedding, dims, r, p)
+function _cp_rankr_decode_factors(::NativeCPParam, dims, r, p)
     return unpack_rankr_native(p, dims, r)
 end
 
-function _cp_rankr_decode_factors(::CanonicalCPEmbedding, dims, r, p)
+function _cp_rankr_decode_factors(::CanonicalCPParam, dims, r, p)
     return unpack_rankr_canonical(p, dims, r)
 end
 
-function _cp_rankr_decode_factors(::SquaredNonnegativeCPEmbedding, dims, r, p)
+function _cp_rankr_decode_factors(::SquaredNNCPParam, dims, r, p)
     λ̃, Ũ = unpack_point_rankr(p, dims, r)
     return λ̃ .^ 2, [Ũ[m] .^ 2 for m in eachindex(Ũ)]
 end
 
-function _cp_rankr_decode_factors(::SoftplusNonnegativeCPEmbedding, dims, r, p)
+function _cp_rankr_decode_factors(::SoftplusNNCPParam, dims, r, p)
     λ̃, Ũ = unpack_point_rankr(p, dims, r)
     return _softplus_value.(λ̃), [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)]
 end
 
-function _cp_rankr_encode_point(::NativeCPEmbedding, λ, U, r)
+function _cp_rankr_encode_point(::NativeCPParam, λ, U, r)
     return pack_rankr_native(λ, U, r)
 end
 
-function _cp_rankr_encode_point(::CanonicalCPEmbedding, λ, U, r)
+function _cp_rankr_encode_point(::CanonicalCPParam, λ, U, r)
     return pack_rankr_canonical(λ, U, r)
 end
 
-function _cp_rankr_encode_point(::SquaredNonnegativeCPEmbedding, λ, U, r)
+function _cp_rankr_encode_point(::SquaredNNCPParam, λ, U, r)
     T = eltype(λ)
     return pack_point_rankr(
         sqrt.(max.(λ, zero(T))),
@@ -142,7 +142,7 @@ function _cp_rankr_encode_point(::SquaredNonnegativeCPEmbedding, λ, U, r)
     )
 end
 
-function _cp_rankr_encode_point(::SoftplusNonnegativeCPEmbedding, λ, U, r)
+function _cp_rankr_encode_point(::SoftplusNNCPParam, λ, U, r)
     T = eltype(λ)
     return pack_point_rankr(
         _cp_softplus_encode_value.(max.(λ, zero(T))),
@@ -151,15 +151,15 @@ function _cp_rankr_encode_point(::SoftplusNonnegativeCPEmbedding, λ, U, r)
     )
 end
 
-function _cp_rankr_seed_point(::NativeCPEmbedding, λ, U, r)
+function _cp_rankr_seed_point(::NativeCPParam, λ, U, r)
     return pack_rankr_native(λ, U, r)
 end
 
-function _cp_rankr_seed_point(::CanonicalCPEmbedding, λ, U, r)
+function _cp_rankr_seed_point(::CanonicalCPParam, λ, U, r)
     return pack_rankr_canonical(λ, U, r)
 end
 
-function _cp_rankr_seed_point(::SquaredNonnegativeCPEmbedding, λ, U, r)
+function _cp_rankr_seed_point(::SquaredNNCPParam, λ, U, r)
     T = eltype(λ)
     return pack_point_rankr(
         sqrt.(max.(abs.(λ), eps(T))),
@@ -168,7 +168,7 @@ function _cp_rankr_seed_point(::SquaredNonnegativeCPEmbedding, λ, U, r)
     )
 end
 
-function _cp_rankr_seed_point(::SoftplusNonnegativeCPEmbedding, λ, U, r)
+function _cp_rankr_seed_point(::SoftplusNNCPParam, λ, U, r)
     T = eltype(λ)
     return pack_point_rankr(
         _invsoftplus.(max.(abs.(λ), eps(T))),
@@ -204,7 +204,7 @@ function _cp_rankr_tangent_tensorvec!(
     return out
 end
 
-function _cp_rankr_decode_tangent_factors(::NativeCPEmbedding, dims, r, p, X)
+function _cp_rankr_decode_tangent_factors(::NativeCPParam, dims, r, p, X)
     λ, U = unpack_rankr_native(p, dims, r)
     xparts = parts_tuple(X)
     length(xparts) == r || throw(
@@ -224,13 +224,13 @@ function _cp_rankr_decode_tangent_factors(::NativeCPEmbedding, dims, r, p, X)
     return λ, U, λ̇, U̇
 end
 
-function _cp_rankr_decode_tangent_factors(::CanonicalCPEmbedding, dims, r, p, X)
+function _cp_rankr_decode_tangent_factors(::CanonicalCPParam, dims, r, p, X)
     λ, U = unpack_rankr_canonical(p, dims, r)
     λ̇, U̇ = unpack_rankr_canonical(X, dims, r)
     return λ, U, λ̇, U̇
 end
 
-function _cp_rankr_decode_tangent_factors(::SquaredNonnegativeCPEmbedding, dims, r, p, X)
+function _cp_rankr_decode_tangent_factors(::SquaredNNCPParam, dims, r, p, X)
     λ̃, Ũ = unpack_point_rankr(p, dims, r)
     λ̇̃, U̇̃ = unpack_point_rankr(X, dims, r)
     λ = λ̃ .^ 2
@@ -240,7 +240,7 @@ function _cp_rankr_decode_tangent_factors(::SquaredNonnegativeCPEmbedding, dims,
     return λ, U, λ̇, U̇
 end
 
-function _cp_rankr_decode_tangent_factors(::SoftplusNonnegativeCPEmbedding, dims, r, p, X)
+function _cp_rankr_decode_tangent_factors(::SoftplusNNCPParam, dims, r, p, X)
     λ̃, Ũ = unpack_point_rankr(p, dims, r)
     λ̇̃, U̇̃ = unpack_point_rankr(X, dims, r)
     λ = _softplus_value.(λ̃)
