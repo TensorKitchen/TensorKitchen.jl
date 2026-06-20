@@ -471,11 +471,7 @@ function _component_ambient_embedding!(
     return out
 end
 
-function _component_ambient_embedding!(
-    out::AbstractVector,
-    M::Manifolds.Segre,
-    p,
-)
+function _component_ambient_embedding!(out::AbstractVector, M::Manifolds.Segre, p)
     copyto!(out, _segre_component_tensorvec(p))
     return out
 end
@@ -506,12 +502,7 @@ function _component_ambient_pushforward!(out::AbstractVector, M, p, X)
     return out
 end
 
-function _component_ambient_pushforward!(
-    out::AbstractVector,
-    M::Manifolds.Segre,
-    p,
-    X,
-)
+function _component_ambient_pushforward!(out::AbstractVector, M::Manifolds.Segre, p, X)
     copyto!(out, _segre_tangent_tensorvec(p, X))
     return out
 end
