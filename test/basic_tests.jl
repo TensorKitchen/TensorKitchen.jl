@@ -175,6 +175,59 @@ end
     )
 end
 
+@testset "JoinModel: generic (Segre, Segre, ...) backend" begin
+    dims = (5, 4, 3)
+    rng = MersenneTwister(4242)
+    A = randn(rng, dims...)
+    segres = (Manifolds.Segre(dims), Manifolds.Segre(dims), Manifolds.Segre(dims))
+
+    model = JoinModel(segres, A)
+    @test model isa JoinModel
+    @test model.backend isa TensorKitchen.JoinBackend
+    @test model.backend.r == 3
+    @test tensor(model) == A
+    @test model.backend.manifolds == segres
+
+    M = TensorKitchen.manifold(model)
+    @test M isa ProductManifold
+    @test length(M.manifolds) == 3
+    @test all(Mk -> Mk isa Manifolds.Segre && factor_dims(Mk) == dims, M.manifolds)
+
+    model_repeat = JoinModel(Manifolds.Segre(dims), 3, A)
+    @test model_repeat.backend.r == 3
+    @test model_repeat.backend.manifolds == segres
+
+    p = TensorKitchen.initial_point(model, :random; verbose = false)
+    @test length(TensorKitchen.point_parts(p)) == 3
+
+    f = cost(model, p)
+    g = TensorKitchen.egrad(model, p)
+    rg = rgrad(model, p)
+    @test isfinite(f) && f >= 0
+    @test isfinite(norm(M, p, g))
+    @test isfinite(norm(M, p, rg))
+
+    rec = similar(model.backend.work_rec)
+    TensorKitchen._join_reconstruct!(rec, model.backend, p)
+    @test f ≈ 0.5 * sum(abs2, rec .- vec(A))
+
+    comps = TensorKitchen.extract_components(model, p)
+    @test length(comps) == 3
+    @test all(c -> c.manifold isa Manifolds.Segre, comps)
+    @test all(c -> size(c.tensor) == dims, comps)
+
+    out = solve(
+        RGDSolver(1.0),
+        model;
+        p0 = p,
+        maxiter = 2,
+        tol = 1e-6,
+        verbose = false,
+        return_stats = true,
+    )
+    @test isfinite(out.cost) && isfinite(out.rel_error)
+end
+
 @testset "LM residual/Jacobian smoke check matches gradient" begin
     cases = (
         JoinModel(randn(5, 4, 3), 2; geometry = :canonical),
@@ -672,6 +725,28 @@ end
     p_warm_sym = TensorKitchen.initial_point(model, :alswarm)
     @test TensorKitchen.cost(model, p_warm) <= TensorKitchen.cost(model, p_base) + 1e-10
     @test isfinite(TensorKitchen.cost(model, p_warm_sym))
+    generic_join = JoinModel((Manifolds.Segre(dims), Manifolds.Segre(dims)), A)
+    p_warm_canonical_match = TensorKitchen.initial_point(
+        model,
+        ALSWarmStartInit(2; base_init = TuckerInit());
+        verbose = false,
+    )
+    p_join_warm = TensorKitchen.initial_point(
+        generic_join,
+        ALSWarmStartInit(2; base_init = TuckerInit());
+        verbose = false,
+    )
+    p_join_from_canonical =
+        TensorKitchen.canonical_to_joinpoint(p_warm_canonical_match, dims, r)
+    A_join_warm = reconstruct_cpd_rankr(
+        components_from_factors(TensorKitchen.unpack_rankr_native(p_join_warm, dims, r)...),
+    )
+    A_join_from_canonical = reconstruct_cpd_rankr(
+        components_from_factors(
+            TensorKitchen.unpack_rankr_native(p_join_from_canonical, dims, r)...,
+        ),
+    )
+    @test A_join_warm ≈ A_join_from_canonical
 
     res_p0 = cpd(A, r; solver = :rgd, p0 = p0, maxiter = 5, tol = 1e-6, verbose = false)
     @test res_p0 isa CPDResult
@@ -2618,6 +2693,16 @@ end
     A_native = reconstruct_cpd_rankr(components_from_factors(λn, Un))
     @test all(λn .>= 0)
     @test A_native ≈ A_in
+    p_canonical = TensorKitchen.pack_rankr_canonical(λ, U, r)
+    p_join = TensorKitchen.canonical_to_joinpoint(p_canonical, dims, r)
+    p_canonical_roundtrip = TensorKitchen.joinpoint_to_canonical(p_join, dims, r)
+    λ_join, U_join = TensorKitchen.unpack_rankr_native(p_join, dims, r)
+    λ_canon_rt, U_canon_rt =
+        TensorKitchen.unpack_rankr_canonical(p_canonical_roundtrip, dims, r)
+    A_join = reconstruct_cpd_rankr(components_from_factors(λ_join, U_join))
+    A_canon_rt = reconstruct_cpd_rankr(components_from_factors(λ_canon_rt, U_canon_rt))
+    @test A_join ≈ A_in
+    @test A_canon_rt ≈ A_in
 
     A = randn(8, 6, 5)
     λ0, U0 = cp_init_tucker(A, 3)
