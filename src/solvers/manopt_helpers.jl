@@ -13,6 +13,22 @@ Base.unsafe_write(::_SolverDebugSink, ::Ptr{UInt8}, n::UInt) = Int(n)
 # Shared no-op IO used by Manopt debug groups.
 const _SOLVER_DEBUG_SINK = _SolverDebugSink()
 
+# Gradient tolerance paired with StopWhenCostRelChangeAndGradientLess.
+"""
+    _dual_stop_grad_tol(T, tol; grad_tol=nothing)
+
+Gradient tolerance paired with `StopWhenCostRelChangeAndGradientLess`.
+Defaults to `sqrt(tol)`; callers may pass an explicit `grad_tol` (for example
+`grad_tol = tol` on the nonnegative CPD manifold route).
+"""
+@inline function _dual_stop_grad_tol(
+    ::Type{T},
+    tol::Real,
+    grad_tol = nothing,
+) where {T<:Real}
+    return isnothing(grad_tol) ? sqrt(T(tol)) : T(grad_tol)
+end
+
 # Stop when both the relative cost change and Riemannian gradient norm are small.
 mutable struct StopWhenCostRelChangeAndGradientLess{T<:Real} <: Manopt.StoppingCriterion
     tol_cost::T
@@ -133,6 +149,64 @@ end
 function _solver_point(M, p0)
     M2 = _unwrap_solver_manifold(M)
     return M2 isa ProductManifold ? _to_array_partition(p0) : p0
+end
+
+
+# Unwrap solver manifold wrappers down to the underlying manifold object.
+@inline _unwrap_solver_manifold(M) = hasproperty(M, :M) ? getproperty(M, :M) : M
+
+
+# The actual methods depend on the registered defaults, e.g. custom manifolds such
+# as Segre or SoftplusEuclidean may choose ExponentialRetraction, while sphere-like
+# factors may choose their ManifoldsBase default.
+@inline function _default_component_retraction_method(Mi, pi)
+    return ManifoldsBase.default_retraction_method(Mi, typeof(pi))
+end
+
+
+# Choose a solver retraction method, including per-factor product retractions.
+function _solver_retraction_method(M, p)
+    return _solver_retraction_method_unwrapped(_unwrap_solver_manifold(M), p)
+end
+
+function _solver_retraction_method_unwrapped(M::ProductManifold, p)
+    pparts0 = point_parts(p)
+    pparts = pparts0 isa Tuple ? pparts0 : Tuple(pparts0)
+    n = length(M.manifolds)
+    length(pparts) == n || throw(
+        ArgumentError(
+            "Cannot derive solver retraction method: ProductManifold has $n factors but point has $(length(pparts)) parts.",
+        ),
+    )
+    methods =
+        ntuple(i -> _default_component_retraction_method(M.manifolds[i], pparts[i]), n)
+    return ManifoldsBase.ProductRetraction(methods)
+end
+
+_solver_retraction_method_unwrapped(M, p) = _default_component_retraction_method(M, p)
+
+
+# Conservative compatibility probe for vector transports used by Manopt solvers.
+function _supports_vector_transport_to(M, p, vt, retraction_method)
+    try
+        X = zero_vector(M, p)
+        q = retract(M, p, X, retraction_method)
+        Y = vector_transport_to(M, p, X, q, vt)
+        return isnothing(check_vector(M, q, Y))
+    catch
+        return false
+    end
+end
+
+
+# Choose a vector transport method that works with the current manifold/point layout.
+function _default_vector_transport_method(M, p, retraction_method)
+    vt = ManifoldsBase.ProjectionTransport()
+    if _supports_vector_transport_to(M, p, vt, retraction_method)
+        return vt
+    end
+
+    return ManifoldsBase.default_vector_transport_method(M, typeof(p))
 end
 
 

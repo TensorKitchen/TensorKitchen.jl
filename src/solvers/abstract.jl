@@ -31,21 +31,6 @@ end
 StandardSolverTrace{T}() where {T<:AbstractFloat} =
     StandardSolverTrace{T}(IterationRecord{T}[], 0, 0, 0.0)
 
-"""
-    _dual_stop_grad_tol(T, tol; grad_tol=nothing)
-
-Gradient tolerance paired with `StopWhenCostRelChangeAndGradientLess`.
-Defaults to `sqrt(tol)`; callers may pass an explicit `grad_tol` (for example
-`grad_tol = tol` on the nonnegative CPD manifold route).
-"""
-@inline function _dual_stop_grad_tol(
-    ::Type{T},
-    tol::Real,
-    grad_tol = nothing,
-) where {T<:Real}
-    return isnothing(grad_tol) ? sqrt(T(tol)) : T(grad_tol)
-end
-
 function record!(
     trace::StandardSolverTrace{T},
     iter::Int,
@@ -410,35 +395,6 @@ function _model_gradient_closure(
     )
     return model_exact_join_basis_function(model)
 end
-
-@inline _unwrap_solver_manifold(M) = hasproperty(M, :M) ? getproperty(M, :M) : M
-
-# The actual methods depend on the registered defaults, e.g. custom manifolds such
-# as Segre or SoftplusEuclidean may choose ExponentialRetraction, while sphere-like
-# factors may choose their ManifoldsBase default.
-@inline function _default_component_retraction_method(Mi, pi)
-    return ManifoldsBase.default_retraction_method(Mi, typeof(pi))
-end
-
-function _solver_retraction_method(M, p)
-    return _solver_retraction_method_unwrapped(_unwrap_solver_manifold(M), p)
-end
-
-function _solver_retraction_method_unwrapped(M::ProductManifold, p)
-    pparts0 = point_parts(p)
-    pparts = pparts0 isa Tuple ? pparts0 : Tuple(pparts0)
-    n = length(M.manifolds)
-    length(pparts) == n || throw(
-        ArgumentError(
-            "Cannot derive solver retraction method: ProductManifold has $n factors but point has $(length(pparts)) parts.",
-        ),
-    )
-    methods =
-        ntuple(i -> _default_component_retraction_method(M.manifolds[i], pparts[i]), n)
-    return ManifoldsBase.ProductRetraction(methods)
-end
-
-_solver_retraction_method_unwrapped(M, p) = _default_component_retraction_method(M, p)
 
 """
     _prepare_solver_problem(model; init, gradient_mode)

@@ -107,7 +107,7 @@ function solve_rgd(
     )
 
     return _manopt_finish_result(
-        get_solver_result(state),
+        _tk_get_solver_result(state),
         state,
         callbacks.progress,
         diagnostics_recorder,
@@ -188,7 +188,7 @@ function solve_rgd_fixed(
     )
 
     return _manopt_finish_result(
-        get_solver_result(state),
+        _tk_get_solver_result(state),
         state,
         callbacks.progress,
         diagnostics_recorder,

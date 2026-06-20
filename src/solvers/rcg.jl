@@ -1,42 +1,6 @@
 # solvers/rcg.jl — Riemannian Conjugate Gradient
 export RCGSolver
 
-# Vector transport selection
-"""
-    _supports_vector_transport_to(M, p, vt, retraction_method)
-
-Return `true` if `vt` can transport a zero tangent vector from `p` to the
-corresponding retracted point and the result is accepted as a tangent vector.
-This is a conservative compatibility probe for Manifolds.jl / ManifoldsBase
-vector transports.
-"""
-function _supports_vector_transport_to(M, p, vt, retraction_method)
-    try
-        X = zero_vector(M, p)
-        q = retract(M, p, X, retraction_method)
-        Y = vector_transport_to(M, p, X, q, vt)
-        return isnothing(check_vector(M, q, Y))
-    catch
-        return false
-    end
-end
-
-"""
-    _default_vector_transport_method(M, p, retraction_method)
-
-Return the default vector transport method for the given manifold and point.
-If the manifold and point layout support it, use `ProjectionTransport()`.
-Otherwise, use the manifold's default vector transport method.
-"""
-function _default_vector_transport_method(M, p, retraction_method)
-    vt = ManifoldsBase.ProjectionTransport()
-    if _supports_vector_transport_to(M, p, vt, retraction_method)
-        return vt
-    end
-
-    return ManifoldsBase.default_vector_transport_method(M, typeof(p))
-end
-
 # RCG coefficient and restart rule selection
 function _rcg_coefficient_rule(
     M,
@@ -174,7 +138,7 @@ function solve_rcg(
     )
 
     return _manopt_finish_result(
-        get_solver_result(state),
+        _tk_get_solver_result(state),
         state,
         callbacks.progress,
         diagnostics_recorder,
