@@ -32,19 +32,8 @@ end
 solver_symbol(::LMSolver) = :lm
 
 @inline function _lm_scaling_factor(::Type{T}, normA2, normalized_objective::Bool) where {T}
-    return normalized_objective && !isnothing(normA2) && normA2 > 0 ? inv(sqrt(T(normA2))) :
-           one(T)
-end
-
-function _ambient_tangent_vector!(out::AbstractVector, M, p, X)
-    emb = ManifoldsBase.embed(M, p, X)
-    length(emb) == length(out) || throw(
-        DimensionMismatch(
-            "Tangent embedding length $(length(emb)) does not match output length $(length(out)).",
-        ),
-    )
-    copyto!(out, vec(emb))
-    return out
+    return normalized_objective && !isnothing(normA2) && normA2 > 0 ?
+           one(T) / sqrt(T(normA2)) : one(T)
 end
 
 function _join_tangent_ambient_vector!(
@@ -59,12 +48,7 @@ function _join_tangent_ambient_vector!(
     _check_parts_len(xparts, backend.r, "_join_tangent_ambient_vector!")
     fill!(out, zero(eltype(out)))
     @inbounds for k = 1:backend.r
-        _ambient_tangent_vector!(
-            backend.component_bufs[k],
-            backend.manifolds[k],
-            parts[k],
-            xparts[k],
-        )
+        _component_ambient_pushforward!(backend.component_bufs[k], backend.manifolds[k], parts[k], xparts[k])
         out .+= backend.component_bufs[k]
     end
     return out
@@ -324,6 +308,8 @@ function solve_lm(
     basis = ManifoldsBase.DefaultOrthonormalBasis()
     residual = _lm_residual_function(model, T, normA2, setup.uses_relative_objective)
     jacobian = _lm_jacobian_function(model, T, normA2, setup.uses_relative_objective; basis)
+    initial_residual_values = residual(M, p0_local)
+    initial_jacobian_f = jacobian(M, p0_local)
     retraction_method = _solver_retraction_method(M, p0_local)
     stopping = StopWhenAny(
         StopAfterIteration(maxiter),
@@ -358,13 +344,14 @@ function solve_lm(
         jacobian_type = Manopt.CoordinateVectorialType(basis),
         retraction_method = retraction_method,
         stopping_criterion = stopping,
+        initial_residual_values = initial_residual_values,
+        initial_jacobian_f = initial_jacobian_f,
         η = η,
         damping_term_min = damping_term_min,
         β = β,
         expect_zero_residual = expect_zero_residual,
         linear_subsolver! = linear_subsolver,
         debug = callbacks.debug_actions,
-        count = [:Cost, :Gradient],
         return_state = true,
     )
 
