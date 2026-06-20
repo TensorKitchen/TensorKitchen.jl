@@ -448,12 +448,19 @@ function rgrad(model::JoinModel{<:AbstractFloat,<:JoinBackend}, p)
     return wrap_like_point(p, vals)
 end
 
-function _ambient_vector!(out::AbstractVector, M, p)
+"""
+    _component_ambient_embedding!(out, M, p)
+
+Write the ambient embedding of one join component into `out`.
+Component manifolds may specialize this hook when their native point structure
+admits a more direct embedding than the generic `embed!` path.
+"""
+function _component_ambient_embedding!(out::AbstractVector, M, p)
     ManifoldsBase.embed!(M, out, p)
     return out
 end
 
-function _ambient_vector!(
+function _component_ambient_embedding!(
     out::AbstractVector,
     M::Manifolds.Tucker,
     p::Manifolds.TuckerPoint,
@@ -464,12 +471,49 @@ function _ambient_vector!(
     return out
 end
 
-function _ambient_vector!(out::AbstractVector, M::Manifolds.Tucker, p)
+function _component_ambient_embedding!(
+    out::AbstractVector,
+    M::Manifolds.Segre,
+    p,
+)
+    copyto!(out, _segre_component_tensorvec(p))
+    return out
+end
+
+function _component_ambient_embedding!(out::AbstractVector, M::Manifolds.Tucker, p)
     throw(
         ArgumentError(
             "Expected native TuckerPoint for Manifolds.Tucker, got $(typeof(p)).",
         ),
     )
+end
+
+"""
+    _component_ambient_pushforward!(out, M, p, X)
+
+Write the ambient pushforward `DΦ(p)[X]` of one join component into `out`.
+This is the component-level differential used by LM Jacobian assembly on
+generic `JoinModel`s.
+"""
+function _component_ambient_pushforward!(out::AbstractVector, M, p, X)
+    emb = ManifoldsBase.embed(M, p, X)
+    length(emb) == length(out) || throw(
+        DimensionMismatch(
+            "Tangent embedding length $(length(emb)) does not match output length $(length(out)).",
+        ),
+    )
+    copyto!(out, vec(emb))
+    return out
+end
+
+function _component_ambient_pushforward!(
+    out::AbstractVector,
+    M::Manifolds.Segre,
+    p,
+    X,
+)
+    copyto!(out, _segre_tangent_tensorvec(p, X))
+    return out
 end
 
 function _subtract_ambient_tensor!(
@@ -483,7 +527,7 @@ function _subtract_ambient_tensor!(
             "_subtract_ambient_tensor!: work length $(length(work_vec)) != residual length $(length(residual))",
         ),
     )
-    _ambient_vector!(work_vec, M, p)
+    _component_ambient_embedding!(work_vec, M, p)
     residual_vec = vec(residual)
     @inbounds for i in eachindex(residual_vec, work_vec)
         residual_vec[i] -= work_vec[i]
@@ -531,7 +575,7 @@ function _join_reconstruct!(out::AbstractArray, backend::Union{JoinBackend,BTDBa
 
     @inbounds for k = 1:r
         # Reconstruct each component into its preallocated workspace.
-        _ambient_vector!(bufs[k], manifolds[k], parts[k])
+        _component_ambient_embedding!(bufs[k], manifolds[k], parts[k])
 
         # Accumulate into the output tensor without allocating a Khatri-Rao-sized object.
         out .+= bufs[k]

@@ -177,7 +177,7 @@ end
 
 @testset "LM residual/Jacobian smoke check matches gradient" begin
     cases = (
-        JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), randn(5, 4, 3)),
+        JoinModel(randn(5, 4, 3), 2; geometry = :canonical),
         JoinModel(abs.(randn(5, 4, 3)), 2; geometry = :softplus_metric, nonnegative = true),
     )
     for model in cases
@@ -196,9 +196,36 @@ end
     end
 end
 
+@testset "LM generic join Jacobian uses component pushforwards" begin
+    A = randn(5, 4, 3)
+    model = JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), A)
+    M = TensorKitchen.manifold(model)
+    p = TensorKitchen._solver_point(M, TensorKitchen.initial_point(model, :random; verbose = false))
+    basis = ManifoldsBase.DefaultOrthonormalBasis()
+    J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
+    @test all(isfinite, J)
+
+    retraction_method = TensorKitchen._solver_retraction_method(M, p)
+    ϵ = 1e-6
+    buf_plus = similar(model.backend.work_rec)
+    buf_minus = similar(model.backend.work_rec)
+    d = manifold_dimension(M)
+    for j = 1:min(d, 3)
+        coeff = zeros(Float64, d)
+        coeff[j] = 1.0
+        Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
+        p_plus = ManifoldsBase.retract(M, p, ϵ * Xj, retraction_method)
+        p_minus = ManifoldsBase.retract(M, p, -ϵ * Xj, retraction_method)
+        TensorKitchen._join_reconstruct!(buf_plus, model.backend, p_plus)
+        TensorKitchen._join_reconstruct!(buf_minus, model.backend, p_minus)
+        fd = (buf_plus .- buf_minus) ./ (2 * ϵ)
+        @test maximum(abs.(fd .- J[:, j])) ≤ 1e-7
+    end
+end
+
 @testset "LM normalized and unnormalized objectives take the same step" begin
     A = randn(6, 5, 4)
-    model = JoinModel((Manifolds.Segre((6, 5, 4)), Manifolds.Segre((6, 5, 4))), A)
+    model = JoinModel(A, 2; geometry = :canonical)
     p0 = TensorKitchen._solver_point(
         TensorKitchen.manifold(model),
         TensorKitchen.initial_point(model, :random; verbose = false),
@@ -223,11 +250,10 @@ end
         return_stats = true,
         normalized_objective = false,
     )
-    buf_rel = similar(model.backend.work_rec)
-    buf_abs = similar(model.backend.work_rec)
-    TensorKitchen._join_reconstruct!(buf_rel, model.backend, TensorKitchen.point(res_rel))
-    TensorKitchen._join_reconstruct!(buf_abs, model.backend, TensorKitchen.point(res_abs))
-    @test maximum(abs.(buf_rel .- buf_abs)) ≤ 1e-10
+    rawmodel = TensorKitchen.cpd_model(model)
+    X_rel = TensorKitchen.embed_point(rawmodel, TensorKitchen.point(res_rel))
+    X_abs = TensorKitchen.embed_point(rawmodel, TensorKitchen.point(res_abs))
+    @test maximum(abs.(X_rel .- X_abs)) ≤ 1e-10
     @test isapprox(res_rel.rel_error, res_abs.rel_error; rtol = 1e-10, atol = 1e-10)
 end
 
