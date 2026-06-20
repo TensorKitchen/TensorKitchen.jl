@@ -47,10 +47,11 @@ function _join_tangent_ambient_vector!(
     _check_parts_len(parts, backend.r, "_join_tangent_ambient_vector!")
     _check_parts_len(xparts, backend.r, "_join_tangent_ambient_vector!")
     fill!(out, zero(eltype(out)))
+    components = _backend_components(backend)
     @inbounds for k = 1:backend.r
         _component_ambient_pushforward!(
             backend.component_bufs[k],
-            backend.manifolds[k],
+            components[k],
             parts[k],
             xparts[k],
         )
