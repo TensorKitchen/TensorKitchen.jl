@@ -328,6 +328,20 @@ end
     )
     @test res_cpd_object.solver == :lm
 
+    res_cpd_alswarm_lm = cpd(
+        A,
+        2;
+        solver = :lm,
+        init = :alswarm,
+        warm_steps = 2,
+        warm_init = :tucker,
+        maxiter = 2,
+        tol = 1e-6,
+        verbose = false,
+    )
+    @test res_cpd_alswarm_lm.solver == :lm
+    @test isfinite(res_cpd_alswarm_lm.rel_error)
+
     target = [1.2, -0.4, 0.8]
     res_approx =
         approx(Manifolds.Sphere(2), target; solver = :lm, maxiter = 2, verbose = false)
@@ -374,6 +388,25 @@ end
     @test res_btd.solver == :lm
     @test length(res_btd.components) == 2
     @test !get(res_btd.solver_info, :btd_skipped_manifold_polish, false)
+
+    res_btd_alswarm_lm = btd(
+        A,
+        2,
+        ranks;
+        solver = :lm,
+        init = :alswarm,
+        warm_init = BTDHOSVDMultistartInit(2; screening_steps = 0, block_maxiter = 1),
+        warm_steps = 1,
+        warm_block_maxiter = 1,
+        warm_rel_error_gate = nothing,
+        maxiter = 2,
+        tol = 1e-6,
+        verbose = false,
+    )
+    @test res_btd_alswarm_lm isa BTDResult
+    @test res_btd_alswarm_lm.solver == :lm
+    @test hasproperty(res_btd_alswarm_lm.solver_info, :btd_als_warm_start_iters)
+    @test res_btd_alswarm_lm.solver_info.btd_als_warm_start_requested_solver == :lm
 end
 
 # =========================================================================
