@@ -202,6 +202,10 @@ end
         JoinModel((TensorKitchen.JoinComponent(segres[1]), segres[2], segres[3]), A)
     @test model_component.backend.components[1] isa TensorKitchen.JoinComponent
     @test map(TensorKitchen.manifold, model_component.backend.components) == segres
+    @test TensorKitchen.component_manifold(model_component.backend.components[1]) ==
+          segres[1]
+    @test TensorKitchen.component_embedding(model_component.backend.components[1]) isa
+          TensorKitchen.DefaultJoinEmbedding
 
     p = TensorKitchen.initial_point(model, :random; verbose = false)
     @test length(TensorKitchen.point_parts(p)) == 3
@@ -255,6 +259,36 @@ end
     end
 end
 
+function _reference_join_jacobian_from_product_basis(model, M, p; basis)
+    backend = model.backend
+    parts = TensorKitchen.point_parts(p)
+    T = TensorKitchen._scalar_eltype(p)
+    ambient_dim = length(TensorKitchen.tensor(model))
+    d = manifold_dimension(M)
+    J = Matrix{T}(undef, ambient_dim, d)
+    coeff = zeros(T, d)
+    col = Vector{T}(undef, ambient_dim)
+    buf = Vector{T}(undef, ambient_dim)
+    for j = 1:d
+        fill!(coeff, zero(T))
+        coeff[j] = one(T)
+        Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
+        xparts = TensorKitchen.point_parts(Xj)
+        fill!(col, zero(T))
+        for k = 1:backend.r
+            TensorKitchen.component_ambient_pushforward!(
+                buf,
+                TensorKitchen._backend_component(backend, k),
+                parts[k],
+                xparts[k],
+            )
+            col .+= buf
+        end
+        J[:, j] .= col
+    end
+    return J
+end
+
 @testset "LM generic join Jacobian uses component pushforwards" begin
     A = randn(5, 4, 3)
     model = JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), A)
@@ -266,6 +300,33 @@ end
     basis = ManifoldsBase.DefaultOrthonormalBasis()
     J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
     @test all(isfinite, J)
+    @test sum(
+        TensorKitchen.component_tangent_dimension(
+            TensorKitchen._backend_component(model.backend, k),
+            TensorKitchen.point_parts(p)[k],
+        ) for k = 1:model.backend.r
+    ) == manifold_dimension(M)
+    J_ref = _reference_join_jacobian_from_product_basis(model, M, p; basis)
+    @test maximum(abs.(J .- J_ref)) ≤ 1e-12
+
+    parts = TensorKitchen.point_parts(p)
+    c1 = TensorKitchen._backend_component(model.backend, 1)
+    ξ1 = TensorKitchen.component_basis_vector(c1, parts[1], 1; basis)
+    buf = similar(model.backend.work_rec)
+    TensorKitchen.component_ambient_pushforward!(buf, c1, parts[1], ξ1)
+    @test maximum(abs.(buf .- J[:, 1])) ≤ 1e-10
+
+    c2 = TensorKitchen._backend_component(model.backend, 2)
+    ξ2 = TensorKitchen.component_basis_vector(c2, parts[2], 1; basis)
+    TensorKitchen.component_ambient_pushforward!(buf, c2, parts[2], ξ2)
+    offset2 = TensorKitchen.component_tangent_dimension(c1, parts[1]) + 1
+    @test maximum(abs.(buf .- J[:, offset2])) ≤ 1e-10
+
+    fill!(buf, NaN)
+    TensorKitchen.component_ambient_pushforward!(buf, c1, parts[1], ξ1)
+    fresh = similar(buf)
+    TensorKitchen.component_ambient_pushforward!(fresh, c1, parts[1], ξ1)
+    @test buf == fresh
 
     retraction_method = TensorKitchen._solver_retraction_method(M, p)
     ϵ = 1e-6
@@ -2377,6 +2438,37 @@ end
     M_btd = TensorKitchen.manifold(model_btd)
     p_btd =
         TensorKitchen._solver_point(M_btd, TensorKitchen.initial_point(model_btd, :random))
+    basis_btd = ManifoldsBase.DefaultOrthonormalBasis()
+    J_btd =
+        TensorKitchen._lm_raw_jacobian_matrix(model_btd, M_btd, p_btd; basis = basis_btd)
+    @test all(isfinite, J_btd)
+    @test sum(
+        TensorKitchen.component_tangent_dimension(
+            TensorKitchen._backend_component(backend, k),
+            TensorKitchen.point_parts(p_btd)[k],
+        ) for k = 1:backend.r
+    ) == manifold_dimension(M_btd)
+    J_btd_ref = _reference_join_jacobian_from_product_basis(
+        model_btd,
+        M_btd,
+        p_btd;
+        basis = basis_btd,
+    )
+    @test maximum(abs.(J_btd .- J_btd_ref)) ≤ 1e-12
+
+    retraction_method_btd = TensorKitchen._solver_retraction_method(M_btd, p_btd)
+    residual0_btd = TensorKitchen._lm_raw_residual_vector(model_btd, p_btd)
+    ϵ_btd = 1e-6
+    for j = 1:min(manifold_dimension(M_btd), 2)
+        coeff = zeros(Float64, manifold_dimension(M_btd))
+        coeff[j] = 1.0
+        Xj = ManifoldsBase.get_vector(M_btd, p_btd, coeff, basis_btd)
+        p_plus = ManifoldsBase.retract(M_btd, p_btd, ϵ_btd * Xj, retraction_method_btd)
+        r_plus = TensorKitchen._lm_raw_residual_vector(model_btd, p_plus)
+        fd = (r_plus .- residual0_btd) ./ ϵ_btd
+        @test maximum(abs.(fd .- J_btd[:, j])) ≤ 5e-6
+    end
+
     parts_btd = TensorKitchen.point_parts(p_btd)
     residual_btd = TensorKitchen._join_residual!(backend, p_btd)
     tangent_dot_btd(a, b) = begin

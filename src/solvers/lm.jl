@@ -36,35 +36,29 @@ solver_symbol(::LMSolver) = :lm
            one(T) / sqrt(T(normA2)) : one(T)
 end
 
-function _join_tangent_ambient_vector!(
-    out::AbstractVector,
-    backend::Union{JoinBackend,BTDBackend},
-    p,
-    X,
-)
-    parts = point_parts(p)
-    xparts = point_parts(X)
-    _check_parts_len(parts, backend.r, "_join_tangent_ambient_vector!")
-    _check_parts_len(xparts, backend.r, "_join_tangent_ambient_vector!")
-    fill!(out, zero(eltype(out)))
-    components = _backend_components(backend)
-    @inbounds for k = 1:backend.r
-        _component_ambient_pushforward!(
-            backend.component_bufs[k],
-            components[k],
-            parts[k],
-            xparts[k],
-        )
-        out .+= backend.component_bufs[k]
-    end
-    return out
-end
-
 function _lm_raw_residual_vector(
     model::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}},
     p,
 )
     return copy(_join_residual!(model.backend, p))
+end
+
+function _join_component_jacobian_block!(
+    J::AbstractMatrix{T},
+    next_col::Int,
+    component,
+    p_component,
+    work_vec::AbstractVector{T};
+    basis = ManifoldsBase.DefaultOrthonormalBasis(),
+) where {T<:AbstractFloat}
+    d_component = component_tangent_dimension(component, p_component)
+    @inbounds for j = 1:d_component
+        Xj = component_basis_vector(component, p_component, j; basis)
+        component_ambient_pushforward!(work_vec, component, p_component, Xj)
+        J[:, next_col] .= work_vec
+        next_col += 1
+    end
+    return next_col
 end
 
 function _lm_raw_jacobian_matrix(
@@ -75,17 +69,33 @@ function _lm_raw_jacobian_matrix(
 )
     T = _scalar_eltype(p)
     ambient_dim = length(tensor(model))
-    d = manifold_dimension(M)
+    backend = model.backend
+    components = _backend_components(backend)
+    parts = point_parts(p)
+    _check_parts_len(parts, backend.r, "_lm_raw_jacobian_matrix")
+    d = sum(component_tangent_dimension(components[k], parts[k]) for k = 1:backend.r)
+    d == manifold_dimension(M) || throw(
+        DimensionMismatch(
+            "JoinModel Jacobian assembly expected tangent dimension $d from components but manifold reports $(manifold_dimension(M)).",
+        ),
+    )
     J = Matrix{T}(undef, ambient_dim, d)
-    coeff = zeros(T, d)
-    column = similar(model.backend.work_rec, T, ambient_dim)
-    @inbounds for j = 1:d
-        fill!(coeff, zero(T))
-        coeff[j] = one(T)
-        Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-        _join_tangent_ambient_vector!(column, model.backend, p, Xj)
-        J[:, j] .= column
+    next_col = 1
+    @inbounds for k = 1:backend.r
+        next_col = _join_component_jacobian_block!(
+            J,
+            next_col,
+            components[k],
+            parts[k],
+            backend.component_bufs[k];
+            basis,
+        )
     end
+    next_col == d + 1 || throw(
+        DimensionMismatch(
+            "JoinModel Jacobian assembly filled $(next_col - 1) columns but expected $d.",
+        ),
+    )
     return J
 end
 
