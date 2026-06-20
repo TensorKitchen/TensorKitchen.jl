@@ -2,6 +2,16 @@
 
 _is_manifold_like(::AbstractManifold) = true
 _is_manifold_like(_) = false
+_is_join_component_like(::JoinComponent) = true
+_is_join_component_like(x) = _is_manifold_like(x)
+
+_wrap_join_component(component::JoinComponent) = component
+_wrap_join_component(manifold::AbstractManifold) = JoinComponent(manifold)
+
+_component_manifold(component::JoinComponent) = component.manifold
+_component_manifold(manifold::AbstractManifold) = manifold
+_backend_components(backend::JoinBackend) = backend.components
+_backend_components(backend::BTDBackend) = backend.manifolds
 
 function _as_join_manifold_tuple(manifolds::Tuple)
     all(_is_manifold_like, manifolds) || throw(
@@ -23,12 +33,35 @@ end
 
 _as_join_manifold_tuple(M::ProductManifold) = Tuple(M.manifolds)
 
-function _uniform_segre_dims(manifolds::Tuple)
-    isempty(manifolds) && return nothing
-    first_manifold = first(manifolds)
+function _as_join_component_tuple(components::Tuple)
+    all(_is_join_component_like, components) || throw(
+        ArgumentError(
+            "All join components must be AbstractManifold or JoinComponent. Got types: $(map(typeof, components)).",
+        ),
+    )
+    return ntuple(k -> _wrap_join_component(components[k]), length(components))
+end
+
+function _as_join_component_tuple(components::AbstractVector)
+    all(_is_join_component_like, components) || throw(
+        ArgumentError(
+            "All join components must be AbstractManifold or JoinComponent. Got types: $(map(typeof, components)).",
+        ),
+    )
+    return Tuple(_wrap_join_component(c) for c in components)
+end
+
+_as_join_component_tuple(M::ProductManifold) = _as_join_component_tuple(Tuple(M.manifolds))
+
+function _uniform_segre_dims(components::Tuple)
+    isempty(components) && return nothing
+    first_manifold = _component_manifold(first(components))
     first_manifold isa Manifolds.Segre || return nothing
     dims = factor_dims(first_manifold)
-    all(M -> M isa Manifolds.Segre && factor_dims(M) == dims, manifolds) || return nothing
+    all(c -> begin
+        M = _component_manifold(c)
+        M isa Manifolds.Segre && factor_dims(M) == dims
+    end, components) || return nothing
     return dims
 end
 
@@ -48,6 +81,9 @@ _manifold_init(M::Manifolds.Sphere, target, init::Symbol) = _sphere_init(M, targ
 _manifold_init(M::Manifolds.Segre, target, init::Symbol) = _segre_init(M, target, init)
 _manifold_init(M::Manifolds.Tucker, target, init::Symbol) = _tucker_init(M, target, init)
 
+_component_init(component, target, init) =
+    _manifold_init(_component_manifold(component), target, init)
+
 function _manifold_init(M, target, init_sym::Symbol)
     init_sym == :random && return rand(M)
     throw(
@@ -58,15 +94,16 @@ function _manifold_init(M, target, init_sym::Symbol)
 end
 
 """
-    _manifold_egrad(M, p, residual)
+    _component_egrad(component, p, residual)
 
 Compute the component Euclidean gradient induced by a join residual. Tucker
 components use their native tensor gradient; other components copy the residual.
 """
-_manifold_egrad(M, p, residual) = copy(residual)
-_manifold_egrad(M::Manifolds.Tucker, p, residual) = _tucker_egrad(M, p, residual)
+_component_egrad(::DefaultJoinEmbedding, M, p, residual) = copy(residual)
+_component_egrad(::DefaultJoinEmbedding, M::Manifolds.Tucker, p, residual) =
+    _tucker_egrad(M, p, residual)
 
-function _manifold_egrad(M::Manifolds.Segre, p, residual)
+function _component_egrad(::DefaultJoinEmbedding, M::Manifolds.Segre, p, residual)
     dims = factor_dims(M)
     R = reshape(residual, dims)
     parts = point_parts(p)
@@ -80,6 +117,12 @@ function _manifold_egrad(M::Manifolds.Segre, p, residual)
     end
     return pack_tangent_rank1_segre(grad_λ, grad_U)
 end
+
+_component_egrad(component::JoinComponent, p, residual) =
+    _component_egrad(component.embedding, component.manifold, p, residual)
+_component_egrad(M, p, residual) = _component_egrad(DefaultJoinEmbedding(), M, p, residual)
+
+_manifold_egrad(M, p, residual) = _component_egrad(M, p, residual)
 
 """
     _ambient_vector(M, p, target_len) returns AbstractVector
@@ -146,6 +189,7 @@ end
 
 ambient_length(M::Manifolds.Segre) = prod(factor_dims(M))
 ambient_length(M::Manifolds.Tucker) = prod(factor_dims(M))
+ambient_length(component::JoinComponent) = ambient_length(component.manifold)
 
 """
     _join_vector_workspace_like(target, n) returns AbstractVector
@@ -167,15 +211,15 @@ end
 Ensure every join component embeds into the same flattened ambient space as the
 target tensor.
 """
-function _validate_join_ambient_compatibility(manifolds::Tuple, target::AbstractArray)
+function _validate_join_ambient_compatibility(components::Tuple, target::AbstractArray)
     target_len = length(target)
     failures = String[]
-    @inbounds for k in eachindex(manifolds)
-        mk = ambient_length(manifolds[k])
+    @inbounds for k in eachindex(components)
+        mk = ambient_length(components[k])
         if mk != target_len
             push!(
                 failures,
-                "[$k] $(typeof(manifolds[k])) has ambient length $mk but target has length $target_len",
+                "[$k] $(typeof(components[k])) has ambient length $mk but target has length $target_len",
             )
         end
     end
@@ -203,14 +247,14 @@ function _sum_backend_instance(
 end
 
 function _sum_backend_parts(
-    manifolds,
+    components,
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
-    r = length(manifolds)
+    r = length(components)
     # Keep the original target representation instead of eagerly materializing Array.
     tgt = target
-    _validate_join_ambient_compatibility(manifolds, tgt)
+    _validate_join_ambient_compatibility(components, tgt)
 
     tflat = vec(tgt)
     tgt_len = length(tgt)
@@ -218,8 +262,10 @@ function _sum_backend_parts(
     component_bufs = [_join_vector_workspace_like(tgt, tgt_len) for _ = 1:r]
     work_rec = _join_vector_workspace_like(tgt, tgt_len)
     work_residual = _join_vector_workspace_like(tgt, tgt_len)
+    manifolds = ntuple(k -> _component_manifold(components[k]), r)
 
     return (;
+        components,
         manifolds,
         r,
         target = tgt,
@@ -236,13 +282,13 @@ end
 
 function _sum_backend_instance(
     ::Type{JoinBackend},
-    manifolds,
+    components,
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
-    parts = _sum_backend_parts(manifolds, target; init_point)
+    parts = _sum_backend_parts(components, target; init_point)
     return JoinBackend(
-        parts.manifolds,
+        parts.components,
         parts.r,
         parts.target,
         parts.target_size,
@@ -258,11 +304,11 @@ end
 
 function _sum_backend_instance(
     ::Type{BTDBackend},
-    manifolds,
+    components,
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
-    parts = _sum_backend_parts(manifolds, target; init_point)
+    parts = _sum_backend_parts(components, target; init_point)
     return BTDBackend(
         parts.manifolds,
         parts.r,
@@ -286,13 +332,14 @@ Construct a generic sum-of-manifolds approximation model from explicit
 component manifolds and a target tensor.
 """
 function JoinModel(
-    manifolds::Tuple{Vararg{AbstractManifold}},
+    components::Tuple,
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
-    r = length(manifolds)
+    components_tuple = _as_join_component_tuple(components)
+    r = length(components_tuple)
     r >= 1 || throw(ArgumentError("JoinModel(manifolds, target) needs r >= 1, got r=$r"))
-    b = _sum_backend_instance(JoinBackend, manifolds, target; init_point)
+    b = _sum_backend_instance(JoinBackend, components_tuple, target; init_point)
     return JoinModel{T,typeof(b)}(b)
 end
 
@@ -302,11 +349,11 @@ end
 Construct a join model by repeating a base manifold `r` times.
 """
 function JoinModel(
-    manifolds::AbstractVector,
+    components::AbstractVector,
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
-    return JoinModel(_as_join_manifold_tuple(manifolds), target; init_point)
+    return JoinModel(_as_join_component_tuple(components), target; init_point)
 end
 
 function JoinModel(
@@ -314,7 +361,7 @@ function JoinModel(
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
-    return JoinModel(_as_join_manifold_tuple(M), target; init_point)
+    return JoinModel(_as_join_component_tuple(M), target; init_point)
 end
 
 function JoinModel(
@@ -327,7 +374,24 @@ function JoinModel(
 end
 
 function JoinModel(
+    base::JoinComponent,
+    r::Int,
+    target::AbstractArray{T,N};
+    init_point = nothing,
+) where {T<:AbstractFloat,N}
+    return JoinModel(ntuple(_ -> base, r), target; init_point)
+end
+
+function JoinModel(
     base::AbstractManifold,
+    target::AbstractArray{T,N};
+    init_point = nothing,
+) where {T<:AbstractFloat,N}
+    return JoinModel((base,), target; init_point)
+end
+
+function JoinModel(
+    base::JoinComponent,
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
@@ -350,7 +414,7 @@ function initial_point(
         return backend.init_point(M, init)
     end
     parts =
-        ntuple(k -> _manifold_init(backend.manifolds[k], backend.target, init), backend.r)
+        ntuple(k -> _component_init(backend.components[k], backend.target, init), backend.r)
     return ArrayPartition(parts...)
 end
 
@@ -361,7 +425,7 @@ function initial_point(
     kwargs...,
 )
     backend = model.backend
-    dims = _uniform_segre_dims(backend.manifolds)
+    dims = _uniform_segre_dims(backend.components)
     isnothing(dims) && throw(
         ArgumentError(
             "ALSWarmStartInit for a generic JoinModel requires all component manifolds to be Manifolds.Segre with identical factor_dims.",
@@ -407,19 +471,21 @@ function egrad(model::JoinModel{<:AbstractFloat,<:JoinBackend}, p)
     backend = model.backend
     residual = _join_residual_grad!(backend, p)
     parts = point_parts(p)
-    vals = ntuple(k -> _manifold_egrad(backend.manifolds[k], parts[k], residual), backend.r)
+    vals =
+        ntuple(k -> _component_egrad(backend.components[k], parts[k], residual), backend.r)
     return wrap_like_point(p, vals)
 end
 
-function _join_basis_project(manifolds::Tuple, p, residual)
+function _join_basis_project(components::Tuple, p, residual)
     parts = point_parts(p)
-    _check_parts_len(parts, length(manifolds), "_join_basis_project")
+    _check_parts_len(parts, length(components), "_join_basis_project")
     vals = ntuple(k -> begin
-        Mk = manifolds[k]
+        ck = components[k]
+        Mk = _component_manifold(ck)
         pk = parts[k]
-        eg = _manifold_egrad(Mk, pk, residual)
+        eg = _component_egrad(ck, pk, residual)
         egrad_to_rgrad(Mk, pk, eg)
-    end, length(manifolds))
+    end, length(components))
     return wrap_like_point(p, vals)
 end
 
@@ -437,7 +503,7 @@ model_exact_join_basis_function(model::JoinModel{<:AbstractFloat,<:JoinBackend})
     (M, p) -> begin
         backend = model.backend
         residual = _join_residual!(backend, p)
-        _join_basis_project(backend.manifolds, p, residual)
+        _join_basis_project(backend.components, p, residual)
     end
 
 function extract_components(
@@ -445,6 +511,7 @@ function extract_components(
     p,
 )
     backend = model.backend
+    components = _backend_components(backend)
     parts = point_parts(p)
     _check_parts_len(parts, backend.r, "extract_components")
     T = eltype(backend.target)
@@ -453,14 +520,14 @@ function extract_components(
     manifold_type = Union{}
     @inbounds for k = 1:backend.r
         point_type = typejoin(point_type, typeof(parts[k]))
-        manifold_type = typejoin(manifold_type, typeof(backend.manifolds[k]))
+        manifold_type = typejoin(manifold_type, typeof(_component_manifold(components[k])))
     end
     comps = Vector{DecompositionComponent{T,N,point_type,manifold_type}}(undef, backend.r)
     @inbounds for k = 1:backend.r
         # Components keep only point/manifold metadata and reconstruct derived tensors on demand.
         comps[k] = DecompositionComponent{T,N,point_type,manifold_type}(
             parts[k],
-            backend.manifolds[k],
+            _component_manifold(components[k]),
             backend.target_shape,
         )
     end
@@ -473,28 +540,34 @@ function rgrad(model::JoinModel{<:AbstractFloat,<:JoinBackend}, p)
     _check_parts_len(parts, backend.r, "rgrad")
     residual = _join_residual_grad!(backend, p)
     vals = ntuple(k -> begin
-        Mk = backend.manifolds[k]
+        ck = backend.components[k]
+        Mk = _component_manifold(ck)
         pk = parts[k]
-        eg = _manifold_egrad(Mk, pk, residual)
+        eg = _component_egrad(ck, pk, residual)
         egrad_to_rgrad(Mk, pk, eg)
     end, backend.r)
     return wrap_like_point(p, vals)
 end
 
 """
-    _component_ambient_embedding!(out, M, p)
+    _component_ambient_embedding!(out, component, p)
 
 Write the ambient embedding of one join component into `out`.
 Component manifolds may specialize this hook when their native point structure
 admits a more direct embedding than the generic `embed!` path.
 """
 function _component_ambient_embedding!(out::AbstractVector, M, p)
+    return _component_ambient_embedding!(out, DefaultJoinEmbedding(), M, p)
+end
+
+function _component_ambient_embedding!(out::AbstractVector, ::DefaultJoinEmbedding, M, p)
     ManifoldsBase.embed!(M, out, p)
     return out
 end
 
 function _component_ambient_embedding!(
     out::AbstractVector,
+    ::DefaultJoinEmbedding,
     M::Manifolds.Tucker,
     p::Manifolds.TuckerPoint,
 )
@@ -505,11 +578,29 @@ function _component_ambient_embedding!(
 end
 
 function _component_ambient_embedding!(out::AbstractVector, M::Manifolds.Segre, p)
+    return _component_ambient_embedding!(out, DefaultJoinEmbedding(), M, p)
+end
+
+function _component_ambient_embedding!(
+    out::AbstractVector,
+    ::DefaultJoinEmbedding,
+    M::Manifolds.Segre,
+    p,
+)
     copyto!(out, _segre_component_tensorvec(p))
     return out
 end
 
 function _component_ambient_embedding!(out::AbstractVector, M::Manifolds.Tucker, p)
+    return _component_ambient_embedding!(out, DefaultJoinEmbedding(), M, p)
+end
+
+function _component_ambient_embedding!(
+    out::AbstractVector,
+    ::DefaultJoinEmbedding,
+    M::Manifolds.Tucker,
+    p,
+)
     throw(
         ArgumentError(
             "Expected native TuckerPoint for Manifolds.Tucker, got $(typeof(p)).",
@@ -517,14 +608,28 @@ function _component_ambient_embedding!(out::AbstractVector, M::Manifolds.Tucker,
     )
 end
 
+function _component_ambient_embedding!(out::AbstractVector, component::JoinComponent, p)
+    return _component_ambient_embedding!(out, component.embedding, component.manifold, p)
+end
+
 """
-    _component_ambient_pushforward!(out, M, p, X)
+    _component_ambient_pushforward!(out, component, p, X)
 
 Write the ambient pushforward `DΦ(p)[X]` of one join component into `out`.
 This is the component-level differential used by LM Jacobian assembly on
 generic `JoinModel`s.
 """
 function _component_ambient_pushforward!(out::AbstractVector, M, p, X)
+    return _component_ambient_pushforward!(out, DefaultJoinEmbedding(), M, p, X)
+end
+
+function _component_ambient_pushforward!(
+    out::AbstractVector,
+    ::DefaultJoinEmbedding,
+    M,
+    p,
+    X,
+)
     emb = ManifoldsBase.embed(M, p, X)
     length(emb) == length(out) || throw(
         DimensionMismatch(
@@ -536,13 +641,38 @@ function _component_ambient_pushforward!(out::AbstractVector, M, p, X)
 end
 
 function _component_ambient_pushforward!(out::AbstractVector, M::Manifolds.Segre, p, X)
+    return _component_ambient_pushforward!(out, DefaultJoinEmbedding(), M, p, X)
+end
+
+function _component_ambient_pushforward!(
+    out::AbstractVector,
+    ::DefaultJoinEmbedding,
+    M::Manifolds.Segre,
+    p,
+    X,
+)
     copyto!(out, _segre_tangent_tensorvec(p, X))
     return out
 end
 
+function _component_ambient_pushforward!(
+    out::AbstractVector,
+    component::JoinComponent,
+    p,
+    X,
+)
+    return _component_ambient_pushforward!(
+        out,
+        component.embedding,
+        component.manifold,
+        p,
+        X,
+    )
+end
+
 function _subtract_ambient_tensor!(
     residual::AbstractArray{T,N},
-    M,
+    component,
     p,
     work_vec::AbstractVector{T},
 ) where {T<:AbstractFloat,N}
@@ -551,7 +681,7 @@ function _subtract_ambient_tensor!(
             "_subtract_ambient_tensor!: work length $(length(work_vec)) != residual length $(length(residual))",
         ),
     )
-    _component_ambient_embedding!(work_vec, M, p)
+    _component_ambient_embedding!(work_vec, component, p)
     residual_vec = vec(residual)
     @inbounds for i in eachindex(residual_vec, work_vec)
         residual_vec[i] -= work_vec[i]
@@ -588,7 +718,7 @@ then accumulates those buffers into `out`. This avoids allocating one dense
 ambient tensor per component during solver iterations.
 """
 function _join_reconstruct!(out::AbstractArray, backend::Union{JoinBackend,BTDBackend}, p)
-    manifolds = backend.manifolds
+    components = _backend_components(backend)
     r = backend.r
     bufs = backend.component_bufs
 
@@ -599,7 +729,7 @@ function _join_reconstruct!(out::AbstractArray, backend::Union{JoinBackend,BTDBa
 
     @inbounds for k = 1:r
         # Reconstruct each component into its preallocated workspace.
-        _component_ambient_embedding!(bufs[k], manifolds[k], parts[k])
+        _component_ambient_embedding!(bufs[k], components[k], parts[k])
 
         # Accumulate into the output tensor without allocating a Khatri-Rao-sized object.
         out .+= bufs[k]

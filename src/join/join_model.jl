@@ -1,9 +1,21 @@
 # join/join_model.jl — Join-front-end model and backend type definitions
 
-export AbstractJoinBackend, JoinModel, CPDBackend, JoinBackend, BTDBackend
+export AbstractJoinBackend, JoinComponent, JoinModel, CPDBackend, JoinBackend, BTDBackend
 # BTDBackend is defined in `btd/model.jl` (includes contraction workspace).
 
 abstract type AbstractJoinBackend end
+
+struct JoinComponent{M,E}
+    manifold::M
+    embedding::E
+end
+
+struct DefaultJoinEmbedding end
+
+JoinComponent(manifold::M) where {M} =
+    JoinComponent{M,DefaultJoinEmbedding}(manifold, DefaultJoinEmbedding())
+
+manifold(component::JoinComponent) = component.manifold
 
 struct JoinModel{T<:AbstractFloat,B<:AbstractJoinBackend} <: AbstractDecompositionModel{T}
     backend::B
@@ -24,7 +36,7 @@ _JoinResidualWORO(residual::V) where {V} =
 struct JoinBackend{
     T,
     N,
-    MT<:Tuple,
+    CT<:Tuple,
     A<:AbstractArray{T,N},
     V,
     MP<:ProductManifold,
@@ -32,7 +44,7 @@ struct JoinBackend{
     W<:_JoinResidualWORO{T},
     C,
 } <: AbstractJoinBackend
-    manifolds::MT
+    components::CT
     r::Int
     target::A
     target_shape::NTuple{N,Int}

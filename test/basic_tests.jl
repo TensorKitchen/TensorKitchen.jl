@@ -186,7 +186,8 @@ end
     @test model.backend isa TensorKitchen.JoinBackend
     @test model.backend.r == 3
     @test tensor(model) == A
-    @test model.backend.manifolds == segres
+    @test length(model.backend.components) == 3
+    @test map(TensorKitchen.manifold, model.backend.components) == segres
 
     M = TensorKitchen.manifold(model)
     @test M isa ProductManifold
@@ -195,7 +196,12 @@ end
 
     model_repeat = JoinModel(Manifolds.Segre(dims), 3, A)
     @test model_repeat.backend.r == 3
-    @test model_repeat.backend.manifolds == segres
+    @test map(TensorKitchen.manifold, model_repeat.backend.components) == segres
+
+    model_component =
+        JoinModel((TensorKitchen.JoinComponent(segres[1]), segres[2], segres[3]), A)
+    @test model_component.backend.components[1] isa TensorKitchen.JoinComponent
+    @test map(TensorKitchen.manifold, model_component.backend.components) == segres
 
     p = TensorKitchen.initial_point(model, :random; verbose = false)
     @test length(TensorKitchen.point_parts(p)) == 3
