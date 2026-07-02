@@ -238,6 +238,14 @@ function solve_lm(
     jacobian = _lm_jacobian_function(model, T, normA2, setup.uses_relative_objective; basis)
     initial_residual_values = residual(M, p0_local)
     initial_jacobian_f = jacobian(M, p0_local)
+    tangent_space = TangentSpace(M, p0_local)
+    lm_subsolver_state = Manopt.CoordinatesNormalSystemState(
+        tangent_space,
+        zero_vector(M, p0_local);
+        evaluation = Manopt.InplaceEvaluation(),
+        linsolve = linear_subsolver,
+        basis = basis,
+    )
     retraction_method = _solver_retraction_method(M, p0_local)
     stopping = StopWhenAny(
         StopAfterIteration(maxiter),
@@ -269,16 +277,20 @@ function solve_lm(
         p0_local;
         evaluation = Manopt.AllocatingEvaluation(),
         function_type = Manopt.FunctionVectorialType(),
-        jacobian_type = Manopt.CoordinateVectorialType(basis),
+        jacobian_type = Manopt.CoefficientVectorialType(basis),
         retraction_method = retraction_method,
         stopping_criterion = stopping,
         initial_residual_values = initial_residual_values,
-        initial_jacobian_f = initial_jacobian_f,
-        η = η,
+        initial_jacobian_matrices = [initial_jacobian_f],
+        candidate_acceptance_threshold = η,
+        damping_increase_factor = β,
+        damping_increase_threshold = η,
+        damping_reduction_threshold = expect_zero_residual ? η : Inf,
+        damping_reduction_factor = inv(T(β)),
         damping_term_min = damping_term_min,
-        β = β,
-        expect_zero_residual = expect_zero_residual,
-        linear_subsolver! = linear_subsolver,
+        initial_damping_term = damping_term_min,
+        use_unified_basis = true,
+        sub_state = lm_subsolver_state,
         debug = callbacks.debug_actions,
         return_state = true,
     )
