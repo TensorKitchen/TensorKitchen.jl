@@ -259,6 +259,38 @@ end
     end
 end
 
+@testset "Operator interface matches Jacobian and gradient" begin
+    A = randn(5, 4, 3)
+    cases = (
+        ("generic_join", JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), A)),
+        ("cp_canonical", JoinModel(A, 2; geometry = :canonical)),
+        ("cp_softplus", JoinModel(abs.(A), 2; geometry = :softplus_metric, nonnegative = true)),
+    )
+    for (label, model) in cases
+        M = TensorKitchen.manifold(model)
+        p = TensorKitchen._solver_point(
+            M,
+            TensorKitchen.initial_point(model, :random; verbose = false),
+        )
+        basis = ManifoldsBase.DefaultOrthonormalBasis()
+        r = TensorKitchen.residual(model, p)
+        J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
+        @testset "$label" begin
+            @test r ≈ TensorKitchen._lm_raw_residual_vector(model, p)
+            d = manifold_dimension(M)
+            for j = 1:min(d, 3)
+                coeff = zeros(Float64, d)
+                coeff[j] = 1.0
+                Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
+                @test TensorKitchen.differential_action(model, p, Xj) ≈ J[:, j]
+            end
+            g_adj = TensorKitchen.adjoint_action(model, p, r; basis)
+            g_model = TensorKitchen.rgrad(model, p)
+            @test norm(M, p, g_adj - g_model) ≤ 1e-7 * max(1.0, norm(M, p, g_model))
+        end
+    end
+end
+
 function _reference_join_jacobian_from_product_basis(model, M, p; basis)
     backend = model.backend
     parts = TensorKitchen.point_parts(p)

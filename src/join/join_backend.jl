@@ -792,3 +792,51 @@ function _join_residual!(backend::Union{JoinBackend,BTDBackend}, p)
     backend.work_residual .-= backend.target_flat
     return backend.work_residual
 end
+
+function residual(model::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}}, p)
+    return copy(_join_residual!(model.backend, p))
+end
+
+function differential_action!(
+    out::AbstractVector{T},
+    model::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}},
+    p,
+    X,
+) where {T<:AbstractFloat}
+    backend = model.backend
+    parts = point_parts(p)
+    xparts = point_parts(X)
+    _check_parts_len(parts, backend.r, "differential_action!")
+    _check_parts_len(xparts, backend.r, "differential_action!")
+    length(out) == length(backend.target_flat) || throw(
+        DimensionMismatch(
+            "differential_action! output length $(length(out)) != ambient length $(length(backend.target_flat)).",
+        ),
+    )
+    fill!(out, zero(T))
+    @inbounds for k = 1:backend.r
+        component_ambient_pushforward!(
+            backend.component_bufs[k],
+            _backend_component(backend, k),
+            parts[k],
+            xparts[k],
+        )
+        out .+= backend.component_bufs[k]
+    end
+    return out
+end
+
+function adjoint_action(
+    model::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}},
+    p,
+    a::AbstractVector;
+    kwargs...,
+)
+    backend = model.backend
+    length(a) == length(backend.target_flat) || throw(
+        DimensionMismatch(
+            "adjoint_action expected ambient vector of length $(length(backend.target_flat)), got $(length(a)).",
+        ),
+    )
+    return _join_basis_project(_backend_components(backend), p, a)
+end
