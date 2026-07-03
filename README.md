@@ -5,7 +5,7 @@
 
 [Documentation](https://tensorkitchen.github.io/TensorKitchen.jl/)
 
-<img src="docs/logo_text_transparent.png" width="450" alt="TensorKitchen.jl">
+<img src="docs/src/assets/logo_text_transparent.png" width="450" alt="TensorKitchen.jl">
 
 <br>
 
