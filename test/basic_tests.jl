@@ -553,7 +553,8 @@ end
     @test all(U_sp[m] ≈ TensorKitchen._softplus_value.(Ũ[m]) for m in eachindex(U_sp))
     @test λ̇_sp ≈ TensorKitchen._softplus_derivative.(λ̃) .* λ̇̃
     @test all(
-        U̇_sp[m] ≈ TensorKitchen._softplus_derivative.(Ũ[m]) .* U̇̃[m] for m in eachindex(U̇_sp)
+        U̇_sp[m] ≈ TensorKitchen._softplus_derivative.(Ũ[m]) .* U̇̃[m] for
+        m in eachindex(U̇_sp)
     )
 
     model_sp = TensorKitchen.RankRCPDModel(
