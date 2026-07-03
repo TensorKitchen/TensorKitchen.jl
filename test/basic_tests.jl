@@ -262,9 +262,15 @@ end
 @testset "Operator interface matches Jacobian and gradient" begin
     A = randn(5, 4, 3)
     cases = (
-        ("generic_join", JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), A)),
+        (
+            "generic_join",
+            JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), A),
+        ),
         ("cp_canonical", JoinModel(A, 2; geometry = :canonical)),
-        ("cp_softplus", JoinModel(abs.(A), 2; geometry = :softplus_metric, nonnegative = true)),
+        (
+            "cp_softplus",
+            JoinModel(abs.(A), 2; geometry = :softplus_metric, nonnegative = true),
+        ),
     )
     for (label, model) in cases
         M = TensorKitchen.manifold(model)

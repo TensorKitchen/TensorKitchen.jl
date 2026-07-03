@@ -98,7 +98,8 @@ function _lm_vector_differential_function(
 ) where {T<:AbstractFloat}
     ambient_dim = length(tensor(model))
     residual_f = _lm_residual_function(model, T, normA2, normalized_objective)
-    differential_f = _lm_differential_action_function(model, T, normA2, normalized_objective)
+    differential_f =
+        _lm_differential_action_function(model, T, normA2, normalized_objective)
     adjoint_f = _lm_adjoint_action_function(model, T, normA2, normalized_objective)
     return Manopt.VectorDifferentialFunction(
         residual_f,

@@ -82,11 +82,17 @@ function differential_action!(
             "differential_action! output length $(length(out)) != ambient length $(length(model.A)).",
         ),
     )
-    λ, U, λ̇, U̇ = _cp_rank1_decode_tangent_factors(_cp_parameterization(model), model.dims, p, X)
+    λ, U, λ̇, U̇ =
+        _cp_rank1_decode_tangent_factors(_cp_parameterization(model), model.dims, p, X)
     return _cp_rank1_tangent_tensorvec!(out, λ, U, λ̇, U̇)
 end
 
-function adjoint_action(model::Rank1CPDModel{T,N}, p, a::AbstractVector; kwargs...) where {T<:AbstractFloat,N}
+function adjoint_action(
+    model::Rank1CPDModel{T,N},
+    p,
+    a::AbstractVector;
+    kwargs...,
+) where {T<:AbstractFloat,N}
     length(a) == length(model.A) || throw(
         DimensionMismatch(
             "adjoint_action expected ambient vector of length $(length(model.A)) for $(typeof(model)), got $(length(a)).",
