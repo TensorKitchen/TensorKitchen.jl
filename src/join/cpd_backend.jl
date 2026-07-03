@@ -60,15 +60,18 @@ initial_point(
 cost(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p) = cost(cpd_model(model), p)
 egrad(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p) = egrad(cpd_model(model), p)
 residual(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p) = residual(cpd_model(model), p)
-differential_action!(out::AbstractVector, model::JoinModel{<:AbstractFloat,<:CPDBackend}, p, X) =
-    differential_action!(out, cpd_model(model), p, X)
+differential_action!(
+    out::AbstractVector,
+    model::JoinModel{<:AbstractFloat,<:CPDBackend},
+    p,
+    X,
+) = differential_action!(out, cpd_model(model), p, X)
 adjoint_action(
     model::JoinModel{<:AbstractFloat,<:CPDBackend},
     p,
     a::AbstractVector;
     kwargs...,
-) =
-    adjoint_action(cpd_model(model), p, a; kwargs...)
+) = adjoint_action(cpd_model(model), p, a; kwargs...)
 supports_rgrad(model::JoinModel{<:AbstractFloat,<:CPDBackend}) =
     supports_rgrad(cpd_model(model))
 rgrad(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p) = rgrad(cpd_model(model), p)
