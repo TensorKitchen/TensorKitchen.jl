@@ -67,6 +67,36 @@ function embed_point(model::Rank1CPDModel{T,N}, p) where {T,N}
     return _cp_rank1_embed_tensor(_cp_parameterization(model), model.dims, p)
 end
 
+function residual(model::Rank1CPDModel{T,N}, p) where {T<:AbstractFloat,N}
+    return vec(embed_point(model, p)) .- vec(model.A)
+end
+
+function differential_action!(
+    out::AbstractVector{T},
+    model::Rank1CPDModel{T,N},
+    p,
+    X,
+) where {T<:AbstractFloat,N}
+    length(out) == length(model.A) || throw(
+        DimensionMismatch(
+            "differential_action! output length $(length(out)) != ambient length $(length(model.A)).",
+        ),
+    )
+    λ, U, λ̇, U̇ = _cp_rank1_decode_tangent_factors(_cp_parameterization(model), model.dims, p, X)
+    return _cp_rank1_tangent_tensorvec!(out, λ, U, λ̇, U̇)
+end
+
+function adjoint_action(model::Rank1CPDModel{T,N}, p, a::AbstractVector; kwargs...) where {T<:AbstractFloat,N}
+    length(a) == length(model.A) || throw(
+        DimensionMismatch(
+            "adjoint_action expected ambient vector of length $(length(model.A)) for $(typeof(model)), got $(length(a)).",
+        ),
+    )
+    Aadj = reshape(a, model.dims)
+    eg = _cp_rank1_linear_egrad(_cp_parameterization(model), model.dims, p, Aadj)
+    return egrad_to_rgrad(model.M, p, eg)
+end
+
 function cost(model::Rank1CPDModel{T,N}, p) where {T,N}
     return model_cost_function(model)(model.M, p)
 end

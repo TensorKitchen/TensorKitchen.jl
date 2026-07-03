@@ -320,7 +320,6 @@ function _reference_join_jacobian_from_product_basis(model, M, p; basis)
     end
     return J
 end
-
 @testset "LM generic join Jacobian uses component pushforwards" begin
     A = randn(5, 4, 3)
     model = JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), A)
@@ -481,7 +480,6 @@ end
         end
     end
 end
-
 @testset "LM normalized and unnormalized objectives take the same step" begin
     A = randn(6, 5, 4)
     model = JoinModel(A, 2; geometry = :canonical)
@@ -566,7 +564,6 @@ end
     @test all(isfinite, λ_lat)
     @test all(F -> all(isfinite, F), U_lat)
 end
-
 @testset "cpd/approx accept LMSolver" begin
     A = randn(5, 4, 3)
     res_cpd_symbol = cpd(A, 2; solver = :lm, maxiter = 2, tol = 1e-6, verbose = false)

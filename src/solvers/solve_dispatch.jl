@@ -15,7 +15,8 @@ end
 _solver_object(solver::AbstractSolver, ::Real; kwargs...) = solver
 
 _solver_object(::Val{:als}, ::Real; kwargs...) = ALSSolver()
-_solver_object(::Val{:rgd}, stepsize::Real; kwargs...) = RGDSolver(stepsize)
+_solver_object(::Val{:rgd}, stepsize::Real; kwargs...) =
+    RGDSolver(stepsize; armijo_alpha_min = get(kwargs, :armijo_alpha_min, 1e-8))
 _solver_object(::Val{:rgd_fixed}, stepsize::Real; kwargs...) = RGDFixedSolver(stepsize)
 
 function _solver_object(::Val{:rcg}, ::Real; kwargs...)
@@ -34,11 +35,6 @@ function _solver_object(::Val{:lbfgs}, ::Real; kwargs...)
         memory_size = get(kwargs, :memory_size, 1),
         cautious_update = get(kwargs, :cautious_update, true),
         initial_scale = get(kwargs, :initial_scale, 1.0),
-        nonpositive_curvature_behavior = get(
-            kwargs,
-            :nonpositive_curvature_behavior,
-            :ignore,
-        ),
         linesearch = get(kwargs, :linesearch, :wolfe),
         preconditioner = get(kwargs, :preconditioner, nothing),
     )

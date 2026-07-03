@@ -107,6 +107,54 @@ function _cp_rank1_decode_tangent_factors(::SoftplusNNCPParam, dims, p, X)
     return λ, U, λ̇, U̇
 end
 
+function _cp_rank1_linear_egrad(::NativeCPParam, dims, p, A)
+    λ, U = unpack_point_rank1(p, dims)
+    T = typeof(λ)
+    grad_λ = rank1_inner(A, U)
+    grad_U = Vector{Vector{T}}(undef, length(dims))
+    @inbounds for m in eachindex(dims)
+        g = Vector{T}(undef, dims[m])
+        rank1_mode_contract!(g, A, U, m)
+        rmul!(g, λ)
+        grad_U[m] = g
+    end
+    return pack_tangent_rank1_segre(grad_λ, grad_U)
+end
+
+function _cp_rank1_linear_egrad(::SquaredNNCPParam, dims, p, A)
+    λ̃, Ũ = unpack_point_rank1(p, dims)
+    λ = λ̃^2
+    U = [Ũ[m] .^ 2 for m in eachindex(Ũ)]
+    grad_λ = rank1_inner(A, U)
+    grad_U = Vector{Vector{eltype(λ̃)}}(undef, length(dims))
+    @inbounds for m in eachindex(dims)
+        g = Vector{eltype(λ̃)}(undef, dims[m])
+        rank1_mode_contract!(g, A, U, m)
+        g .*= λ .* 2 .* Ũ[m]
+        grad_U[m] = g
+    end
+    grad_λ̃ = grad_λ * 2 * λ̃
+    return p isa Vector ? pack_point_rank1_to_vector(grad_λ̃, grad_U) :
+           pack_point_rank1(grad_λ̃, grad_U)
+end
+
+function _cp_rank1_linear_egrad(::SoftplusNNCPParam, dims, p, A)
+    λ̃, Ũ = unpack_point_rank1(p, dims)
+    λ = _softplus_value(λ̃)
+    U = [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)]
+    grad_λ = rank1_inner(A, U)
+    grad_U = Vector{Vector{eltype(λ̃)}}(undef, length(dims))
+    @inbounds for m in eachindex(dims)
+        g = Vector{eltype(λ̃)}(undef, dims[m])
+        rank1_mode_contract!(g, A, U, m)
+        g .*= λ .* _softplus_derivative.(Ũ[m])
+        grad_U[m] = g
+    end
+    grad_λ̃ = grad_λ * _softplus_derivative(λ̃)
+    return p isa Vector ? pack_point_rank1_to_vector(grad_λ̃, grad_U) :
+           pack_point_rank1(grad_λ̃, grad_U)
+end
+
 function _cp_rankr_decode_factors(::NativeCPParam, dims, r, p)
     return unpack_rankr_native(p, dims, r)
 end
@@ -248,4 +296,57 @@ function _cp_rankr_decode_tangent_factors(::SoftplusNNCPParam, dims, r, p, X)
     λ̇ = _softplus_derivative.(λ̃) .* λ̇̃
     U̇ = [_softplus_derivative.(Ũ[m]) .* U̇̃[m] for m in eachindex(Ũ)]
     return λ, U, λ̇, U̇
+end
+
+function _cp_rankr_linear_terms(A, U, dims, r)
+    Nmodes = length(dims)
+    contracts = [mttkrp(A, U, m; method = :auto) for m = 1:Nmodes]
+    grad_λ = _inner_from_mttkrp_first_mode(U, contracts[1])
+    return grad_λ, contracts
+end
+
+function _cp_rankr_linear_egrad(::NativeCPParam, dims, r, p, A)
+    λ, U = unpack_rankr_native(p, dims, r)
+    grad_λ, contracts = _cp_rankr_linear_terms(A, U, dims, r)
+    grad_parts = Vector{Vector{Vector{eltype(λ)}}}(undef, r)
+    @inbounds for k = 1:r
+        grad_Uk = [λ[k] .* Vector(@view contracts[m][:, k]) for m = 1:length(dims)]
+        grad_parts[k] = pack_tangent_rank1_segre(grad_λ[k], grad_Uk)
+    end
+    return hasproperty(p, :x) ? ArrayPartition(grad_parts...) : (grad_parts...,)
+end
+
+function _cp_rankr_linear_egrad(::CanonicalCPParam, dims, r, p, A)
+    λ, U = unpack_rankr_canonical(p, dims, r)
+    grad_λ, contracts = _cp_rankr_linear_terms(A, U, dims, r)
+    gradU = [contracts[m] .* transpose(λ) for m = 1:length(dims)]
+    return wrap_rankr_canonical_tangent_like(p, grad_λ, gradU, r)
+end
+
+function _cp_rankr_linear_egrad(::SquaredNNCPParam, dims, r, p, A)
+    λ̃, Ũ = unpack_point_rankr(p, dims, r)
+    λ = λ̃ .^ 2
+    U = [Ũ[m] .^ 2 for m in eachindex(Ũ)]
+    grad_λ, contracts = _cp_rankr_linear_terms(A, U, dims, r)
+    grad_λ̃ = grad_λ .* 2 .* λ̃
+    gradU = Vector{Matrix{eltype(λ̃)}}(undef, length(dims))
+    @inbounds for m in eachindex(dims)
+        gradU[m] = (contracts[m] .* transpose(λ)) .* (2 .* Ũ[m])
+    end
+    return p isa Vector ? pack_point_rankr_to_vector(grad_λ̃, gradU, r) :
+           pack_point_rankr(grad_λ̃, gradU, r)
+end
+
+function _cp_rankr_linear_egrad(::SoftplusNNCPParam, dims, r, p, A)
+    λ̃, Ũ = unpack_point_rankr(p, dims, r)
+    λ = _softplus_value.(λ̃)
+    U = [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)]
+    grad_λ, contracts = _cp_rankr_linear_terms(A, U, dims, r)
+    grad_λ̃ = grad_λ .* _softplus_derivative.(λ̃)
+    gradU = Vector{Matrix{eltype(λ̃)}}(undef, length(dims))
+    @inbounds for m in eachindex(dims)
+        gradU[m] = (contracts[m] .* transpose(λ)) .* _softplus_derivative.(Ũ[m])
+    end
+    return p isa Vector ? pack_point_rankr_to_vector(grad_λ̃, gradU, r) :
+           pack_point_rankr(grad_λ̃, gradU, r)
 end

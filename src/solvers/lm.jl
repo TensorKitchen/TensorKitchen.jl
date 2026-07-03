@@ -70,17 +70,6 @@ function _lm_residual_function(
     return (M, p) -> scale .* _lm_raw_residual_vector(model, p)
 end
 
-function _lm_jacobian_function(
-    model::AbstractDecompositionModel,
-    ::Type{T},
-    normA2,
-    normalized_objective::Bool;
-    basis = ManifoldsBase.DefaultOrthonormalBasis(),
-) where {T<:AbstractFloat}
-    scale = _lm_scaling_factor(T, normA2, normalized_objective)
-    return (M, p) -> scale .* _lm_raw_jacobian_matrix(model, M, p; basis)
-end
-
 function _lm_differential_action_function(
     model::AbstractDecompositionModel,
     ::Type{T},
@@ -183,8 +172,8 @@ function solve_lm(
     sub_state = Manopt.ConjugateResidualState(
         TangentSpace(M, p0_local),
         sub_objective;
-        stopping_criterion = StopAfterIteration(max(4 * manifold_dimension(M), 50)) |
-                             StopWhenGradientNormLess(T(1e-14)),
+        stopping_criterion = StopAfterIteration(max(20 * manifold_dimension(M), 200)) |
+                             StopWhenGradientNormLess(T(1e-16)),
     )
     retraction_method = _solver_retraction_method(M, p0_local)
     stopping = StopWhenAny(
@@ -255,6 +244,7 @@ function solve_lm(
             uses_operator_jacobian = true,
             uses_direct_adjoint_action = true,
             uses_coordinate_linear_solver = false,
+            uses_user_linear_subsolver = linear_subsolver !== Manopt.default_lm_lin_solve!,
             uses_vector_transport = !isnothing(vector_transport_method),
         ),
     )

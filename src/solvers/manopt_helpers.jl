@@ -28,7 +28,6 @@ Defaults to `sqrt(tol)`; callers may pass an explicit `grad_tol` (for example
 ) where {T<:Real}
     return isnothing(grad_tol) ? sqrt(T(tol)) : T(grad_tol)
 end
-
 # Stop when both the relative cost change and Riemannian gradient norm are small.
 mutable struct StopWhenCostRelChangeAndGradientLess{T<:Real} <: Manopt.StoppingCriterion
     tol_cost::T
@@ -208,8 +207,6 @@ function _default_vector_transport_method(M, p, retraction_method)
 
     return ManifoldsBase.default_vector_transport_method(M, typeof(p))
 end
-
-
 # Detect pullback nonnegative geometries that need conservative line search.
 function _contains_sqeuclidean_manifold(M)
     M2 = _unwrap_solver_manifold(M)

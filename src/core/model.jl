@@ -1,6 +1,17 @@
 # core/model.jl — Top-level decomposition model interface
 export AbstractDecompositionModel,
-    manifold, initial_point, egrad, rgrad, supports_rgrad, tensor, cost, post_step!
+    manifold,
+    initial_point,
+    egrad,
+    rgrad,
+    supports_rgrad,
+    tensor,
+    cost,
+    post_step!,
+    residual,
+    differential_action,
+    differential_action!,
+    adjoint_action
 """
     AbstractDecompositionModel{T}
 
@@ -112,4 +123,50 @@ end
 
 function tensor(model::AbstractDecompositionModel)
     error("tensor not implemented for $(typeof(model))")
+end
+
+function residual(model::AbstractDecompositionModel, p)
+    error("residual not implemented for $(typeof(model))")
+end
+
+function differential_action!(out::AbstractVector, model::AbstractDecompositionModel, p, X)
+    error("differential_action! not implemented for $(typeof(model))")
+end
+
+function differential_action(model::AbstractDecompositionModel, p, X)
+    T = eltype(tensor(model))
+    out = Vector{T}(undef, length(tensor(model)))
+    differential_action!(out, model, p, X)
+    return out
+end
+
+function adjoint_action(
+    model::AbstractDecompositionModel,
+    p,
+    a::AbstractVector;
+    basis = ManifoldsBase.DefaultOrthonormalBasis(),
+)
+    M = manifold(model)
+    d = manifold_dimension(M)
+    length(a) == length(tensor(model)) || throw(
+        DimensionMismatch(
+            "adjoint_action expected ambient vector of length $(length(tensor(model))) for $(typeof(model)), got $(length(a)).",
+        ),
+    )
+    T = _scalar_eltype(p)
+    coeff = zeros(T, d)
+    e_j = zeros(T, d)
+    col = Vector{T}(undef, length(a))
+    @inbounds for j = 1:d
+        fill!(e_j, zero(T))
+        e_j[j] = one(T)
+        Xj = ManifoldsBase.get_vector(M, p, e_j, basis)
+        differential_action!(col, model, p, Xj)
+        coeff[j] = dot(col, a)
+    end
+    return ManifoldsBase.get_vector(M, p, coeff, basis)
+end
+
+function adjoint_action(model::AbstractDecompositionModel, p, a::AbstractArray; kwargs...)
+    return adjoint_action(model, p, vec(a); kwargs...)
 end

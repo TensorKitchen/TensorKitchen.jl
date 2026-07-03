@@ -654,7 +654,6 @@ end
 
 component_ambient_embedding!(out::AbstractVector, component, p) =
     _component_ambient_embedding!(out, component, p)
-
 """
     _component_ambient_pushforward!(out, component, p, X)
 
@@ -717,7 +716,6 @@ end
 
 component_ambient_pushforward!(out::AbstractVector, component, p, X) =
     _component_ambient_pushforward!(out, component, p, X)
-
 function _subtract_ambient_tensor!(
     residual::AbstractArray{T,N},
     component,

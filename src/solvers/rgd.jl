@@ -20,7 +20,10 @@ function solve_rgd(
     iteration_callbacks = (),
     grad_tol = nothing,
     normalized_objective::Bool = true,
+    armijo_alpha_min::Real = 1e-8,
 )
+    armijo_alpha_min > 0 ||
+        throw(ArgumentError("armijo_alpha_min must be > 0, got $armijo_alpha_min"))
     setup = _prepare_manopt_solver_functions(
         model_cost,
         model_egrad,
@@ -36,14 +39,14 @@ function solve_rgd(
     T = setup.T
     retraction_method = _solver_retraction_method(M, p0_local)
     stepsize_eff_base = T(stepsize) * setup.objective_scale
-    armijo_alpha_min = T(1e-8) * setup.objective_scale
+    armijo_alpha_min_T = T(armijo_alpha_min) * setup.objective_scale
     tol_g = setup.dual_grad_tol
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
     stopping = _manopt_stopping(
         maxiter,
         setup.grad_stop_tol,
         dual_stop;
-        extra = (StopWhenStepsizeLess(armijo_alpha_min),),
+        extra = (StopWhenStepsizeLess(armijo_alpha_min_T),),
     )
 
     use_squaring_armijo = _contains_sqeuclidean_manifold(M)
@@ -56,12 +59,12 @@ function solve_rgd(
             setup.solver_grad,
             retraction_method,
             stepsize_eff_base;
-            alpha_min = armijo_alpha_min,
+            alpha_min = armijo_alpha_min_T,
         ) : stepsize_eff_base
     armijo_contraction = use_squaring_armijo ? T(0.5) : T(0.85)
     armijo_sufficient_decrease = use_squaring_armijo ? T(1e-4) : T(1e-3)
     armijo_stop_decreasing =
-        _armijo_max_decreases(initial_stepsize_eff, armijo_contraction, armijo_alpha_min)
+        _armijo_max_decreases(initial_stepsize_eff, armijo_contraction, armijo_alpha_min_T)
     armijo_max_step = use_strict_sqeuclidean ? initial_stepsize_eff : Inf
     armijo_stop_increasing = use_strict_sqeuclidean ? 0 : 100
     armijo_additional_decrease =
@@ -74,7 +77,7 @@ function solve_rgd(
         initial_stepsize = initial_stepsize_eff,
         contraction_factor = armijo_contraction,
         sufficient_decrease = armijo_sufficient_decrease,
-        stop_when_stepsize_less = armijo_alpha_min,
+        stop_when_stepsize_less = armijo_alpha_min_T,
         stop_when_stepsize_exceeds = armijo_max_step,
         stop_increasing_at_step = armijo_stop_increasing,
         stop_decreasing_at_step = armijo_stop_decreasing,
@@ -122,7 +125,10 @@ function solve_rgd(
         return_stats,
         verbose,
         normalized_objective = setup.uses_relative_objective,
-        solver_info_extra = (initial_stepsize_eff = Float64(initial_stepsize_eff),),
+        solver_info_extra = (
+            initial_stepsize_eff = Float64(initial_stepsize_eff),
+            armijo_alpha_min = Float64(armijo_alpha_min_T),
+        ),
     )
 end
 
@@ -206,18 +212,21 @@ function solve_rgd_fixed(
     )
 end
 
-# ========== RGDSolver (AbstractFirstOrderSolver) ==========
-
 """
-    RGDSolver(stepsize=1.0)
+    RGDSolver(stepsize=1.0; armijo_alpha_min=1e-8)
 
-Riemannian gradient descent with Armijo backtracking line search. Call via
-`solve(RGDSolver(...), model; init=:random, gradient_mode=:riemannian)`.
+Riemannian gradient descent with Armijo backtracking line search.
 """
 struct RGDSolver <: AbstractFirstOrderSolver
     stepsize::Float64
+    armijo_alpha_min::Float64
 end
-RGDSolver() = RGDSolver(1.0)
+function RGDSolver(stepsize::Real = 1.0; armijo_alpha_min::Real = 1e-8)
+    stepsize > 0 || throw(ArgumentError("stepsize must be > 0, got $stepsize"))
+    armijo_alpha_min > 0 ||
+        throw(ArgumentError("armijo_alpha_min must be > 0, got $armijo_alpha_min"))
+    return RGDSolver(Float64(stepsize), Float64(armijo_alpha_min))
+end
 
 solver_symbol(::RGDSolver) = :rgd
 first_order_diagnostics_recorder(::RGDSolver) =
@@ -255,17 +264,14 @@ function run_first_order_solver(
         iteration_callbacks,
         grad_tol,
         normalized_objective,
+        armijo_alpha_min = solver.armijo_alpha_min,
     )
 end
-
-# ========== RGDFixedSolver (AbstractFirstOrderSolver) ==========
 
 """
     RGDFixedSolver(stepsize=1.0)
 
 Riemannian gradient descent with a constant stepsize.
-Used as the stable fallback for Tucker-product BTD on dependency stacks where
-Armijo's rand/allocate_result path is still unreliable.
 """
 struct RGDFixedSolver <: AbstractFirstOrderSolver
     stepsize::Float64

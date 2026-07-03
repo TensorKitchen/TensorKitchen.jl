@@ -86,12 +86,10 @@ function solve_rcg(
         grad_tol,
         normalized_objective,
     )
-    # Get the initial point and the tangent space type
     p0_local = setup.p0
     T = setup.T
 
     retraction_method = _solver_retraction_method(M, p0_local)
-
     transport =
         isnothing(vector_transport_method) ?
         _default_vector_transport_method(M, p0_local, retraction_method) :
@@ -167,30 +165,10 @@ function solve_rcg(
     )
 end
 
-# RCGSolver object
 """
     RCGSolver(; coefficient=:hager_zhang, restart=:non_descent, ...)
 
-    Riemannian conjugate gradient solver.
-
-Useful options:
-
-- `coefficient = :hager_zhang`
-- `coefficient = :polak_ribiere`
-- `coefficient = :fletcher_reeves`
-- `coefficient = :dai_yuan`
-- `coefficient = :hestenes_stiefel`
-- `coefficient = :conjugate_descent`
-- `coefficient = :steepest`
-    
-Restart options:
-
-- `restart = :non_descent`
-- `restart = :non_sufficient_descent`
-- `restart = :never`
-
-The default is chosen for CPD swamp experiments:
-RCGSolver(; coefficient=:hager_zhang, restart=:non_descent)
+Riemannian conjugate gradient solver.
 """
 Base.@kwdef struct RCGSolver <: AbstractFirstOrderROSolver
     coefficient::Symbol = :hager_zhang

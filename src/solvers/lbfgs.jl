@@ -3,9 +3,7 @@ export LBFGSSolver
 
 """
     LBFGSSolver(; memory_size=1, cautious_update=true, initial_scale=1.0,
-        nonpositive_curvature_behavior=:ignore,
-        nondescent_direction_behavior=:reinitialize_direction_update,
-        linesearch=:wolfe, preconditioner=nothing)
+        nonpositive_curvature_behavior=:ignore, linesearch=:wolfe, preconditioner=nothing)
 
 Limited-memory Riemannian BFGS wrapper built on `Manopt.quasi_Newton`.
 """
@@ -29,8 +27,11 @@ function LBFGSSolver(;
     memory_size >= 1 || throw(ArgumentError("memory_size must be >= 1, got $memory_size"))
     initial_scale > 0 ||
         throw(ArgumentError("initial_scale must be > 0, got $initial_scale"))
-    linesearch in (:wolfe, :hagerzhang) || throw(
-        ArgumentError("Unsupported linesearch=$linesearch. Use :wolfe or :hagerzhang."),
+    supported = _lbfgs_supported_linesearches()
+    linesearch in supported || throw(
+        ArgumentError(
+            "Unsupported linesearch=$linesearch. Use one of " * join(supported, ", ") * ".",
+        ),
     )
     return LBFGSSolver(
         memory_size,
@@ -47,9 +48,20 @@ solver_symbol(::LBFGSSolver) = :lbfgs
 second_order_diagnostics_recorder(::LBFGSSolver) =
     _SolverDiagnosticsRecorder(line_search_enabled = true)
 
+function _lbfgs_supported_linesearches()
+    base = (:wolfe,)
+    return isdefined(Manopt, :HagerZhangLinesearch) ? (base..., :hagerzhang) : base
+end
+
 @inline function _lbfgs_linesearch(kind::Symbol)
-    kind === :hagerzhang && return Manopt.HagerZhangLinesearch()
-    kind === :wolfe && return Manopt.WolfePowellLinesearch()
+    kind === :wolfe && return Manopt.WolfePowellLinesearch(
+        sufficient_curvature = 0.9,
+        stop_when_stepsize_less = 1e-8,
+        stop_decreasing_at_step = 100,
+    )
+    if kind === :hagerzhang && isdefined(Manopt, :HagerZhangLinesearch)
+        return getproperty(Manopt, :HagerZhangLinesearch)()
+    end
     throw(ArgumentError("Unsupported linesearch kind $kind."))
 end
 
