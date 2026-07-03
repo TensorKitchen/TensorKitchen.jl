@@ -3,6 +3,7 @@
 
 # TensorKitchen.jl
 
+[Documentation](https://tensorkitchen.github.io/TensorKitchen.jl/)
 
 <img src="docs/logo_text_transparent.png" width="450" alt="TensorKitchen.jl">
 
@@ -47,7 +48,7 @@ See [PIPELINE.md](docs/src/PIPELINE.md) for the current execution flow.
 Install the current development version through the Julia package manager:
 
 ```julia
-add TensorKitchen
+pkg> add TensorKitchen
 ```
 
 ---
