@@ -8,10 +8,14 @@ _is_join_component_like(x) = _is_manifold_like(x)
 _wrap_join_component(component::JoinComponent) = component
 _wrap_join_component(manifold::AbstractManifold) = JoinComponent(manifold)
 
-_component_manifold(component::JoinComponent) = component.manifold
+_component_embedding(component::JoinComponent) = component_embedding(component)
+_component_embedding(::AbstractManifold) = DefaultJoinEmbedding()
+_component_manifold(component::JoinComponent) = component_manifold(component)
 _component_manifold(manifold::AbstractManifold) = manifold
 _backend_components(backend::JoinBackend) = backend.components
-_backend_components(backend::BTDBackend) = backend.manifolds
+_backend_components(backend::BTDBackend) = backend.components
+_backend_component(backend, k::Int) = _backend_components(backend)[k]
+_backend_manifold(backend, k::Int) = _component_manifold(_backend_component(backend, k))
 
 function _as_join_manifold_tuple(manifolds::Tuple)
     all(_is_manifold_like, manifolds) || throw(
@@ -118,8 +122,12 @@ function _component_egrad(::DefaultJoinEmbedding, M::Manifolds.Segre, p, residua
     return pack_tangent_rank1_segre(grad_λ, grad_U)
 end
 
-_component_egrad(component::JoinComponent, p, residual) =
-    _component_egrad(component.embedding, component.manifold, p, residual)
+_component_egrad(component::JoinComponent, p, residual) = _component_egrad(
+    _component_embedding(component),
+    _component_manifold(component),
+    p,
+    residual,
+)
 _component_egrad(M, p, residual) = _component_egrad(DefaultJoinEmbedding(), M, p, residual)
 
 _manifold_egrad(M, p, residual) = _component_egrad(M, p, residual)
@@ -189,7 +197,32 @@ end
 
 ambient_length(M::Manifolds.Segre) = prod(factor_dims(M))
 ambient_length(M::Manifolds.Tucker) = prod(factor_dims(M))
-ambient_length(component::JoinComponent) = ambient_length(component.manifold)
+ambient_length(component::JoinComponent) = ambient_length(component_manifold(component))
+
+function component_basis_vector(
+    component,
+    p,
+    coeffs;
+    basis = ManifoldsBase.DefaultOrthonormalBasis(),
+)
+    return ManifoldsBase.get_vector(component_manifold(component), p, coeffs, basis)
+end
+
+function component_basis_vector(
+    component,
+    p,
+    j::Integer;
+    basis = ManifoldsBase.DefaultOrthonormalBasis(),
+)
+    T = _scalar_eltype(p)
+    d = component_tangent_dimension(component, p)
+    1 <= j <= d || throw(
+        BoundsError("Component basis index $j is out of bounds for tangent dimension $d."),
+    )
+    coeffs = zeros(T, d)
+    coeffs[j] = one(T)
+    return component_basis_vector(component, p, coeffs; basis)
+end
 
 """
     _join_vector_workspace_like(target, n) returns AbstractVector
@@ -251,10 +284,11 @@ function _sum_backend_parts(
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
-    r = length(components)
+    components_tuple = _as_join_component_tuple(components)
+    r = length(components_tuple)
     # Keep the original target representation instead of eagerly materializing Array.
     tgt = target
-    _validate_join_ambient_compatibility(components, tgt)
+    _validate_join_ambient_compatibility(components_tuple, tgt)
 
     tflat = vec(tgt)
     tgt_len = length(tgt)
@@ -262,10 +296,10 @@ function _sum_backend_parts(
     component_bufs = [_join_vector_workspace_like(tgt, tgt_len) for _ = 1:r]
     work_rec = _join_vector_workspace_like(tgt, tgt_len)
     work_residual = _join_vector_workspace_like(tgt, tgt_len)
-    manifolds = ntuple(k -> _component_manifold(components[k]), r)
+    manifolds = ntuple(k -> _component_manifold(components_tuple[k]), r)
 
     return (;
-        components,
+        components = components_tuple,
         manifolds,
         r,
         target = tgt,
@@ -310,6 +344,7 @@ function _sum_backend_instance(
 ) where {T<:AbstractFloat,N}
     parts = _sum_backend_parts(components, target; init_point)
     return BTDBackend(
+        parts.components,
         parts.manifolds,
         parts.r,
         parts.target,
@@ -609,15 +644,24 @@ function _component_ambient_embedding!(
 end
 
 function _component_ambient_embedding!(out::AbstractVector, component::JoinComponent, p)
-    return _component_ambient_embedding!(out, component.embedding, component.manifold, p)
+    return _component_ambient_embedding!(
+        out,
+        _component_embedding(component),
+        _component_manifold(component),
+        p,
+    )
 end
 
+component_ambient_embedding!(out::AbstractVector, component, p) =
+    _component_ambient_embedding!(out, component, p)
 """
     _component_ambient_pushforward!(out, component, p, X)
 
 Write the ambient pushforward `DΦ(p)[X]` of one join component into `out`.
 This is the component-level differential used by LM Jacobian assembly on
-generic `JoinModel`s.
+generic `JoinModel`s. Implementations must overwrite `out` completely rather
+than accumulating into it, since LM Jacobian assembly reuses the same work
+buffer across columns.
 """
 function _component_ambient_pushforward!(out::AbstractVector, M, p, X)
     return _component_ambient_pushforward!(out, DefaultJoinEmbedding(), M, p, X)
@@ -663,13 +707,15 @@ function _component_ambient_pushforward!(
 )
     return _component_ambient_pushforward!(
         out,
-        component.embedding,
-        component.manifold,
+        _component_embedding(component),
+        _component_manifold(component),
         p,
         X,
     )
 end
 
+component_ambient_pushforward!(out::AbstractVector, component, p, X) =
+    _component_ambient_pushforward!(out, component, p, X)
 function _subtract_ambient_tensor!(
     residual::AbstractArray{T,N},
     component,
@@ -743,4 +789,52 @@ function _join_residual!(backend::Union{JoinBackend,BTDBackend}, p)
     backend.work_residual .= backend.work_rec
     backend.work_residual .-= backend.target_flat
     return backend.work_residual
+end
+
+function residual(model::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}}, p)
+    return copy(_join_residual!(model.backend, p))
+end
+
+function differential_action!(
+    out::AbstractVector{T},
+    model::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}},
+    p,
+    X,
+) where {T<:AbstractFloat}
+    backend = model.backend
+    parts = point_parts(p)
+    xparts = point_parts(X)
+    _check_parts_len(parts, backend.r, "differential_action!")
+    _check_parts_len(xparts, backend.r, "differential_action!")
+    length(out) == length(backend.target_flat) || throw(
+        DimensionMismatch(
+            "differential_action! output length $(length(out)) != ambient length $(length(backend.target_flat)).",
+        ),
+    )
+    fill!(out, zero(T))
+    @inbounds for k = 1:backend.r
+        component_ambient_pushforward!(
+            backend.component_bufs[k],
+            _backend_component(backend, k),
+            parts[k],
+            xparts[k],
+        )
+        out .+= backend.component_bufs[k]
+    end
+    return out
+end
+
+function adjoint_action(
+    model::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}},
+    p,
+    a::AbstractVector;
+    kwargs...,
+)
+    backend = model.backend
+    length(a) == length(backend.target_flat) || throw(
+        DimensionMismatch(
+            "adjoint_action expected ambient vector of length $(length(backend.target_flat)), got $(length(a)).",
+        ),
+    )
+    return _join_basis_project(_backend_components(backend), p, a)
 end

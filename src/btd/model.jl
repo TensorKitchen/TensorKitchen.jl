@@ -31,8 +31,18 @@ Backend state for block-term decomposition as a sum of Tucker blocks. Stores
 the target tensor, product manifold, reusable work buffers, and per-block
 ambient reconstruction buffers used by cost, gradient, and ALS routines.
 """
-struct BTDBackend{T,N,MT<:Tuple,A<:AbstractArray{T,N},V,MP<:ProductManifold,I,C} <:
-       AbstractJoinBackend
+struct BTDBackend{
+    T,
+    N,
+    CT<:Tuple,
+    MT<:Tuple,
+    A<:AbstractArray{T,N},
+    V,
+    MP<:ProductManifold,
+    I,
+    C,
+} <: AbstractJoinBackend
+    components::CT
     manifolds::MT
     r::Int
     # Preserve the target array/backend so BTD shares the generic join storage behavior.
@@ -60,7 +70,7 @@ model_exact_join_basis_function(model::JoinModel{<:AbstractFloat,<:BTDBackend}) 
     (M, p) -> begin
         backend = model.backend
         residual = _join_residual!(backend, p)
-        _join_basis_project(backend.manifolds, p, residual)
+        _join_basis_project(backend.components, p, residual)
     end
 
 
@@ -71,14 +81,11 @@ function _btd_sequential_tucker_init(model::JoinModel{<:AbstractFloat,<:BTDBacke
     residual = copy(backend.target)
     parts = Vector{Manifolds.TuckerPoint{eltype(backend.target)}}(undef, backend.r)
     for k = 1:backend.r
-        pk = _manifold_init(backend.manifolds[k], residual, init)
+        component = _backend_component(backend, k)
+        Mk = _backend_manifold(backend, k)
+        pk = _component_init(component, residual, init)
         parts[k] = pk
-        _subtract_ambient_tensor!(
-            residual,
-            backend.manifolds[k],
-            pk,
-            backend.component_bufs[k],
-        )
+        _subtract_ambient_tensor!(residual, Mk, pk, backend.component_bufs[k])
     end
     return ArrayPartition(parts...)
 end
@@ -86,7 +93,7 @@ end
 function _btd_block_ranks_by_mode(backend::BTDBackend{T,N}) where {T,N}
     ranks = Vector{NTuple{N,Int}}(undef, backend.r)
     for b = 1:backend.r
-        M = backend.manifolds[b]
+        M = _backend_manifold(backend, b)
         M isa Manifolds.Tucker || throw(
             ArgumentError(
                 "BTD HOSVD multistart expects Tucker manifolds, got $(typeof(M)) at block $b.",
@@ -160,7 +167,7 @@ function _btd_hosvd_split_candidate(
         parts[b] = pk
         _subtract_ambient_tensor!(
             residual,
-            backend.manifolds[b],
+            _backend_manifold(backend, b),
             pk,
             backend.component_bufs[b],
         )
@@ -190,7 +197,7 @@ function initial_point(
     init_sym = _builtin_initializer_symbol(init)
     if init_sym == :random
         parts = ntuple(
-            k -> _manifold_init(backend.manifolds[k], backend.target, init),
+            k -> _component_init(_backend_component(backend, k), backend.target, init),
             backend.r,
         )
         return ArrayPartition(parts...)
@@ -282,6 +289,9 @@ function rgrad(model::JoinModel{<:AbstractFloat,<:BTDBackend}, p)
     parts = point_parts(p)
     _check_parts_len(parts, backend.r, "BTD rgrad")
     eg = point_parts(_btd_egrad(backend, p))
-    vals = ntuple(k -> egrad_to_rgrad(backend.manifolds[k], parts[k], eg[k]), backend.r)
+    vals = ntuple(
+        k -> egrad_to_rgrad(_backend_manifold(backend, k), parts[k], eg[k]),
+        backend.r,
+    )
     return wrap_like_point(p, vals)
 end

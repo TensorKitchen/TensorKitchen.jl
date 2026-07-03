@@ -3,7 +3,7 @@ export LBFGSSolver
 
 """
     LBFGSSolver(; memory_size=1, cautious_update=true, initial_scale=1.0,
-        linesearch=:wolfe, preconditioner=nothing)
+        nonpositive_curvature_behavior=:ignore, linesearch=:wolfe, preconditioner=nothing)
 
 Limited-memory Riemannian BFGS wrapper built on `Manopt.quasi_Newton`.
 """
@@ -11,6 +11,7 @@ struct LBFGSSolver <: AbstractSecondOrderROSolver
     memory_size::Int
     cautious_update::Bool
     initial_scale::Float64
+    nonpositive_curvature_behavior::Symbol
     linesearch::Symbol
     preconditioner::Any
 end
@@ -19,6 +20,7 @@ function LBFGSSolver(;
     memory_size::Int = 1,
     cautious_update::Bool = true,
     initial_scale::Real = 1.0,
+    nonpositive_curvature_behavior::Symbol = :ignore,
     linesearch::Symbol = :wolfe,
     preconditioner = nothing,
 )
@@ -35,6 +37,7 @@ function LBFGSSolver(;
         memory_size,
         cautious_update,
         Float64(initial_scale),
+        nonpositive_curvature_behavior,
         linesearch,
         preconditioner,
     )
@@ -80,6 +83,7 @@ function solve_lbfgs(
     memory_size::Int = 1,
     cautious_update::Bool = true,
     initial_scale::Real = 1.0,
+    nonpositive_curvature_behavior::Symbol = :ignore,
     linesearch::Symbol = :wolfe,
     preconditioner = nothing,
     grad_tol = nothing,
@@ -163,8 +167,10 @@ function solve_lbfgs(
             memory_size = memory_size,
             cautious_update = cautious_update,
             initial_scale = initial_scale,
+            nonpositive_curvature_behavior = nonpositive_curvature_behavior,
             linesearch = linesearch,
             has_preconditioner = !isnothing(preconditioner),
+            uses_nonpositive_curvature_behavior = false,
         ),
     )
 end
@@ -202,6 +208,7 @@ function run_second_order_solver(
         memory_size = solver.memory_size,
         cautious_update = solver.cautious_update,
         initial_scale = solver.initial_scale,
+        nonpositive_curvature_behavior = solver.nonpositive_curvature_behavior,
         linesearch = solver.linesearch,
         preconditioner = solver.preconditioner,
         normalized_objective,

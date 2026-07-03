@@ -63,6 +63,15 @@ _btd_uses_warm_start(::AbstractSolver, ::BTDALSWarmStartInit) = true
 _btd_should_polish(::ALSSolver, ::Integer) = false
 _btd_should_polish(::AbstractSolver, polish_n::Integer) = polish_n > 0
 
+function _reject_unsupported_btd_solver(solver_obj)
+    solver_obj isa LMSolver || return nothing
+    throw(
+        ArgumentError(
+            "BTD currently does not support LM refinement because the required Manopt operator path is not yet available for nested Tucker layouts. Use :rgd, :rcg, :lbfgs, :als, or :btd_tsd instead.",
+        ),
+    )
+end
+
 function _btd_warm_start_result(
     model::JoinModel{T,<:BTDBackend},
     backend::BTDBackend,
@@ -159,7 +168,10 @@ refines it. Returns a [`BTDResult`](@ref).
     - `:als`: Alternating least squares.
     - `:rcg`: Riemannian conjugate gradient.
     - `:lbfgs`: Limited-memory quasi-Newton refinement.
-    - `:lm`: Levenberg-Marquardt refinement.
+    - `:btd_tsd`: Blockwise tangent-subspace descent for BTD.
+
+`solver = :lm` is currently not supported for BTD because the required Manopt
+LM operator path is not yet available for nested Tucker layouts.
 
 ## Extended Options
 
@@ -234,6 +246,7 @@ function btd(
     kwargs...,
 ) where {T<:AbstractFloat,N}
     solver_obj = _solver_object(solver, stepsize; kwargs...)
+    _reject_unsupported_btd_solver(solver_obj)
     solver_sym = _btd_solver_symbol(solver_obj)
     init_resolved = _resolve_btd_init(init, solver_obj)
     init_eff =

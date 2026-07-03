@@ -36,39 +36,10 @@ solver_symbol(::LMSolver) = :lm
            one(T) / sqrt(T(normA2)) : one(T)
 end
 
-function _join_tangent_ambient_vector!(
-    out::AbstractVector,
-    backend::Union{JoinBackend,BTDBackend},
-    p,
-    X,
-)
-    parts = point_parts(p)
-    xparts = point_parts(X)
-    _check_parts_len(parts, backend.r, "_join_tangent_ambient_vector!")
-    _check_parts_len(xparts, backend.r, "_join_tangent_ambient_vector!")
-    fill!(out, zero(eltype(out)))
-    components = _backend_components(backend)
-    @inbounds for k = 1:backend.r
-        _component_ambient_pushforward!(
-            backend.component_bufs[k],
-            components[k],
-            parts[k],
-            xparts[k],
-        )
-        out .+= backend.component_bufs[k]
-    end
-    return out
-end
-
-function _lm_raw_residual_vector(
-    model::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}},
-    p,
-)
-    return copy(_join_residual!(model.backend, p))
-end
+_lm_raw_residual_vector(model::AbstractDecompositionModel, p) = residual(model, p)
 
 function _lm_raw_jacobian_matrix(
-    model::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}},
+    model::AbstractDecompositionModel,
     M,
     p;
     basis = ManifoldsBase.DefaultOrthonormalBasis(),
@@ -78,179 +49,15 @@ function _lm_raw_jacobian_matrix(
     d = manifold_dimension(M)
     J = Matrix{T}(undef, ambient_dim, d)
     coeff = zeros(T, d)
-    column = similar(model.backend.work_rec, T, ambient_dim)
-    @inbounds for j = 1:d
-        fill!(coeff, zero(T))
-        coeff[j] = one(T)
-        Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-        _join_tangent_ambient_vector!(column, model.backend, p, Xj)
-        J[:, j] .= column
-    end
-    return J
-end
-
-@inline function _cp_scaled_tangent_factors(λ, U, λ̇, U̇, ::Val{:identity})
-    return λ, U, λ̇, U̇
-end
-
-@inline function _cp_scaled_tangent_factors(λ̃, Ũ, λ̇̃, U̇̃, ::Val{:square})
-    λ = λ̃ .^ 2
-    U = [Ũ[m] .^ 2 for m in eachindex(Ũ)]
-    λ̇ = 2 .* λ̃ .* λ̇̃
-    U̇ = [2 .* Ũ[m] .* U̇̃[m] for m in eachindex(Ũ)]
-    return λ, U, λ̇, U̇
-end
-
-@inline function _cp_scaled_tangent_factors(λ̃, Ũ, λ̇̃, U̇̃, ::Val{:softplus})
-    λ = _softplus_value.(λ̃)
-    U = [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)]
-    λ̇ = _softplus_derivative.(λ̃) .* λ̇̃
-    U̇ = [_softplus_derivative.(Ũ[m]) .* U̇̃[m] for m in eachindex(Ũ)]
-    return λ, U, λ̇, U̇
-end
-
-function _cp_rankr_tangent_tensorvec!(
-    out::AbstractVector{T},
-    λ::AbstractVector{T},
-    U::Vector{<:AbstractMatrix{T}},
-    λ̇::AbstractVector{T},
-    U̇::Vector{<:AbstractMatrix{T}},
-) where {T<:AbstractFloat}
-    fill!(out, zero(T))
-    r = length(λ)
-    @inbounds for k = 1:r
-        comp = ([λ[k]], [Vector(@view U[m][:, k]) for m in eachindex(U)]...)
-        xcomp = ([λ̇[k]], [Vector(@view U̇[m][:, k]) for m in eachindex(U̇)]...)
-        out .+= _segre_tangent_tensorvec(comp, xcomp)
-    end
-    return out
-end
-
-function _cp_rank1_tangent_tensorvec!(
-    out::AbstractVector{T},
-    λ::T,
-    U::Vector{<:AbstractVector{T}},
-    λ̇::T,
-    U̇::Vector{<:AbstractVector{T}},
-) where {T<:AbstractFloat}
-    comp = ([λ], U...)
-    xcomp = ([λ̇], U̇...)
-    copyto!(out, _segre_tangent_tensorvec(comp, xcomp))
-    return out
-end
-
-function _lm_raw_residual_vector(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p)
-    return _lm_raw_residual_vector(cpd_model(model), p)
-end
-
-function _lm_raw_jacobian_matrix(
-    model::JoinModel{<:AbstractFloat,<:CPDBackend},
-    M,
-    p;
-    basis = ManifoldsBase.DefaultOrthonormalBasis(),
-)
-    return _lm_raw_jacobian_matrix(cpd_model(model), M, p; basis)
-end
-
-function _lm_raw_residual_vector(model::Rank1CPDModel{T}, p) where {T<:AbstractFloat}
-    return vec(embed_point(model, p)) .- vec(model.A)
-end
-
-function _lm_raw_jacobian_matrix(
-    model::Rank1CPDModel{T},
-    M,
-    p;
-    basis = ManifoldsBase.DefaultOrthonormalBasis(),
-) where {T<:AbstractFloat}
-    ambient_dim = length(model.A)
-    d = manifold_dimension(M)
-    J = Matrix{T}(undef, ambient_dim, d)
-    coeff = zeros(T, d)
-    λp, Up = unpack_point_rank1(p, model.dims)
     column = Vector{T}(undef, ambient_dim)
     @inbounds for j = 1:d
         fill!(coeff, zero(T))
         coeff[j] = one(T)
         Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-        if model.nonnegative
-            λ̇p, U̇p = unpack_point_rank1(Xj, model.dims)
-            kind = _rank1_uses_softplus_metric(model.M) ? Val(:softplus) : Val(:square)
-            λ, U, λ̇, U̇ = _cp_scaled_tangent_factors(
-                [λp],
-                [reshape(u, :, 1) for u in Up],
-                [λ̇p],
-                [reshape(u, :, 1) for u in U̇p],
-                kind,
-            )
-            U_vec = [Vector(@view U[m][:, 1]) for m in eachindex(U)]
-            U̇_vec = [Vector(@view U̇[m][:, 1]) for m in eachindex(U̇)]
-            _cp_rank1_tangent_tensorvec!(column, λ[1], U_vec, λ̇[1], U̇_vec)
-        else
-            copyto!(column, vec(ManifoldsBase.embed(M, p, Xj)))
-        end
+        differential_action!(column, model, p, Xj)
         J[:, j] .= column
     end
     return J
-end
-
-function _lm_raw_residual_vector(model::RankRCPDModel{T}, p) where {T<:AbstractFloat}
-    return vec(embed_point(model, p)) .- vec(model.A)
-end
-
-function _lm_raw_jacobian_matrix(
-    model::RankRCPDModel{T},
-    M,
-    p;
-    basis = ManifoldsBase.DefaultOrthonormalBasis(),
-) where {T<:AbstractFloat}
-    ambient_dim = length(model.A)
-    d = manifold_dimension(M)
-    J = Matrix{T}(undef, ambient_dim, d)
-    coeff = zeros(T, d)
-    column = Vector{T}(undef, ambient_dim)
-    if model.geometry == :native && !model.nonnegative
-        pparts = point_parts(p)
-        @inbounds for j = 1:d
-            fill!(coeff, zero(T))
-            coeff[j] = one(T)
-            Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-            xparts = point_parts(Xj)
-            fill!(column, zero(T))
-            for k = 1:model.r
-                column .+= _segre_tangent_tensorvec(pparts[k], xparts[k])
-            end
-            J[:, j] .= column
-        end
-        return J
-    end
-
-    λp, Up =
-        model.nonnegative ? unpack_point_rankr(p, model.dims, model.r) :
-        unpack_rankr_canonical(p, model.dims, model.r)
-    kind =
-        model.nonnegative ?
-        (model.geometry == :softplus_metric ? Val(:softplus) : Val(:square)) :
-        Val(:identity)
-    @inbounds for j = 1:d
-        fill!(coeff, zero(T))
-        coeff[j] = one(T)
-        Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-        λ̇p, U̇p =
-            model.nonnegative ? unpack_point_rankr(Xj, model.dims, model.r) :
-            unpack_rankr_canonical(Xj, model.dims, model.r)
-        λ, U, λ̇, U̇ = _cp_scaled_tangent_factors(λp, Up, λ̇p, U̇p, kind)
-        _cp_rankr_tangent_tensorvec!(column, λ, U, λ̇, U̇)
-        J[:, j] .= column
-    end
-    return J
-end
-
-function _lm_raw_residual_vector(model::AbstractDecompositionModel, p)
-    throw(ArgumentError("LMSolver residual is not implemented for model $(typeof(model))."))
-end
-
-function _lm_raw_jacobian_matrix(model::AbstractDecompositionModel, M, p; basis)
-    throw(ArgumentError("LMSolver Jacobian is not implemented for model $(typeof(model))."))
 end
 
 function _lm_residual_function(
@@ -263,15 +70,47 @@ function _lm_residual_function(
     return (M, p) -> scale .* _lm_raw_residual_vector(model, p)
 end
 
-function _lm_jacobian_function(
+function _lm_differential_action_function(
     model::AbstractDecompositionModel,
     ::Type{T},
     normA2,
-    normalized_objective::Bool;
-    basis = ManifoldsBase.DefaultOrthonormalBasis(),
+    normalized_objective::Bool,
 ) where {T<:AbstractFloat}
     scale = _lm_scaling_factor(T, normA2, normalized_objective)
-    return (M, p) -> scale .* _lm_raw_jacobian_matrix(model, M, p; basis)
+    return (M, p, X) -> scale .* differential_action(model, p, X)
+end
+
+function _lm_adjoint_action_function(
+    model::AbstractDecompositionModel,
+    ::Type{T},
+    normA2,
+    normalized_objective::Bool,
+) where {T<:AbstractFloat}
+    scale = _lm_scaling_factor(T, normA2, normalized_objective)
+    return (M, p, a) -> adjoint_action(model, p, scale .* a)
+end
+
+function _lm_vector_differential_function(
+    model::AbstractDecompositionModel,
+    ::Type{T},
+    normA2,
+    normalized_objective::Bool,
+) where {T<:AbstractFloat}
+    ambient_dim = length(tensor(model))
+    residual_f = _lm_residual_function(model, T, normA2, normalized_objective)
+    differential_f =
+        _lm_differential_action_function(model, T, normA2, normalized_objective)
+    adjoint_f = _lm_adjoint_action_function(model, T, normA2, normalized_objective)
+    return Manopt.VectorDifferentialFunction(
+        residual_f,
+        differential_f,
+        adjoint_f,
+        ambient_dim;
+        evaluation = Manopt.AllocatingEvaluation(),
+        function_type = Manopt.FunctionVectorialType(),
+        jacobian_type = Manopt.FunctionVectorialType(),
+        adjoint_jacobian_type = Manopt.FunctionVectorialType(),
+    )
 end
 
 function solve_lm(
@@ -311,11 +150,32 @@ function solve_lm(
     )
     p0_local = setup.p0
     T = setup.T
-    basis = ManifoldsBase.DefaultOrthonormalBasis()
-    residual = _lm_residual_function(model, T, normA2, setup.uses_relative_objective)
-    jacobian = _lm_jacobian_function(model, T, normA2, setup.uses_relative_objective; basis)
-    initial_residual_values = residual(M, p0_local)
-    initial_jacobian_f = jacobian(M, p0_local)
+    vdf = _lm_vector_differential_function(model, T, normA2, setup.uses_relative_objective)
+    initial_residual_values = residual(model, p0_local)
+    scale = _lm_scaling_factor(T, normA2, setup.uses_relative_objective)
+    if scale != one(T)
+        initial_residual_values .*= scale
+    end
+    nlso = Manopt.ManifoldNonlinearLeastSquaresObjective(
+        vdf,
+        Manopt.ComponentwiseRobustifierFunction(Manopt.IdentityRobustifier()),
+    )
+    initial_jacobian_matrices = fill(nothing, 1)
+    sub_objective = Manopt.construct_lm_subobjective(
+        false,
+        nlso,
+        damping_term_min,
+        1.0e-6,
+        :Strict,
+        initial_residual_values,
+        initial_jacobian_matrices,
+    )
+    sub_state = Manopt.ConjugateResidualState(
+        TangentSpace(M, p0_local),
+        sub_objective;
+        stopping_criterion = StopAfterIteration(max(20 * manifold_dimension(M), 200)) |
+                             StopWhenGradientNormLess(T(1e-16)),
+    )
     retraction_method = _solver_retraction_method(M, p0_local)
     stopping = StopWhenAny(
         StopAfterIteration(maxiter),
@@ -342,21 +202,21 @@ function solve_lm(
     )
     state = Manopt.LevenbergMarquardt(
         M,
-        residual,
-        jacobian,
+        nlso,
         p0_local;
-        evaluation = Manopt.AllocatingEvaluation(),
-        function_type = Manopt.FunctionVectorialType(),
-        jacobian_type = Manopt.CoordinateVectorialType(basis),
         retraction_method = retraction_method,
         stopping_criterion = stopping,
         initial_residual_values = initial_residual_values,
-        initial_jacobian_f = initial_jacobian_f,
-        η = η,
+        candidate_acceptance_threshold = η,
+        damping_increase_factor = β,
+        damping_increase_threshold = η,
+        damping_reduction_threshold = expect_zero_residual ? η : Inf,
+        damping_reduction_factor = inv(T(β)),
         damping_term_min = damping_term_min,
-        β = β,
-        expect_zero_residual = expect_zero_residual,
-        linear_subsolver! = linear_subsolver,
+        initial_damping_term = damping_term_min,
+        use_unified_basis = false,
+        sub_objective = sub_objective,
+        sub_state = sub_state,
         debug = callbacks.debug_actions,
         return_state = true,
     )
@@ -382,6 +242,10 @@ function solve_lm(
             damping_term_min = Float64(damping_term_min),
             β = Float64(β),
             expect_zero_residual = expect_zero_residual,
+            uses_operator_jacobian = true,
+            uses_direct_adjoint_action = true,
+            uses_coordinate_linear_solver = false,
+            uses_user_linear_subsolver = linear_subsolver !== Manopt.default_lm_lin_solve!,
             uses_vector_transport = !isnothing(vector_transport_method),
         ),
     )

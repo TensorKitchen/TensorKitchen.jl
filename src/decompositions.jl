@@ -8,6 +8,7 @@ include("cpd/core/mttkrp.jl")
 include("cpd/core/cpd_init.jl")
 include("cpd/core/cp_cost.jl")
 include("cpd/core/reconstruct.jl")
+include("cpd/model/parameterizations.jl")
 include("cpd/model/rank1.jl")
 include("cpd/model/rankr.jl")
 

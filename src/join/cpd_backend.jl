@@ -59,6 +59,19 @@ initial_point(
 ) = initial_point(cpd_model(model), init; kwargs...)
 cost(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p) = cost(cpd_model(model), p)
 egrad(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p) = egrad(cpd_model(model), p)
+residual(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p) = residual(cpd_model(model), p)
+differential_action!(
+    out::AbstractVector,
+    model::JoinModel{<:AbstractFloat,<:CPDBackend},
+    p,
+    X,
+) = differential_action!(out, cpd_model(model), p, X)
+adjoint_action(
+    model::JoinModel{<:AbstractFloat,<:CPDBackend},
+    p,
+    a::AbstractVector;
+    kwargs...,
+) = adjoint_action(cpd_model(model), p, a; kwargs...)
 supports_rgrad(model::JoinModel{<:AbstractFloat,<:CPDBackend}) =
     supports_rgrad(cpd_model(model))
 rgrad(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p) = rgrad(cpd_model(model), p)
@@ -96,60 +109,34 @@ function _public_cpd_factors(m, λ, U)
     return λ, U
 end
 
-@inline function _decode_nonnegative_cpd(m, λ̃, Ũ)
-    use_softplus =
-        hasproperty(m, :geometry) ? (m.geometry == :softplus_metric) :
-        (hasproperty(m, :M) && _rank1_uses_softplus_metric(m.M))
-    if use_softplus
-        return _softplus_value.(λ̃), [_softplus_value.(Ũ[j]) for j in eachindex(Ũ)]
+@inline _cpd_solver_point(m, p, solver_sym::Symbol) = cpd_point(m, p)
+
+function _cpd_solver_point(
+    m::RankRCPDModel{T},
+    p,
+    solver_sym::Symbol,
+) where {T<:AbstractFloat}
+    if m.nonnegative && (solver_sym in _CP_ALS_FAMILY_SOLVERS)
+        λ, U = unpack_rankr_canonical(p, m.dims, m.r)
+        return CPDPoint(λ, U)
     end
-    return λ̃ .^ 2, [Ũ[j] .^ 2 for j in eachindex(Ũ)]
+    return cpd_point(m, p)
 end
 
 function _cpd_result(model::JoinModel{<:AbstractFloat,<:CPDBackend}, result, dims, r)
     m = cpd_model(model)
     solver_sym = _result_solver_symbol(solver(result))
     si = _result_solver_info(result)
-    als_family = solver_sym in _CP_ALS_FAMILY_SOLVERS
-
-    if r == 1
-        λ̃, U_vec = unpack_point_rank1(point(result), dims)
-        if m.nonnegative && !als_family
-            λ_vec, U_sq = _decode_nonnegative_cpd(m, [λ̃], U_vec)
-            λ = λ_vec[1]
-        else
-            λ = λ̃
-            U_sq = U_vec
-        end
-        λ_pub, U_pub = _public_cpd_factors(m, [λ], [reshape(u, :, 1) for u in U_sq])
-        return CPDResult(
-            λ_pub,
-            U_pub,
-            cost(result),
-            rel_error(result),
-            grad_norm(result),
-            iterations(result),
-            converged(result),
-            solver_sym,
-            si,
-        )
-    end
-
-    comps = if m.nonnegative && !als_family
-        λ̃, Ũ = unpack_point_rankr(point(result), dims, r)
-        λ, U = _decode_nonnegative_cpd(m, λ̃, Ũ)
-        components_from_factors(λ, U)
-    else
-        unpack_point_rankr_components(point(result), dims, r)
-    end
+    q = _cpd_solver_point(m, point(result), solver_sym)
+    λ_raw = lambda(q)
+    U_raw = factors(q)
 
     rel_err = rel_error(result)
     if !isfinite(rel_err)
-        Xhat = reconstruct_cpd_rankr([c.λ for c in comps], factors_from_components(comps))
+        Xhat = reconstruct_cpd_rankr(λ_raw, U_raw)
         rel_err = rel_error(m.A, Xhat)
     end
-    λ_pub, U_pub =
-        _public_cpd_factors(m, [c.λ for c in comps], factors_from_components(comps))
+    λ_pub, U_pub = _public_cpd_factors(m, λ_raw, U_raw)
     return CPDResult(
         λ_pub,
         U_pub,
@@ -167,29 +154,10 @@ function extract_components(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p)
     return _extract_cpd_components(cpd_model(model), p)
 end
 
-function _extract_cpd_components(m::RankRCPDModel, p)
-    comps =
-        m.nonnegative ? begin
-            λ̃, Ũ = unpack_point_rankr(p, m.dims, m.r)
-            λ, U = _decode_nonnegative_cpd(m, λ̃, Ũ)
-            components_from_factors(λ, U)
-        end : unpack_point_rankr_components(p, m.dims, m.r)
+function _extract_cpd_components(m::Union{Rank1CPDModel,RankRCPDModel}, p)
+    q = cpd_point(m, p)
+    comps = components_from_factors(lambda(q), factors(q))
     return [CPDComponent(pack_point_rank1(c.λ, c.vectors), c) for c in comps]
-end
-
-function _extract_cpd_components(m::Rank1CPDModel, p)
-    λ, U = unpack_point_rank1(p, m.dims)
-    if m.nonnegative
-        if _rank1_uses_softplus_metric(m.M)
-            λ = _softplus_value(λ)
-            U = [_softplus_value.(u) for u in U]
-        else
-            λ = λ^2
-            U = [u .^ 2 for u in U]
-        end
-    end
-    c = RankOneTensor(λ, U)
-    return [CPDComponent(pack_point_rank1(λ, U), c)]
 end
 
 function _extract_cpd_components(m, p)

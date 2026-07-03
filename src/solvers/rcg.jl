@@ -1,42 +1,6 @@
 # solvers/rcg.jl — Riemannian Conjugate Gradient
 export RCGSolver
 
-# Vector transport selection
-"""
-    _supports_vector_transport_to(M, p, vt, retraction_method)
-
-Return `true` if `vt` can transport a zero tangent vector from `p` to the
-corresponding retracted point and the result is accepted as a tangent vector.
-This is a conservative compatibility probe for Manifolds.jl / ManifoldsBase
-vector transports.
-"""
-function _supports_vector_transport_to(M, p, vt, retraction_method)
-    try
-        X = zero_vector(M, p)
-        q = retract(M, p, X, retraction_method)
-        Y = vector_transport_to(M, p, X, q, vt)
-        return isnothing(check_vector(M, q, Y))
-    catch
-        return false
-    end
-end
-
-"""
-    _default_vector_transport_method(M, p, retraction_method)
-
-Return the default vector transport method for the given manifold and point.
-If the manifold and point layout support it, use `ProjectionTransport()`.
-Otherwise, use the manifold's default vector transport method.
-"""
-function _default_vector_transport_method(M, p, retraction_method)
-    vt = ManifoldsBase.ProjectionTransport()
-    if _supports_vector_transport_to(M, p, vt, retraction_method)
-        return vt
-    end
-
-    return ManifoldsBase.default_vector_transport_method(M, typeof(p))
-end
-
 # RCG coefficient and restart rule selection
 function _rcg_coefficient_rule(
     M,
@@ -122,12 +86,10 @@ function solve_rcg(
         grad_tol,
         normalized_objective,
     )
-    # Get the initial point and the tangent space type
     p0_local = setup.p0
     T = setup.T
 
     retraction_method = _solver_retraction_method(M, p0_local)
-
     transport =
         isnothing(vector_transport_method) ?
         _default_vector_transport_method(M, p0_local, retraction_method) :
@@ -174,7 +136,7 @@ function solve_rcg(
     )
 
     return _manopt_finish_result(
-        get_solver_result(state),
+        _tk_get_solver_result(state),
         state,
         callbacks.progress,
         diagnostics_recorder,
@@ -203,30 +165,10 @@ function solve_rcg(
     )
 end
 
-# RCGSolver object
 """
     RCGSolver(; coefficient=:hager_zhang, restart=:non_descent, ...)
 
-    Riemannian conjugate gradient solver.
-
-Useful options:
-
-- `coefficient = :hager_zhang`
-- `coefficient = :polak_ribiere`
-- `coefficient = :fletcher_reeves`
-- `coefficient = :dai_yuan`
-- `coefficient = :hestenes_stiefel`
-- `coefficient = :conjugate_descent`
-- `coefficient = :steepest`
-    
-Restart options:
-
-- `restart = :non_descent`
-- `restart = :non_sufficient_descent`
-- `restart = :never`
-
-The default is chosen for CPD swamp experiments:
-RCGSolver(; coefficient=:hager_zhang, restart=:non_descent)
+Riemannian conjugate gradient solver.
 """
 Base.@kwdef struct RCGSolver <: AbstractFirstOrderROSolver
     coefficient::Symbol = :hager_zhang

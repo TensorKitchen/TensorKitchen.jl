@@ -38,7 +38,8 @@ function solve_rgd(
     p0_local = setup.p0
     T = setup.T
     retraction_method = _solver_retraction_method(M, p0_local)
-    armijo_alpha_min_T = T(armijo_alpha_min)
+    stepsize_eff_base = T(stepsize) * setup.objective_scale
+    armijo_alpha_min_T = T(armijo_alpha_min) * setup.objective_scale
     tol_g = setup.dual_grad_tol
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
     stopping = _manopt_stopping(
@@ -57,9 +58,9 @@ function solve_rgd(
             p0_local,
             setup.solver_grad,
             retraction_method,
-            T(stepsize);
+            stepsize_eff_base;
             alpha_min = armijo_alpha_min_T,
-        ) : T(stepsize)
+        ) : stepsize_eff_base
     armijo_contraction = use_squaring_armijo ? T(0.5) : T(0.85)
     armijo_sufficient_decrease = use_squaring_armijo ? T(1e-4) : T(1e-3)
     armijo_stop_decreasing =
@@ -109,7 +110,7 @@ function solve_rgd(
     )
 
     return _manopt_finish_result(
-        get_solver_result(state),
+        _tk_get_solver_result(state),
         state,
         callbacks.progress,
         diagnostics_recorder,
@@ -185,7 +186,7 @@ function solve_rgd_fixed(
         setup.solver_grad,
         p0_local;
         retraction_method = retraction_method,
-        stepsize = Manopt.ConstantStepsize(M, T(stepsize)),
+        stepsize = Manopt.ConstantStepsize(M, T(stepsize) * setup.objective_scale),
         stopping_criterion = stopping,
         debug = callbacks.debug_actions,
         count = [:Cost, :Gradient],
@@ -193,7 +194,7 @@ function solve_rgd_fixed(
     )
 
     return _manopt_finish_result(
-        get_solver_result(state),
+        _tk_get_solver_result(state),
         state,
         callbacks.progress,
         diagnostics_recorder,
@@ -211,13 +212,10 @@ function solve_rgd_fixed(
     )
 end
 
-# ========== RGDSolver (AbstractFirstOrderSolver) ==========
-
 """
     RGDSolver(stepsize=1.0; armijo_alpha_min=1e-8)
 
-Riemannian gradient descent with Armijo backtracking line search. Call via
-`solve(RGDSolver(...), model; init=:random, gradient_mode=:riemannian)`.
+Riemannian gradient descent with Armijo backtracking line search.
 """
 struct RGDSolver <: AbstractFirstOrderSolver
     stepsize::Float64
@@ -270,14 +268,10 @@ function run_first_order_solver(
     )
 end
 
-# ========== RGDFixedSolver (AbstractFirstOrderSolver) ==========
-
 """
     RGDFixedSolver(stepsize=1.0)
 
 Riemannian gradient descent with a constant stepsize.
-Used as the stable fallback for Tucker-product BTD on dependency stacks where
-Armijo's rand/allocate_result path is still unreliable.
 """
 struct RGDFixedSolver <: AbstractFirstOrderSolver
     stepsize::Float64

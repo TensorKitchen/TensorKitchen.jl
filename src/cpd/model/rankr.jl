@@ -100,20 +100,54 @@ end
 tensor(model::RankRCPDModel) = model.A
 manifold(model::RankRCPDModel) = model.M
 
+_cp_parameterization(model::RankRCPDModel) =
+    model.nonnegative ?
+    (model.geometry == :softplus_metric ? SoftplusNNCPParam() : SquaredNNCPParam()) :
+    (model.geometry == :native ? NativeCPParam() : CanonicalCPParam())
+
 function embed_point(model::RankRCPDModel{T,N}, p) where {T,N}
-    if model.nonnegative
-        λ̃, Ũ = unpack_point_rankr(p, model.dims, model.r)
-        if model.geometry == :softplus_metric
-            λ = _softplus_value.(λ̃)
-            U = [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)]
-            return reconstruct_cpd_rankr(λ, U)
-        end
-        return embed_point_rankr_nn(p, model.dims, model.r)
-    end
-    λ, U =
-        model.geometry == :native ? unpack_rankr_native(p, model.dims, model.r) :
-        unpack_rankr_canonical(p, model.dims, model.r)
-    return reconstruct_cpd_rankr(λ, U)
+    return _cp_rankr_embed_tensor(_cp_parameterization(model), model.dims, model.r, p)
+end
+
+function residual(model::RankRCPDModel{T,N}, p) where {T<:AbstractFloat,N}
+    return vec(embed_point(model, p)) .- vec(model.A)
+end
+
+function differential_action!(
+    out::AbstractVector{T},
+    model::RankRCPDModel{T,N},
+    p,
+    X,
+) where {T<:AbstractFloat,N}
+    length(out) == length(model.A) || throw(
+        DimensionMismatch(
+            "differential_action! output length $(length(out)) != ambient length $(length(model.A)).",
+        ),
+    )
+    λ, U, λ̇, U̇ = _cp_rankr_decode_tangent_factors(
+        _cp_parameterization(model),
+        model.dims,
+        model.r,
+        p,
+        X,
+    )
+    return _cp_rankr_tangent_tensorvec!(out, λ, U, λ̇, U̇)
+end
+
+function adjoint_action(
+    model::RankRCPDModel{T,N},
+    p,
+    a::AbstractVector;
+    kwargs...,
+) where {T<:AbstractFloat,N}
+    length(a) == length(model.A) || throw(
+        DimensionMismatch(
+            "adjoint_action expected ambient vector of length $(length(model.A)) for $(typeof(model)), got $(length(a)).",
+        ),
+    )
+    Aadj = reshape(a, model.dims)
+    eg = _cp_rankr_linear_egrad(_cp_parameterization(model), model.dims, model.r, p, Aadj)
+    return egrad_to_rgrad(model.M, p, eg)
 end
 
 function cost(model::RankRCPDModel{T,N}, p) where {T,N}
@@ -422,18 +456,7 @@ function initial_point(
     init == :alswarm && return initial_point(model, ALSWarmStartInit(); verbose)
     init_sym = _builtin_initializer_symbol(init)
     λ0, U0 = init_cpd_factors(model.A, model.r; init = init_sym) # initialize the factors
-    if model.nonnegative
-        if model.geometry == :softplus_metric
-            λ̃0 = _invsoftplus.(max.(abs.(λ0), eps(T)))
-            Ũ0 = [_invsoftplus.(max.(abs.(U0[m]), eps(T))) for m in eachindex(U0)]
-        else
-            λ̃0 = sqrt.(max.(abs.(λ0), eps(T)))
-            Ũ0 = [sqrt.(max.(abs.(U0[m]), eps(T))) for m in eachindex(U0)]
-        end
-        return pack_point_rankr(λ̃0, Ũ0, model.r) # structured join layout
-    end
-    return model.geometry == :native ? pack_rankr_native(λ0, U0, model.r) :
-           pack_rankr_canonical(λ0, U0, model.r) # native: ArrayPartition, canonical: tuple            
+    return _cp_rankr_seed_point(_cp_parameterization(model), λ0, U0, model.r)
 end
 
 initial_point(model::RankRCPDModel, init::PointInit; kwargs...) = init.point
@@ -445,19 +468,7 @@ supports_normalization_policy(model::RankRCPDModel, policy::AbstractNormalizatio
     policy isa Union{NoNormalization,SeparateLambdaNormalization}
 
 function cpd_point(model::RankRCPDModel{T,N}, p) where {T<:AbstractFloat,N}
-    if model.nonnegative
-        λ̃, Ũ = unpack_point_rankr(p, model.dims, model.r)
-        if model.geometry == :softplus_metric
-            return CPDPoint(
-                _softplus_value.(λ̃),
-                [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)],
-            )
-        end
-        return CPDPoint(λ̃ .^ 2, [Ũ[m] .^ 2 for m in eachindex(Ũ)])
-    end
-    λ, U =
-        model.geometry == :native ? unpack_rankr_native(p, model.dims, model.r) :
-        unpack_rankr_canonical(p, model.dims, model.r)
+    λ, U = _cp_rankr_decode_factors(_cp_parameterization(model), model.dims, model.r, p)
     return CPDPoint(λ, U)
 end
 
@@ -470,19 +481,12 @@ function pack_cpd_point(
             "CPDPoint has $(length(lambda(point))) weights, expected rank $(model.r)",
         ),
     )
-    if model.nonnegative
-        if model.geometry == :softplus_metric
-            λ̃ = _invsoftplus.(max.(lambda(point), zero(T)))
-            Ũ = [_invsoftplus.(max.(F, zero(T))) for F in factors(point)]
-        else
-            λ̃ = sqrt.(max.(lambda(point), zero(T)))
-            Ũ = [sqrt.(max.(F, zero(T))) for F in factors(point)]
-        end
-        return pack_point_rankr(λ̃, Ũ, model.r)
-    end
-    return model.geometry == :native ?
-           pack_rankr_native(lambda(point), factors(point), model.r) :
-           pack_rankr_canonical(lambda(point), factors(point), model.r)
+    return _cp_rankr_encode_point(
+        _cp_parameterization(model),
+        lambda(point),
+        factors(point),
+        model.r,
+    )
 end
 
 function post_step!(

@@ -202,6 +202,10 @@ end
         JoinModel((TensorKitchen.JoinComponent(segres[1]), segres[2], segres[3]), A)
     @test model_component.backend.components[1] isa TensorKitchen.JoinComponent
     @test map(TensorKitchen.manifold, model_component.backend.components) == segres
+    @test TensorKitchen.component_manifold(model_component.backend.components[1]) ==
+          segres[1]
+    @test TensorKitchen.component_embedding(model_component.backend.components[1]) isa
+          TensorKitchen.DefaultJoinEmbedding
 
     p = TensorKitchen.initial_point(model, :random; verbose = false)
     @test length(TensorKitchen.point_parts(p)) == 3
@@ -255,6 +259,73 @@ end
     end
 end
 
+@testset "Operator interface matches Jacobian and gradient" begin
+    A = randn(5, 4, 3)
+    cases = (
+        (
+            "generic_join",
+            JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), A),
+        ),
+        ("cp_canonical", JoinModel(A, 2; geometry = :canonical)),
+        (
+            "cp_softplus",
+            JoinModel(abs.(A), 2; geometry = :softplus_metric, nonnegative = true),
+        ),
+    )
+    for (label, model) in cases
+        M = TensorKitchen.manifold(model)
+        p = TensorKitchen._solver_point(
+            M,
+            TensorKitchen.initial_point(model, :random; verbose = false),
+        )
+        basis = ManifoldsBase.DefaultOrthonormalBasis()
+        r = TensorKitchen.residual(model, p)
+        J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
+        @testset "$label" begin
+            @test r ≈ TensorKitchen._lm_raw_residual_vector(model, p)
+            d = manifold_dimension(M)
+            for j = 1:min(d, 3)
+                coeff = zeros(Float64, d)
+                coeff[j] = 1.0
+                Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
+                @test TensorKitchen.differential_action(model, p, Xj) ≈ J[:, j]
+            end
+            g_adj = TensorKitchen.adjoint_action(model, p, r; basis)
+            g_model = TensorKitchen.rgrad(model, p)
+            @test norm(M, p, g_adj - g_model) ≤ 1e-7 * max(1.0, norm(M, p, g_model))
+        end
+    end
+end
+
+function _reference_join_jacobian_from_product_basis(model, M, p; basis)
+    backend = model.backend
+    parts = TensorKitchen.point_parts(p)
+    T = TensorKitchen._scalar_eltype(p)
+    ambient_dim = length(TensorKitchen.tensor(model))
+    d = manifold_dimension(M)
+    J = Matrix{T}(undef, ambient_dim, d)
+    coeff = zeros(T, d)
+    col = Vector{T}(undef, ambient_dim)
+    buf = Vector{T}(undef, ambient_dim)
+    for j = 1:d
+        fill!(coeff, zero(T))
+        coeff[j] = one(T)
+        Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
+        xparts = TensorKitchen.point_parts(Xj)
+        fill!(col, zero(T))
+        for k = 1:backend.r
+            TensorKitchen.component_ambient_pushforward!(
+                buf,
+                TensorKitchen._backend_component(backend, k),
+                parts[k],
+                xparts[k],
+            )
+            col .+= buf
+        end
+        J[:, j] .= col
+    end
+    return J
+end
 @testset "LM generic join Jacobian uses component pushforwards" begin
     A = randn(5, 4, 3)
     model = JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), A)
@@ -266,6 +337,33 @@ end
     basis = ManifoldsBase.DefaultOrthonormalBasis()
     J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
     @test all(isfinite, J)
+    @test sum(
+        TensorKitchen.component_tangent_dimension(
+            TensorKitchen._backend_component(model.backend, k),
+            TensorKitchen.point_parts(p)[k],
+        ) for k = 1:model.backend.r
+    ) == manifold_dimension(M)
+    J_ref = _reference_join_jacobian_from_product_basis(model, M, p; basis)
+    @test maximum(abs.(J .- J_ref)) ≤ 1e-12
+
+    parts = TensorKitchen.point_parts(p)
+    c1 = TensorKitchen._backend_component(model.backend, 1)
+    ξ1 = TensorKitchen.component_basis_vector(c1, parts[1], 1; basis)
+    buf = similar(model.backend.work_rec)
+    TensorKitchen.component_ambient_pushforward!(buf, c1, parts[1], ξ1)
+    @test maximum(abs.(buf .- J[:, 1])) ≤ 1e-10
+
+    c2 = TensorKitchen._backend_component(model.backend, 2)
+    ξ2 = TensorKitchen.component_basis_vector(c2, parts[2], 1; basis)
+    TensorKitchen.component_ambient_pushforward!(buf, c2, parts[2], ξ2)
+    offset2 = TensorKitchen.component_tangent_dimension(c1, parts[1]) + 1
+    @test maximum(abs.(buf .- J[:, offset2])) ≤ 1e-10
+
+    fill!(buf, NaN)
+    TensorKitchen.component_ambient_pushforward!(buf, c1, parts[1], ξ1)
+    fresh = similar(buf)
+    TensorKitchen.component_ambient_pushforward!(fresh, c1, parts[1], ξ1)
+    @test buf == fresh
 
     retraction_method = TensorKitchen._solver_retraction_method(M, p)
     ϵ = 1e-6
@@ -285,6 +383,109 @@ end
     end
 end
 
+@testset "LM CPD rank-r Jacobian matches finite differences across geometries" begin
+    A = randn(5, 4, 3)
+    r = 2
+    cases = (
+        (JoinModel(A, r; geometry = :canonical), 1e-7),
+        (JoinModel(A, r; geometry = :native), 1e-7),
+        (JoinModel(abs.(A), r; nonnegative = true, geometry = :squaring_metric), 5e-6),
+        (JoinModel(abs.(A), r; nonnegative = true, geometry = :softplus_metric), 5e-6),
+    )
+
+    for (model, tol_fd) in cases
+        M = TensorKitchen.manifold(model)
+        p = TensorKitchen._solver_point(
+            M,
+            TensorKitchen.initial_point(model, :random; verbose = false),
+        )
+        basis = ManifoldsBase.DefaultOrthonormalBasis()
+        J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
+        @test all(isfinite, J)
+
+        retraction_method = TensorKitchen._solver_retraction_method(M, p)
+        ϵ = 1e-6
+        d = manifold_dimension(M)
+        for j = 1:min(d, 3)
+            coeff = zeros(Float64, d)
+            coeff[j] = 1.0
+            Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
+            p_plus = ManifoldsBase.retract(M, p, ϵ * Xj, retraction_method)
+            p_minus = ManifoldsBase.retract(M, p, -ϵ * Xj, retraction_method)
+            r_plus = TensorKitchen._lm_raw_residual_vector(model, p_plus)
+            r_minus = TensorKitchen._lm_raw_residual_vector(model, p_minus)
+            fd = (r_plus .- r_minus) ./ (2 * ϵ)
+            @test maximum(abs.(fd .- J[:, j])) ≤ tol_fd
+        end
+    end
+end
+
+@testset "LM CPD Jacobian finite differences across direct parameterizations" begin
+    dims = (5, 4, 3)
+    A = randn(dims...)
+    r = 2
+    cases = (
+        ("rank1 native", TensorKitchen.Rank1CPDModel(A), 5e-7),
+        ("rank1 squared", TensorKitchen.Rank1CPDModel(abs.(A); nonnegative = true), 5e-6),
+        (
+            "rank1 softplus",
+            TensorKitchen.Rank1CPDModel(
+                abs.(A);
+                nonnegative = true,
+                use_softplus_metric = true,
+            ),
+            5e-6,
+        ),
+        ("rankr native", TensorKitchen.RankRCPDModel(A, r; geometry = :native), 5e-7),
+        ("rankr canonical", TensorKitchen.RankRCPDModel(A, r; geometry = :canonical), 5e-7),
+        (
+            "rankr squared",
+            TensorKitchen.RankRCPDModel(
+                abs.(A),
+                r;
+                nonnegative = true,
+                geometry = :squaring_metric,
+            ),
+            5e-6,
+        ),
+        (
+            "rankr softplus",
+            TensorKitchen.RankRCPDModel(
+                abs.(A),
+                r;
+                nonnegative = true,
+                geometry = :softplus_metric,
+            ),
+            5e-6,
+        ),
+    )
+
+    for (label, model, tol_fd) in cases
+        M = TensorKitchen.manifold(model)
+        p = TensorKitchen._solver_point(
+            M,
+            TensorKitchen.initial_point(model, :random; verbose = false),
+        )
+        basis = ManifoldsBase.DefaultOrthonormalBasis()
+        J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
+        @testset "$label" begin
+            @test all(isfinite, J)
+            retraction_method = TensorKitchen._solver_retraction_method(M, p)
+            ϵ = 1e-6
+            d = manifold_dimension(M)
+            r0 = TensorKitchen._lm_raw_residual_vector(model, p)
+            for j = 1:min(d, 3)
+                coeff = zeros(Float64, d)
+                coeff[j] = 1.0
+                Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
+                p_plus = ManifoldsBase.retract(M, p, ϵ * Xj, retraction_method)
+                r_plus = TensorKitchen._lm_raw_residual_vector(model, p_plus)
+                fd = (r_plus .- r0) ./ ϵ
+                @test maximum(abs.(fd .- J[:, j])) ≤ tol_fd
+            end
+        end
+    end
+end
 @testset "LM normalized and unnormalized objectives take the same step" begin
     A = randn(6, 5, 4)
     model = JoinModel(A, 2; geometry = :canonical)
@@ -319,6 +520,55 @@ end
     @test isapprox(res_rel.rel_error, res_abs.rel_error; rtol = 1e-10, atol = 1e-10)
 end
 
+@testset "CP parameterization tangent decode helpers" begin
+    dims = (3, 2, 2)
+    r = 2
+    λ̃ = [1.5, -0.4]
+    Ũ = [randn(dims[m], r) for m = 1:length(dims)]
+    λ̇̃ = randn(r)
+    U̇̃ = [randn(dims[m], r) for m = 1:length(dims)]
+    p = TensorKitchen.pack_point_rankr(λ̃, Ũ, r)
+    X = TensorKitchen.pack_point_rankr(λ̇̃, U̇̃, r)
+
+    λ_sq, U_sq, λ̇_sq, U̇_sq = TensorKitchen._cp_rankr_decode_tangent_factors(
+        TensorKitchen.SquaredNNCPParam(),
+        dims,
+        r,
+        p,
+        X,
+    )
+    @test λ_sq ≈ λ̃ .^ 2
+    @test all(U_sq[m] ≈ Ũ[m] .^ 2 for m in eachindex(U_sq))
+    @test λ̇_sq ≈ 2 .* λ̃ .* λ̇̃
+    @test all(U̇_sq[m] ≈ 2 .* Ũ[m] .* U̇̃[m] for m in eachindex(U̇_sq))
+
+    λ_sp, U_sp, λ̇_sp, U̇_sp = TensorKitchen._cp_rankr_decode_tangent_factors(
+        TensorKitchen.SoftplusNNCPParam(),
+        dims,
+        r,
+        p,
+        X,
+    )
+    @test λ_sp ≈ TensorKitchen._softplus_value.(λ̃)
+    @test all(U_sp[m] ≈ TensorKitchen._softplus_value.(Ũ[m]) for m in eachindex(U_sp))
+    @test λ̇_sp ≈ TensorKitchen._softplus_derivative.(λ̃) .* λ̇̃
+    @test all(
+        U̇_sp[m] ≈ TensorKitchen._softplus_derivative.(Ũ[m]) .* U̇̃[m] for m in eachindex(U̇_sp)
+    )
+
+    model_sp = TensorKitchen.RankRCPDModel(
+        randn(dims...),
+        r;
+        nonnegative = true,
+        geometry = :softplus_metric,
+    )
+    q_zero =
+        CPDPoint(zeros(Float64, r), [zeros(Float64, dims[m], r) for m = 1:length(dims)])
+    p_zero = TensorKitchen.pack_cpd_point(model_sp, q_zero)
+    λ_lat, U_lat = TensorKitchen.unpack_point_rankr(p_zero, dims, r)
+    @test all(isfinite, λ_lat)
+    @test all(F -> all(isfinite, F), U_lat)
+end
 @testset "cpd/approx accept LMSolver" begin
     A = randn(5, 4, 3)
     res_cpd_symbol = cpd(A, 2; solver = :lm, maxiter = 2, tol = 1e-6, verbose = false)
@@ -354,65 +604,67 @@ end
     @test res_approx.solver == :lm
 end
 
-@testset "BTD accepts LMSolver on nested Tucker layouts" begin
+@testset "BTD exposes LM residual/Jacobian hooks on nested Tucker layouts" begin
     A = randn(7, 6, 5)
     ranks = (2, 2, 2)
     manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(size(A), ranks, 2))
     backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
     model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
     p0 = TensorKitchen.initial_point(model, :random; verbose = false)
+    M = TensorKitchen.manifold(model)
+    p0_solver = TensorKitchen._solver_point(M, p0)
+    basis = ManifoldsBase.DefaultOrthonormalBasis()
 
     @test p0 isa ArrayPartition
     @test TensorKitchen.point_parts(p0)[1] isa Manifolds.TuckerPoint
+    @test p0_solver isa ArrayPartition
+    @test TensorKitchen.point_parts(p0_solver)[1] isa Manifolds.TuckerPoint
 
-    low = solve(
-        LMSolver(),
-        model;
-        p0,
-        maxiter = 2,
-        tol = 1e-6,
-        verbose = false,
-        return_stats = true,
+    residual0 = TensorKitchen._lm_raw_residual_vector(model, p0_solver)
+    J0 = TensorKitchen._lm_raw_jacobian_matrix(model, M, p0_solver; basis = basis)
+    @test length(residual0) == length(A)
+    @test size(J0) == (length(A), manifold_dimension(M))
+    @test all(isfinite, residual0)
+    @test all(isfinite, J0)
+
+    coeff = zeros(Float64, manifold_dimension(M))
+    coeff[1] = 1.0
+    X = ManifoldsBase.get_vector(M, p0_solver, coeff, basis)
+    JX = TensorKitchen.differential_action(model, p0_solver, X)
+    ambient = randn(size(A))
+    lhs = dot(JX, vec(ambient))
+    rhs = ManifoldsBase.inner(
+        M,
+        p0_solver,
+        X,
+        TensorKitchen.adjoint_action(model, p0_solver, vec(ambient)),
     )
-    low_parts = TensorKitchen.point_parts(low.point)
-    @test low.solver == :lm
-    @test low.point isa ArrayPartition
-    @test length(low_parts) == 2
-    @test low_parts[1] isa Manifolds.TuckerPoint
+    @test isapprox(lhs, rhs; atol = 1e-8, rtol = 1e-8)
+end
 
-    res_btd = btd(
+@testset "BTD rejects LMSolver until nested Tucker LM support lands" begin
+    A = randn(7, 6, 5)
+    ranks = (2, 2, 2)
+
+    @test_throws ArgumentError btd(
         A,
         2,
         ranks;
         solver = :lm,
-        warm_rel_error_gate = nothing,
         maxiter = 2,
         tol = 1e-6,
         verbose = false,
     )
-    @test res_btd isa BTDResult
-    @test res_btd.solver == :lm
-    @test length(res_btd.components) == 2
-    @test !get(res_btd.solver_info, :btd_skipped_manifold_polish, false)
 
-    res_btd_alswarm_lm = btd(
+    @test_throws ArgumentError btd(
         A,
         2,
         ranks;
-        solver = :lm,
-        init = :alswarm,
-        warm_init = BTDHOSVDMultistartInit(2; screening_steps = 0, block_maxiter = 1),
-        warm_steps = 1,
-        warm_block_maxiter = 1,
-        warm_rel_error_gate = nothing,
+        solver = LMSolver(),
         maxiter = 2,
         tol = 1e-6,
         verbose = false,
     )
-    @test res_btd_alswarm_lm isa BTDResult
-    @test res_btd_alswarm_lm.solver == :lm
-    @test hasproperty(res_btd_alswarm_lm.solver_info, :btd_als_warm_start_iters)
-    @test res_btd_alswarm_lm.solver_info.btd_als_warm_start_requested_solver == :lm
 end
 
 # =========================================================================
@@ -2215,10 +2467,44 @@ end
 
     manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(size(A), (2, 2, 2), 2))
     backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
+    @test length(backend.components) == 2
+    @test all(c -> c isa TensorKitchen.JoinComponent, backend.components)
+    @test map(TensorKitchen._component_manifold, backend.components) == manifolds
     model_btd = JoinModel{Float64,typeof(backend)}(backend)
     M_btd = TensorKitchen.manifold(model_btd)
     p_btd =
         TensorKitchen._solver_point(M_btd, TensorKitchen.initial_point(model_btd, :random))
+    basis_btd = ManifoldsBase.DefaultOrthonormalBasis()
+    J_btd =
+        TensorKitchen._lm_raw_jacobian_matrix(model_btd, M_btd, p_btd; basis = basis_btd)
+    @test all(isfinite, J_btd)
+    @test sum(
+        TensorKitchen.component_tangent_dimension(
+            TensorKitchen._backend_component(backend, k),
+            TensorKitchen.point_parts(p_btd)[k],
+        ) for k = 1:backend.r
+    ) == manifold_dimension(M_btd)
+    J_btd_ref = _reference_join_jacobian_from_product_basis(
+        model_btd,
+        M_btd,
+        p_btd;
+        basis = basis_btd,
+    )
+    @test maximum(abs.(J_btd .- J_btd_ref)) ≤ 1e-12
+
+    retraction_method_btd = TensorKitchen._solver_retraction_method(M_btd, p_btd)
+    residual0_btd = TensorKitchen._lm_raw_residual_vector(model_btd, p_btd)
+    ϵ_btd = 1e-6
+    for j = 1:min(manifold_dimension(M_btd), 2)
+        coeff = zeros(Float64, manifold_dimension(M_btd))
+        coeff[j] = 1.0
+        Xj = ManifoldsBase.get_vector(M_btd, p_btd, coeff, basis_btd)
+        p_plus = ManifoldsBase.retract(M_btd, p_btd, ϵ_btd * Xj, retraction_method_btd)
+        r_plus = TensorKitchen._lm_raw_residual_vector(model_btd, p_plus)
+        fd = (r_plus .- residual0_btd) ./ ϵ_btd
+        @test maximum(abs.(fd .- J_btd[:, j])) ≤ 5e-6
+    end
+
     parts_btd = TensorKitchen.point_parts(p_btd)
     residual_btd = TensorKitchen._join_residual!(backend, p_btd)
     tangent_dot_btd(a, b) = begin
@@ -2230,8 +2516,11 @@ end
     end
     for b = 1:backend.r
         fast_eg = TensorKitchen._btd_block_egrad(backend, parts_btd, b)
-        residual_eg =
-            TensorKitchen._tucker_egrad(backend.manifolds[b], parts_btd[b], residual_btd)
+        residual_eg = TensorKitchen._tucker_egrad(
+            TensorKitchen._backend_manifold(backend, b),
+            parts_btd[b],
+            residual_btd,
+        )
         @test norm(getproperty(fast_eg, :Ċ) - getproperty(residual_eg, :Ċ)) < 1e-10
         @test all(
             norm(F - R) < 1e-10 for
@@ -2243,7 +2532,11 @@ end
         q_btd = TensorKitchen._replace_block_part(
             p_btd,
             b,
-            retract(backend.manifolds[b], parts_btd[b], (-h) * block_grad),
+            retract(
+                TensorKitchen._backend_manifold(backend, b),
+                parts_btd[b],
+                (-h) * block_grad,
+            ),
         )
         fd =
             (TensorKitchen.cost(model_btd, q_btd) - TensorKitchen.cost(model_btd, p_btd)) /
