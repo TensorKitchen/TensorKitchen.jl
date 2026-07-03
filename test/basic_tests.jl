@@ -553,7 +553,8 @@ end
     @test all(U_sp[m] ≈ TensorKitchen._softplus_value.(Ũ[m]) for m in eachindex(U_sp))
     @test λ̇_sp ≈ TensorKitchen._softplus_derivative.(λ̃) .* λ̇̃
     @test all(
-        U̇_sp[m] ≈ TensorKitchen._softplus_derivative.(Ũ[m]) .* U̇̃[m] for m in eachindex(U̇_sp)
+        U̇_sp[m] ≈ TensorKitchen._softplus_derivative.(Ũ[m]) .* U̇̃[m] for
+        m in eachindex(U̇_sp)
     )
 
     model_sp = TensorKitchen.RankRCPDModel(
@@ -640,6 +641,31 @@ end
         TensorKitchen.adjoint_action(model, p0_solver, vec(ambient)),
     )
     @test isapprox(lhs, rhs; atol = 1e-8, rtol = 1e-8)
+end
+
+@testset "BTD rejects LMSolver until nested Tucker LM support lands" begin
+    A = randn(7, 6, 5)
+    ranks = (2, 2, 2)
+
+    @test_throws ArgumentError btd(
+        A,
+        2,
+        ranks;
+        solver = :lm,
+        maxiter = 2,
+        tol = 1e-6,
+        verbose = false,
+    )
+
+    @test_throws ArgumentError btd(
+        A,
+        2,
+        ranks;
+        solver = LMSolver(),
+        maxiter = 2,
+        tol = 1e-6,
+        verbose = false,
+    )
 end
 
 # =========================================================================
