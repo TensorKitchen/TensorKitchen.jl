@@ -17,8 +17,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  run_tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: "1"
+
+      - uses: julia-actions/cache@v3
+
+      - name: Instantiate package environment
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+
+      - name: Run tests
+        run: julia --project=. -e 'using Pkg; Pkg.test()'
+
   build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v6
 
@@ -44,16 +63,21 @@ jobs:
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: 
-      - build
+
+    needs:
       - run_tests
+      - build
+
     permissions:
       pages: write
       id-token: write
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+
     runs-on: ubuntu-latest
+
     steps:
       - id: deployment
         uses: actions/deploy-pages@v5
