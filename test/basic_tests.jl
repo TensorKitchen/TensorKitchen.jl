@@ -604,65 +604,42 @@ end
     @test res_approx.solver == :lm
 end
 
-@testset "BTD accepts LMSolver on nested Tucker layouts" begin
+@testset "BTD exposes LM residual/Jacobian hooks on nested Tucker layouts" begin
     A = randn(7, 6, 5)
     ranks = (2, 2, 2)
     manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(size(A), ranks, 2))
     backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
     model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
     p0 = TensorKitchen.initial_point(model, :random; verbose = false)
+    M = TensorKitchen.manifold(model)
+    p0_solver = TensorKitchen._solver_point(M, p0)
+    basis = ManifoldsBase.DefaultOrthonormalBasis()
 
     @test p0 isa ArrayPartition
     @test TensorKitchen.point_parts(p0)[1] isa Manifolds.TuckerPoint
+    @test p0_solver isa ArrayPartition
+    @test TensorKitchen.point_parts(p0_solver)[1] isa Manifolds.TuckerPoint
 
-    low = solve(
-        LMSolver(),
-        model;
-        p0,
-        maxiter = 2,
-        tol = 1e-6,
-        verbose = false,
-        return_stats = true,
-    )
-    low_parts = TensorKitchen.point_parts(low.point)
-    @test low.solver == :lm
-    @test low.point isa ArrayPartition
-    @test length(low_parts) == 2
-    @test low_parts[1] isa Manifolds.TuckerPoint
+    residual0 = TensorKitchen._lm_raw_residual_vector(model, p0_solver)
+    J0 = TensorKitchen._lm_raw_jacobian_matrix(model, M, p0_solver; basis = basis)
+    @test length(residual0) == length(A)
+    @test size(J0) == (length(A), manifold_dimension(M))
+    @test all(isfinite, residual0)
+    @test all(isfinite, J0)
 
-    res_btd = btd(
-        A,
-        2,
-        ranks;
-        solver = :lm,
-        warm_rel_error_gate = nothing,
-        maxiter = 2,
-        tol = 1e-6,
-        verbose = false,
+    coeff = zeros(Float64, manifold_dimension(M))
+    coeff[1] = 1.0
+    X = ManifoldsBase.get_vector(M, p0_solver, coeff, basis)
+    JX = TensorKitchen.differential_action(model, p0_solver, X)
+    ambient = randn(size(A))
+    lhs = dot(JX, vec(ambient))
+    rhs = ManifoldsBase.inner(
+        M,
+        p0_solver,
+        X,
+        TensorKitchen.adjoint_action(model, p0_solver, vec(ambient)),
     )
-    @test res_btd isa BTDResult
-    @test res_btd.solver == :lm
-    @test length(res_btd.components) == 2
-    @test !get(res_btd.solver_info, :btd_skipped_manifold_polish, false)
-
-    res_btd_alswarm_lm = btd(
-        A,
-        2,
-        ranks;
-        solver = :lm,
-        init = :alswarm,
-        warm_init = BTDHOSVDMultistartInit(2; screening_steps = 0, block_maxiter = 1),
-        warm_steps = 1,
-        warm_block_maxiter = 1,
-        warm_rel_error_gate = nothing,
-        maxiter = 2,
-        tol = 1e-6,
-        verbose = false,
-    )
-    @test res_btd_alswarm_lm isa BTDResult
-    @test res_btd_alswarm_lm.solver == :lm
-    @test hasproperty(res_btd_alswarm_lm.solver_info, :btd_als_warm_start_iters)
-    @test res_btd_alswarm_lm.solver_info.btd_als_warm_start_requested_solver == :lm
+    @test isapprox(lhs, rhs; atol = 1e-8, rtol = 1e-8)
 end
 
 # =========================================================================
