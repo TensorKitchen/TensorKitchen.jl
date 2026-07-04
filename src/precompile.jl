@@ -8,10 +8,7 @@ if Base.VERSION >= v"1.9"
         A_med = randn(rng, 6, 5, 4)
 
         model = JoinModel(A, 2; geometry = :canonical)
-        p0 = _solver_point(
-            manifold(model),
-            initial_point(model, :random; verbose = false),
-        )
+        p0 = _solver_point(manifold(model), initial_point(model, :random; verbose = false))
         model_med = JoinModel(A_med, 2; geometry = :canonical)
         p0_med = _solver_point(
             manifold(model_med),
