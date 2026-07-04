@@ -42,7 +42,8 @@ Most optimization APIs share this core pattern:
 3. Convert to a public result struct
 
 `_solve_model` lives in `src/solvers/solve_dispatch.jl` and is the common
-symbol-to-solver dispatch layer (`:rgd`, `:rcg`, `:lbfgs`, `:als`, `:btd_tsd`).
+symbol-to-solver dispatch layer (`:rgd`, `:rgd_fixed`, `:rcg`, `:lbfgs`, `:lm`,
+`:als`, `:btd_tsd`).
 
 ## API flows
 
@@ -58,7 +59,7 @@ symbol-to-solver dispatch layer (`:rgd`, `:rcg`, `:lbfgs`, `:als`, `:btd_tsd`).
 Notes:
 
 - `:als` means CP-ALS.
-- Manifold solvers (`:rgd`, `:rgd_fixed`, `:rcg`, `:lbfgs`) share dispatch with other pipelines.
+- Manifold solvers (`:rgd`, `:rgd_fixed`, `:rcg`, `:lbfgs`, `:lm`) share dispatch with other pipelines.
 - For `solver != :als`, `init = :auto` resolves to `:alswarm`, so CPD and NNCPD start from an ALS warm point before manifold refinement.
 - Generic `approx(...)` does not use CPD's ALS warm-start path unless it auto-routes to `cpd(...)`.
 

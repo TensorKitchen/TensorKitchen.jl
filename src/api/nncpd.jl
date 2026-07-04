@@ -14,6 +14,8 @@ end
 Computes a nonnegative rank-`r` CP approximation of `A` in two steps: (1) the first step finds an initial point; (2) the second step refines the initial point. Returns a [`CPDResult`](@ref). 
 If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
 `cpd(A, r; nonnegative=true, ...)` routes here and adopts the same effective defaults.
+With the default manifold refinement path, this means an ALS warm start followed
+by `solver = :rgd`.
 
 ## Options 
 The options are the same as for [`cpd`](@ref).

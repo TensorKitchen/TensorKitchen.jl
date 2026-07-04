@@ -988,20 +988,20 @@ If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
         - `:random`: Uses a random initial point.
         - `:hosvd`: Uses a HOSVD initial point.
 * `solver = :rgd`: Sets the algorithm for refinement. Possible options are:
-    - `rgd` (default): Riemannian gradient descent
-    - `rgd_fixed`: Riemannian gradient descent with fixed step size
-    - `rcg`: Riemannian conjugate gradient
-    - `lbfgs`: Limited-memory Riemannian quasi-Newton
-    - `lm`: Levenberg-Marquardt using residual/Jacobian least squares
-    - `als`: Alternating Least Squares
+  - `rgd` (default): Riemannian gradient descent
+  - `rgd_fixed`: Riemannian gradient descent with fixed step size
+  - `rcg`: Riemannian conjugate gradient
+  - `lbfgs`: Limited-memory Riemannian quasi-Newton
+  - `lm`: Levenberg-Marquardt using residual/Jacobian least squares
+  - `als`: Alternating Least Squares
 
 ## Extended Options
 * `p0 = nothing`: Explicit initial point. If provided, it overrides the default initial point.
 * `:alswarm`: ALS warm start option.
     - `warm_init = TuckerInit()`: Before finding the warm start initial point, this sets the good starting point for ALS.
     - `warm_steps = 500`: Once finding the best initial point from warm_init, it runs this many ALS iterations to refine the initial point.
-* `maxiter = 500`: Maximum number of Riemannian gradient descent iterations.
-* `stepsize`: Initial step size for line search in Riemannian gradient descent. Defaults to `1.0` for ordinary CPD and `0.01` for the nonnegative route.
+* `maxiter = 500`: Maximum number of refinement iterations.
+* `stepsize`: Initial step size for first-order line-search solvers. Defaults to `1.0` for ordinary CPD and `0.01` for the nonnegative route.
 * `armijo_alpha_min = 1e-8`: Minimum Armijo line-search step size for `solver = :rgd`.
 * `tol = 1e-6`: Convergence tolerance.
 * `gradient_mode = :riemannian`: Gradient rule for manifold solvers. 
