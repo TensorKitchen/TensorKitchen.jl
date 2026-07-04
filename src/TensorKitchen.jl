@@ -6,6 +6,7 @@ using Random
 using ManifoldsBase
 using Manifolds
 using Manopt
+using PrecompileTools
 import ProgressMeter
 using RecursiveArrayTools
 using TensorOperations
@@ -19,6 +20,7 @@ include("manifolds.jl")
 include("decompositions.jl")
 include("backend.jl")
 include("api.jl")
+include("precompile.jl")
 
 function __init__()
     return nothing
