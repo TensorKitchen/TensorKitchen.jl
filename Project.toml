@@ -1,6 +1,6 @@
 name = "TensorKitchen"
 uuid = "3630a16b-0f2f-4d88-afbf-c7d59eccf553"
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 JuliaFormatter = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
