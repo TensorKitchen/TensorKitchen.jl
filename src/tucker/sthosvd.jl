@@ -65,7 +65,7 @@ end
     sthosvd(A, ranks; [processing_order], [svd_backend], [verbose])
     Computes the rank-(r₁,…,r_d) Sequentially Truncated HOSVD (ST-HOSVD).
 
-# Algorithm (Definition 6.1, Algorithm 1)
+# Exact algorithm (Definition 6.1, Algorithm 1)
 Given tensor A ∈ ℝ^{n₁×⋯×n_d} and target multilinear rank (r₁,…,r_d):
 
 1. Set Ŝ₀ = A
@@ -75,6 +75,41 @@ Given tensor A ∈ ℝ^{n₁×⋯×n_d} and target multilinear rank (r₁,…,r_
    c. Set Û_{p[k]} = first r_{p[k]} left singular vectors
    d. Ŝₖ = Ŝ_{k-1} ×_{p[k]} Û_{p[k]}ᵀ   (project and shrink)
 3. Return core Ŝ_d and factor matrices Û₁,…,Û_d
+
+# Implicit randomized backend
+
+For the current sequential core `S`, let its conceptual mode-`k` unfolding be
+`A_(k) ∈ ℝ^(n_k × N_k)`, where `N_k = ∏_{j≠k} n_j`. For target rank `r_k`, set
+the sketch size to `ℓ = min(r_k + oversampling, n_k, N_k)`. The randomized
+backend then performs:
+
+1. Gaussian range finding: `Y = A_(k) Ω_k`, where
+   `Ω_k ∈ ℝ^(N_k × ℓ)` has independent standard-normal entries.
+2. Basis construction: `Q = qr(Y)`, retaining `ℓ` orthonormal columns.
+3. Optional power iteration: repeatedly approximate the range of
+   `A_(k) A_(k)ᵀ Q`, with re-orthogonalization after every iteration.
+4. Projection: `B = Qᵀ A_(k)`, stored with the shape of a tensor whose mode `k`
+   has length `ℓ`.
+5. Rayleigh-Ritz refinement: eigendecompose the small Gram matrix
+   `B Bᵀ ∈ ℝ^(ℓ × ℓ)`, retain its leading `r_k` eigenvectors in `R`, and set
+   `U_k = Q R` and `S_new = Rᵀ B`.
+
+This is a Gaussian projection of all conceptual unfolding columns, not random
+column selection. Neither `A_(k)` nor the complete `Ω_k` is constructed. The
+products in steps 1, 3, and 4 are evaluated as blockwise tensor contractions.
+The implementation materializes only the small sketch and basis, the small Gram
+matrix, and the progressively compressed tensor `B`/`S_new`.
+
+# References
+- N. Halko, P. G. Martinsson, and J. A. Tropp, "Finding Structure with
+  Randomness: Probabilistic Algorithms for Constructing Approximate Matrix
+  Decompositions," *SIAM Review*, 53(2), 217–288, 2011.
+  DOI: `10.1137/090771806`.
+
+The reference provides the Gaussian range-finder and power-iteration framework
+applied here to each conceptual mode unfolding. Evaluating those matrix products
+through blockwise tensor contractions is TensorKitchen's implementation strategy
+for efficient computation.
 
 # Arguments
 - `A::Array{T,N}`: input tensor
@@ -189,6 +224,31 @@ end
     return Matrix{T}(Q[:, 1:count])
 end
 
+"""
+    _randomized_implicit_mode_step(A, mode, rank, rng;
+        oversampling, power_iterations, block_columns)
+
+Approximate the leading rank-`rank` left singular subspace of the conceptual
+mode-`mode` unfolding `A_(mode)` without materializing that unfolding.
+
+With `ℓ = rank + oversampling` (bounded by the unfolding dimensions), the method
+computes the Gaussian sketch `Y = A_(mode) Ω`, obtains `Q = qr(Y)`, and stores the
+projection `B = Qᵀ A_(mode)` in tensor form. Each power iteration applies the
+equivalent of `A_(mode) A_(mode)ᵀ Q` using `_implicit_mode_cross` and
+`_implicit_mode_product`. It then diagonalizes the small matrix `B Bᵀ`, rotates
+`Q` by the leading eigenvectors, and applies the same rotation to `B` to produce
+the sequentially reduced core.
+
+`_implicit_mode_sketch` generates `Ω` in blocks containing approximately at most
+`block_columns` conceptual unfolding columns. Consequently, neither the full
+unfolding nor the full Gaussian matrix is allocated. The returned singular values
+are Rayleigh-Ritz approximations for the retained subspace only; discarded
+singular values are unavailable.
+
+This mode step adapts the randomized range-finding and power-iteration framework
+of N. Halko, P. G. Martinsson, and J. A. Tropp, *SIAM Review* 53(2), 217–288,
+2011, DOI: `10.1137/090771806`.
+"""
 function _randomized_implicit_mode_step(
     A::AbstractArray{T,N},
     mode::Int,
