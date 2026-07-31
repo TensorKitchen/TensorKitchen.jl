@@ -54,6 +54,108 @@ end
     @test size(td_th.core) == r
 end
 
+@testset "implicit randomized ST-HOSVD" begin
+    rng = MersenneTwister(1701)
+
+    # Generic tensor contractions must agree with the historical unfolding-based
+    # implementations for every mode, including tensors above order three.
+    A4 = randn(rng, Float64, 7, 6, 5, 4)
+    for mode = 1:4
+        U = randn(rng, Float64, 3, size(A4, mode))
+        implicit_product =
+            TensorKitchen._implicit_mode_product(A4, U, mode; block_columns = 5)
+        @test implicit_product ≈ mode_n_product(A4, U, mode)
+
+        Bdims = ntuple(m -> m == mode ? 2 : size(A4, m), 4)
+        B4 = randn(rng, Float64, Bdims)
+        implicit_cross = TensorKitchen._implicit_mode_cross(A4, B4, mode; block_columns = 5)
+        explicit_cross = unfold_mode(A4, mode) * transpose(unfold_mode(B4, mode))
+        @test implicit_cross ≈ explicit_cross
+    end
+
+    # With one block, the implicit Gaussian projection is exactly the explicit
+    # mode unfolding multiplied by the same random matrix.
+    A3 = randn(rng, Float32, 9, 8, 7)
+    for mode = 1:3
+        sketch_rank = 4
+        implicit_rng = MersenneTwister(900 + mode)
+        explicit_rng = MersenneTwister(900 + mode)
+        implicit_sketch = TensorKitchen._implicit_mode_sketch(
+            A3,
+            mode,
+            sketch_rank,
+            implicit_rng;
+            block_columns = length(A3),
+        )
+        other_modes = [m for m = 1:3 if m != mode]
+        omega_dims = Tuple(vcat([size(A3, m) for m in other_modes], sketch_rank))
+        omega = randn(explicit_rng, Float32, omega_dims)
+        explicit_sketch = unfold_mode(A3, mode) * reshape(omega, :, sketch_rank)
+        @test implicit_sketch ≈ explicit_sketch rtol = 5e-6 atol = 5e-6
+    end
+
+    # The public backend is deterministic for a fixed RNG and remains close to
+    # deterministic ST-HOSVD on a low-rank tensor with small dense noise.
+    dims = (36, 28, 20)
+    ranks = (7, 6, 5)
+    latent_core = randn(rng, Float32, ranks)
+    latent_factors =
+        [Matrix(qr(randn(rng, Float32, dims[m], ranks[m])).Q[:, 1:ranks[m]]) for m = 1:3]
+    target = reconstruct_tucker(latent_core, latent_factors)
+    target .+= 1.0f-3 .* randn(rng, Float32, dims)
+
+    exact = sthosvd(target, ranks; processing_order = [2, 3, 1])
+    randomized1 = sthosvd(
+        target,
+        ranks;
+        processing_order = [2, 3, 1],
+        svd_backend = :randomized,
+        oversampling = 6,
+        power_iterations = 1,
+        block_columns = 128,
+        rng = MersenneTwister(44),
+    )
+    randomized2 = sthosvd(
+        target,
+        ranks;
+        processing_order = [2, 3, 1],
+        svd_backend = :randomized,
+        oversampling = 6,
+        power_iterations = 1,
+        block_columns = 128,
+        rng = MersenneTwister(44),
+    )
+
+    @test size(core(randomized1)) == ranks
+    @test core(randomized1) ≈ core(randomized2)
+    @test all(factors(randomized1)[m] ≈ factors(randomized2)[m] for m = 1:3)
+    @test all(
+        isapprox(
+            transpose(factors(randomized1)[m]) * factors(randomized1)[m],
+            I;
+            rtol = 2e-5,
+            atol = 2e-5,
+        ) for m = 1:3
+    )
+    @test relative_error(target, randomized1) <= 1.05 * relative_error(target, exact)
+    @test all(isempty, singular_values(randomized1))
+    @test_throws ArgumentError error_bound(randomized1)
+
+    @test_throws ArgumentError sthosvd(target, ranks; svd_backend = :unknown)
+    @test_throws ArgumentError sthosvd(
+        target,
+        ranks;
+        svd_backend = :randomized,
+        oversampling = -1,
+    )
+    @test_throws ArgumentError sthosvd(
+        target,
+        ranks;
+        svd_backend = :randomized,
+        block_columns = 0,
+    )
+end
+
 # =========================================================================
 # tucker/hooi.jl
 # =========================================================================

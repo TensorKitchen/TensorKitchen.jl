@@ -23,6 +23,34 @@ core(tucker_res)
 factors(tucker_res)
 ```
 
+## Large tensors without explicit unfoldings
+
+For a fixed multilinear rank, ST-HOSVD can use an implicit randomized backend:
+
+```julia
+using Random
+
+tucker_res = tucker(
+    A,
+    (100, 40, 60);
+    method = :sthosvd,
+    svd_backend = :randomized,
+    processing_order = [2, 3, 1],
+    oversampling = 16,
+    power_iterations = 1,
+    block_columns = 65_536,
+    rng = MersenneTwister(0),
+)
+```
+Instead of constructing ``A_{(k)}``, the backend evaluates randomized projections
+and subspace iterations as tensor contractions. The Gaussian sketch is generated in 
+bounded blocks, and the input is not copied before its first mode projection. This
+substantially reduces memory when the tensor is large and the requested ranks are
+small relative to the mode dimensions.
+The exact backend remains the default and is generally preferable for small tensors,
+near-full ranks. Randomized results do not support `error_bound`, because discarded
+singular values are not computed.
+
 ## Tucker Docs
 
 ```@docs

@@ -62,7 +62,7 @@ end
 
 
 """
-    sthosvd(A, ranks; [processing_order], [verbose])
+    sthosvd(A, ranks; [processing_order], [svd_backend], [verbose])
     Computes the rank-(r₁,…,r_d) Sequentially Truncated HOSVD (ST-HOSVD).
 
 # Algorithm (Definition 6.1, Algorithm 1)
@@ -82,6 +82,14 @@ Given tensor A ∈ ℝ^{n₁×⋯×n_d} and target multilinear rank (r₁,…,r_
 
 # Keyword arguments
 - `processing_order::Vector{Int}`: order in which to process modes (default: heuristic)
+- `svd_backend::Symbol`: `:exact` materializes each unfolding and uses a conventional
+  SVD; `:randomized` computes a truncated left singular subspace from implicit tensor
+  contractions without materializing the unfolding (default: `:exact`)
+- `oversampling::Int`: additional randomized sketch dimensions (default: `16`)
+- `power_iterations::Int`: randomized subspace power iterations (default: `1`)
+- `block_columns::Int`: approximate maximum number of implicit unfolding columns per
+  random-projection block (default: `65_536`)
+- `rng::AbstractRNG`: random-number generator used by `:randomized`
 - `verbose::Bool`: print progress information (default: false)
 
 # Returns
@@ -99,6 +107,11 @@ function sthosvd(
     A::AbstractArray{T,N},
     ranks::NTuple{N,Int};
     processing_order::Vector{Int} = optimal_mode_order(size(A), ranks),
+    svd_backend::Symbol = :exact,
+    oversampling::Int = 16,
+    power_iterations::Int = 1,
+    block_columns::Int = 65_536,
+    rng::AbstractRNG = Random.default_rng(),
     verbose::Bool = false,
 ) where {T<:AbstractFloat,N}
     dims = size(A)
@@ -109,35 +122,59 @@ function sthosvd(
         @assert 1 <= ranks[k] <= dims[k] "Rank r[$k]=$(ranks[k]) must be in [1, $(dims[k])]"
     end
     @assert sort(processing_order) == 1:d "processing_order must be a permutation of 1:$d"
+    svd_backend in (:exact, :randomized) || throw(
+        ArgumentError("svd_backend must be :exact or :randomized; received $svd_backend"),
+    )
+    oversampling >= 0 || throw(ArgumentError("oversampling must be nonnegative"))
+    power_iterations >= 0 || throw(ArgumentError("power_iterations must be nonnegative"))
+    block_columns >= 1 || throw(ArgumentError("block_columns must be positive"))
 
     progress =
         d > 0 ? make_sthosvd_progress(d; enabled = verbose, phase = :refinement, dt = 0.2) :
         NoMethodProgress()
 
-    # Initialize
-    S = copy(A)  # Ŝ₀ = A (will be progressively truncated)
+    # The randomized backend keeps a reference to an mmap/lazy input until the
+    # first projection instead of creating a tensor-sized input copy.
+    S = svd_backend === :exact ? copy(A) : A
     factors = Vector{Matrix{T}}(undef, d)
     singular_vals = Vector{Vector{T}}(undef, d)
 
     for (step, k) in enumerate(processing_order)
         rk = ranks[k]
 
-        Sk_unfold = unfold_mode(S, k)
-
-        F = svd(Sk_unfold)
-        rk_actual = min(rk, length(F.S))
-
-        Uk = Matrix(@view F.U[:, 1:rk_actual])
-        singular_vals[k] = F.S
-
-        factors[k] = Uk
-
-        S = mode_n_product(S, Uk', k)
+        if svd_backend === :exact
+            Sk_unfold = unfold_mode(S, k)
+            F = svd(Sk_unfold)
+            rk_actual = min(rk, length(F.S))
+            Uk = Matrix(@view F.U[:, 1:rk_actual])
+            singular_vals[k] = F.S
+            factors[k] = Uk
+            S = mode_n_product(S, Uk', k)
+        else
+            Uk, S, _ = _randomized_implicit_mode_step(
+                S,
+                k,
+                rk,
+                rng;
+                oversampling,
+                power_iterations,
+                block_columns,
+            )
+            factors[k] = Uk
+            # The implicit range finder does not compute the complete discarded
+            # spectrum needed by `error_bound`.
+            singular_vals[k] = T[]
+        end
 
         verbose && update_progress!(
             progress,
             step;
-            showvalues = Any[("Mode", k), ("Target rank", rk), ("Core size", size(S))],
+            showvalues = Any[
+                ("Mode", k),
+                ("Target rank", rk),
+                ("SVD backend", svd_backend),
+                ("Core size", size(S)),
+            ],
         )
     end
 
@@ -145,6 +182,53 @@ function sthosvd(
         finish_progress!(progress; showvalues = Any[("Status", "Completed"), ("Steps", d)])
 
     return TuckerResult{T,N}(S, factors, processing_order, singular_vals)
+end
+
+@inline function _orthonormal_columns(Y::AbstractMatrix{T}, count::Int) where {T}
+    Q = qr(Y).Q
+    return Matrix{T}(Q[:, 1:count])
+end
+
+function _randomized_implicit_mode_step(
+    A::AbstractArray{T,N},
+    mode::Int,
+    rank::Int,
+    rng::AbstractRNG;
+    oversampling::Int,
+    power_iterations::Int,
+    block_columns::Int,
+) where {T<:AbstractFloat,N}
+    column_count = div(length(A), size(A, mode))
+    sketch_rank = min(rank + oversampling, size(A, mode), column_count)
+    retained_rank = min(rank, sketch_rank)
+
+    Y = _implicit_mode_sketch(A, mode, sketch_rank, rng; block_columns)
+    Q = _orthonormal_columns(Y, sketch_rank)
+    projected = _implicit_mode_product(A, transpose(Q), mode; block_columns)
+
+    # Apply A_(mode) * A_(mode)' through tensor contractions. Neither the mode
+    # unfolding nor its transpose is materialized.
+    for _ = 1:power_iterations
+        Y = _implicit_mode_cross(A, projected, mode; block_columns)
+        Q = _orthonormal_columns(Y, sketch_rank)
+        projected = _implicit_mode_product(A, transpose(Q), mode; block_columns)
+    end
+
+    # Rayleigh-Ritz refinement within the randomized range. `projected` is
+    # Q' * A_(mode), stored with its tensor shape, so its small left Gram matrix
+    # can also be obtained without an unfolding.
+    gram = _implicit_mode_cross(projected, projected, mode; block_columns)
+    gram = (gram + transpose(gram)) / T(2)
+    decomposition = eigen(Symmetric(gram))
+    order = sortperm(decomposition.values; rev = true)
+    selected = order[1:retained_rank]
+    rotation = Matrix{T}(decomposition.vectors[:, selected])
+    eigenvalues = max.(decomposition.values[selected], zero(T))
+    approximate_singular_values = sqrt.(eigenvalues)
+
+    factor = Q * rotation
+    core = _implicit_mode_product(projected, transpose(rotation), mode; block_columns)
+    return factor, core, approximate_singular_values
 end
 
 
@@ -321,6 +405,12 @@ function error_bound(td::TuckerResult{T,N}) where {T,N}
     for k = 1:N
         rk = size(td.core, k)
         sigma = td.singular_values[k]
+        isempty(sigma) && throw(
+            ArgumentError(
+                "error_bound requires complete per-mode singular spectra; " *
+                "they are unavailable for randomized ST-HOSVD results",
+            ),
+        )
         if rk < length(sigma)
             sq_error += sum(sigma[(rk+1):end] .^ 2)
         end
