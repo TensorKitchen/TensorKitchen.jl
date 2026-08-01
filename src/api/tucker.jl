@@ -21,6 +21,33 @@ For `method = :hooi`:
     - `:sthosvd`: Uses ST-HOSVD to initialize the Tucker factors.
     - `TuckerResult`: Uses an existing Tucker decomposition as the initial point.
 
+For fixed-rank `method = :sthosvd`:
+
+* `svd_backend = :exact` preserves the deterministic dense implementation.
+* `svd_backend = :randomized` computes truncated mode subspaces through implicit
+  tensor contractions. It avoids materializing mode unfoldings and is intended for
+  large tensors whose target ranks are much smaller than their mode dimensions.
+* `oversampling = 16`, `power_iterations = 1`, `block_columns = 65_536`, and
+  `rng = Random.default_rng()` configure the randomized backend.
+
+```julia
+result = tucker(
+    A,
+    (100, 40, 60);
+    method = :sthosvd,
+    svd_backend = :randomized,
+    processing_order = [2, 3, 1],
+    oversampling = 16,
+    power_iterations = 1,
+    block_columns = 65_536,
+    rng = MersenneTwister(0),
+)
+```
+
+The randomized backend records empty per-mode singular-value vectors because it
+does not compute the complete discarded spectra. Consequently, [`error_bound`](@ref)
+is unavailable for those results; reconstruction-based error metrics remain valid.
+
 ## Example
 
 ```julia-repl
