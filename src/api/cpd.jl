@@ -974,68 +974,75 @@ function cpd(
 end
 
 """
-    cpd(A, r; kwargs...)
+    cpd(A, rank; init=:auto, p0=nothing, warm_steps=500,
+        warm_init=TuckerInit(), solver=:rgd, geometry=:canonical,
+        maxiter=500, stepsize=nothing, tol=1e-6,
+        gradient_mode=:riemannian, normalization=:auto,
+        scale_by_lambda=true, lambda_eps=1e-10, nonnegative=false,
+        verbose=true, vector_transport_method=nothing, pullback_eps=1e-8,
+        component_trace=false, kwargs...)
+    cpd(A; r=nothing, kwargs...)
 
-Computes a rank-`r` CP approximation of `A` in two steps: (1) the first step finds an initial point; (2) the second step refines the initial point. Returns a [`CPDResult`](@ref). 
-If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
+Approximate `A` with a CP decomposition containing `rank` components.
 
-## Main Options 
-* `init = :auto`: Sets the algorithm to find the initial point. Possible options are:
-    - `:auto`: Uses a default CPD initializer. For `solver = :als`, this uses `TuckerInit`; otherwise, it uses an ALS warm start.
-    - `:alswarm`: Runs ALS first and uses the result as the initial point for refinement.
-    - customized initial point:
-        - `:tucker` (default when `solver = :als`): Uses a default Tucker initializer.
-        - `:random`: Uses a random initial point.
-        - `:hosvd`: Uses a HOSVD initial point.
-* `solver = :rgd`: Sets the algorithm for refinement. Possible options are:
-  - `rgd` (default): Riemannian gradient descent
-  - `rgd_fixed`: Riemannian gradient descent with fixed step size
-  - `rcg`: Riemannian conjugate gradient
-  - `lbfgs`: Limited-memory Riemannian quasi-Newton
-  - `lm`: Levenberg-Marquardt using residual/Jacobian least squares
-  - `als`: Alternating Least Squares
+# Inputs
 
-## Extended Options
-* `p0 = nothing`: Explicit initial point. If provided, it overrides the default initial point.
-* `:alswarm`: ALS warm start option.
-    - `warm_init = TuckerInit()`: Before finding the warm start initial point, this sets the good starting point for ALS.
-    - `warm_steps = 500`: Once finding the best initial point from warm_init, it runs this many ALS iterations to refine the initial point.
-* `maxiter = 500`: Maximum number of refinement iterations.
-* `stepsize`: Initial step size for first-order line-search solvers. Defaults to `1.0` for ordinary CPD and `0.01` for the nonnegative route.
-* `armijo_alpha_min = 1e-8`: Minimum Armijo line-search step size for `solver = :rgd`.
-* `tol = 1e-6`: Convergence tolerance.
-* `gradient_mode = :riemannian`: Gradient rule for manifold solvers. 
-    - If the model has a direct rgrad, it uses that.
-    - Otherwise it computes egrad and projects it to the tangent space.
-    - This behavior is in src/solvers/abstract.jl (line 289).
-* `geometry = :canonical`: Sets the geometry of the manifold. Possible options are:
-    - `:canonical`: Standard CPD parameterization with the usual Euclidean factors and canonical Riemannian gradient handling. Best default for general unconstrained CPD.
-    - `:squaring_metric`: Nonnegative geometry based on squared latent coordinates. Enforces nonnegativity indirectly, but can become ill-conditioned near zero.
-    - `:softplus_metric`: Nonnegative geometry uses a regularized pullback-inspired geometry induced by the softplus chart. Smoother and usually more stable near zero than `:squaring_metric`.
-    - `:native`: Native CP manifold geometry using the model’s intrinsic CP/Segre representation not for nonnegative=true. Best for structured join layouts with `Manifolds.Segre` summands.
-* `verbose = true`: Enables progress output.
-* `nonnegative::Bool = false`: Nonnegative CPD option to be selected by the user. (same as `nncpd`)
-* `pullback_eps = 1e-8`: Regularization parameter for pullback-style nonnegative geometries.
+- `A`: numerical input tensor.
+- `rank`: number of rank-one components.
 
-## Notes
-* `solver = :als` does not use manifold geometry. In that case:
-    - `geometry` must be `:canonical`
-    - `gradient_mode` is ignored except for validation
-* `:squaring_metric` and `:softplus_metric` require `nonnegative = true`.
-* When `nonnegative = true`, `cpd(...)` routes to `nncpd(...)`. In that route:
-    - if `solver != :als` and `geometry` is left at `:canonical`, the effective geometry becomes `:softplus_metric`
-    - if `stepsize` is left as `nothing`, the effective default becomes `0.01`
-    - if `init = :tucker`, the effective initializer becomes `:alswarm`
-    
-## Example 
-```julia-repl
-julia> A = randn(20, 15, 10); r = 35
-julia> res = cpd(A, r)
-CPDResult{Float64}
-  Order:        3
-  Dimensions:   (20, 15, 10)
-  Rank:         35
-  Rel. error:   0.4359141301703327
+# Output
+
+Returns a [`CPDResult`](@ref). Use `weights` and `factors` to inspect the
+compact representation, `reconstruct` to rebuild the
+approximation, and `rel_error(A, result)` to measure reconstruction error.
+
+# Common options
+
+- `solver=:rgd`: refinement solver. Supported symbols are `:als`, `:rgd`,
+  `:rgd_fixed`, `:rcg`, `:lbfgs`, and `:lm`; a compatible solver object may be
+  passed instead.
+- `init=:auto`: uses `TuckerInit()` for ALS and an ALS warm start for manifold
+  solvers. Other useful choices include `:random`, `:tucker`, `:tucker_diag`,
+  `:hosvd`, an initializer object, or an explicit `p0`.
+- `warm_steps=500`, `warm_init=TuckerInit()`: configure the ALS warm start used
+  by `init=:alswarm` or the non-ALS automatic path.
+- `maxiter=500`, `tol=1e-6`, `verbose=true`: stopping and progress controls.
+- `stepsize=nothing`: uses `1.0` for unconstrained CPD and `0.01` when
+  `nonnegative=true`; an explicit value overrides the route-specific default.
+- `geometry=:canonical`: unconstrained CP geometry. `:native` is also available.
+  `:squaring_metric` and `:softplus_metric` require `nonnegative=true`.
+- `gradient_mode=:riemannian`: public gradient route. `:egrad_project` is the
+  alternative frontend route; exact-gradient modes are advanced and deprecated
+  at the frontend.
+- `normalization=:auto`: chooses a solver- and constraint-compatible policy.
+  Explicit symbols are `:none`, `:lambda_separate`, and
+  `:nn_lambda_separate` when supported by the model.
+- `nonnegative=false`: set `true` to route through [`nncpd`](@ref).
+
+# Advanced controls
+
+- `scale_by_lambda=true`, `lambda_eps=1e-10`: CP metric scaling controls.
+- `pullback_eps=1e-8`: regularization for pullback-style nonnegative geometry.
+- `vector_transport_method=nothing`: use the solver's default transport, or
+  provide a ManifoldsBase transport object.
+- `component_trace=false`: record per-component diagnostics for manifold
+  solvers; it is not supported by `solver=:als`.
+- With `solver=:als`, the additional `miniter`, `projected_grad_tol`,
+  `nn_update`, and `mttkrp_method` keywords are forwarded to
+  [`fit_cp_als`](@ref), which documents their accepted values and defaults.
+
+If `rank`/`r` is omitted, the smallest tensor dimension is used as a heuristic
+rank and a message is printed when `verbose=true`. Passing the rank explicitly
+is recommended for reproducible model selection. `A` must have floating-point
+element type.
+
+# Example
+
+```julia
+A = randn(20, 15, 10)
+result = cpd(A, 5; verbose=false)
+component_weights = weights(result)
+A_approx = reconstruct(result)
 ```
 """
 function cpd(

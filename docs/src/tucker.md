@@ -1,60 +1,78 @@
-# Tucker Decomposition 
+# Tucker Decomposition
 
-Approximating `A` by a Tucker decomposition
+Tucker decomposition compresses a tensor into a smaller core tensor together
+with one factor matrix for each mode. It is useful when different modes need
+different compression levels.
+
+For an ``N``-way tensor, the Tucker approximation is
+
 ```math
-\hat A = C \times_1 U \times_2 V \times_3 W
-```
-with multilinear rank `mlrank` can be computed as follows.
-
-```julia-repl
-julia> mlrank = (5, 4, 3)
-julia> tucker_res = tucker(A, mlrank)
-TuckerResult{Float64, 3}
-  Original size:    (20, 15, 10)
-  Core size:        (5, 4, 3)
-  Multilinear rank: (5, 4, 3)
-  Compression:      12.0x
+\hat{\mathcal A}
+= \mathcal G
+  \times_1 U^{(1)}
+  \times_2 U^{(2)}
+  \cdots
+  \times_N U^{(N)}.
 ```
 
-The core $C$ and the factor matrices $(U, V, W)$ of the decomposition can be accessed as follows.
+The core ``\mathcal G`` has size ``(r_1,\ldots,r_N)``, and each factor matrix
+``U^{(n)}`` maps the compressed mode of size ``r_n`` back to the original mode.
+
+## Inputs
+
+- `A`: the numerical tensor to compress.
+- `ranks`: one retained rank for each mode of `A`.
+
+For a tensor of size `(20, 15, 10)`, ranks `(5, 4, 3)` produce a core of size
+`(5, 4, 3)`.
+
+## Example
 
 ```julia
-core(tucker_res)
-factors(tucker_res)
+using TensorKitchen
+
+A = randn(20, 15, 10)
+result = tucker(A, (5, 4, 3))
 ```
 
-## Large tensors without explicit unfoldings
+## Output
 
-For a fixed multilinear rank, ST-HOSVD can use an implicit randomized backend:
+`result` is a `TuckerResult`.
 
 ```julia
-using Random
+compressed = core(result)
+factor_matrices = factors(result)
+A_approx = reconstruct(result)
+error = rel_error(A, result)
+```
 
-tucker_res = tucker(
+The core is the compressed representation. `A_approx` has the same dimensions
+as `A`, and a smaller relative error means a closer reconstruction.
+
+## Large tensors
+
+For a large tensor, the randomized backend can reduce memory use and runtime
+when the requested ranks are much smaller than the input dimensions:
+
+```julia
+result = tucker(
     A,
-    (100, 40, 60);
+    (5, 4, 3);
     method = :sthosvd,
     svd_backend = :randomized,
-    processing_order = [2, 3, 1],
-    oversampling = 16,
-    power_iterations = 1,
-    block_columns = 65_536,
-    rng = MersenneTwister(0),
 )
 ```
-Instead of constructing ``A_{(k)}``, the backend evaluates randomized projections
-and subspace iterations as tensor contractions. The Gaussian sketch is generated in 
-bounded blocks, and the input is not copied before its first mode projection. This
-substantially reduces memory when the tensor is large and the requested ranks are
-small relative to the mode dimensions.
-The exact backend remains the default and is generally preferable for small tensors,
-near-full ranks. Randomized results do not support `error_bound`, because discarded
-singular values are not computed.
 
-## Tucker Docs
+The randomized result is approximate and may vary slightly between runs. Use
+`rel_error(A, result)` to evaluate it. `error_bound` is available only when the
+decomposition records the full singular-value information.
+
+See [Advanced Tucker methods](advanced/tucker.md) for ST-HOSVD, randomized
+sketching, and HOOI details.
+
+## API reference
 
 ```@docs
-tucker
 TuckerResult
 core(::TuckerResult)
 factors(::TuckerResult)

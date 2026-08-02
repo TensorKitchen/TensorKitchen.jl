@@ -1,6 +1,16 @@
 # solvers/lm.jl — Riemannian Levenberg-Marquardt via Manopt nonlinear least squares
 export LMSolver
 
+"""
+    LMSolver(; η=0.2, damping_term_min=0.1, β=5.0,
+        expect_zero_residual=false, linear_subsolver=Manopt.default_lm_lin_solve!)
+
+Configure the Riemannian Levenberg--Marquardt solver used for nonlinear
+least-squares models. `η` controls step acceptance, `damping_term_min` is the
+minimum damping scale, and `β` controls damping updates. Set
+`expect_zero_residual=true` only when the model is expected to fit the target
+exactly.
+"""
 struct LMSolver <: AbstractSecondOrderROSolver
     η::Float64
     damping_term_min::Float64

@@ -225,6 +225,35 @@ function _cp_als_stats(
     return (n2, T(0.5) * n2, _relative_error_frob_sq(n2, normA2))
 end
 
+"""
+    fit_cp_als(A, rank; maxiter=100, tol=1e-6, miniter=nothing,
+        projected_grad_tol=nothing, nn_update=:auto, init=:random,
+        init_factors=nothing,
+        normalization=SeparateLambdaNormalization(), mttkrp_method=:auto,
+        nonnegative=false, verbose=true, return_stats=false,
+        progress_phase=:refinement)
+
+Fit a rank-`rank` CP model by alternating factor updates.
+
+- `init` accepts `:random`, `:hosvd`, `:tucker`, or `:tucker_diag`;
+  `init_factors=(weights, factors)` supplies an explicit start.
+- `normalization` accepts `:none`, `:lambda_separate`, or
+  `:nn_lambda_separate` when compatible with the model.
+- `mttkrp_method` accepts `:auto`, `:khatri_rao`, or `:direct` and controls
+  the matrix-times-Khatri--Rao-product kernel.
+- With `nonnegative=false`, `nn_update=:auto` selects ordinary least squares
+  (`:ls`). With `nonnegative=true`, it selects row NNLS (`:nnls`); the other
+  nonnegative update choices are `:mu` and `:hals`.
+- `miniter=nothing` uses zero minimum iterations for ordinary least squares and
+  20 for nonnegative updates. `projected_grad_tol=nothing` chooses an automatic
+  nonnegative projected-gradient threshold; it is inactive for ordinary least
+  squares.
+- `return_stats=false` returns `(weights, factors)`; `true` returns the fitted
+  point and convergence statistics. `progress_phase` labels progress reporting.
+
+`A` must have a floating-point element type. This is a lower-level interface;
+use `cpd` or `nncpd` for standard result objects.
+"""
 function fit_cp_als(
     A::AbstractArray{T,N},
     r::Int;
@@ -444,9 +473,16 @@ end
 # ========== ALSSolver (AbstractALSSolver) ==========
 
 """
-    ALSSolver
+    ALSSolver([normalization=SeparateLambdaNormalization()])
 
-CP-ALS solver; MTTKRP from tensor_ops.jl.
+Alternating least-squares solver selector used by the CPD and BTD frontends.
+For CPD, `normalization` controls how component scaling is represented during
+ALS. Accepted symbols are `:none`, `:lambda_separate`, and
+`:nn_lambda_separate`; equivalent normalization policy objects and `nothing`
+(`NoNormalization()`) are also accepted. The model must support the selected
+policy.
+BTD dispatch uses the same solver selector but applies its Tucker-block ALS
+routine and its own high-level BTD options.
 """
 struct ALSSolver{P<:AbstractNormalizationPolicy} <: AbstractALSSolver
     normalization::P

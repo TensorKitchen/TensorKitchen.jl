@@ -2,7 +2,8 @@ using Documenter, TensorKitchen
 
 makedocs(
     sitename = "TensorKitchen.jl",
-    warnonly = true,
+    format = Documenter.HTML(edit_link = "main"),
+    warnonly = false,
     pages = [
         "Home" => "index.md",
         "CPD" => "cpd.md",
@@ -10,7 +11,15 @@ makedocs(
         "BTD" => "btd.md",
         "Join" => "join.md",
         "Utilities" => "utils.md",
-        "Pipeline" => "PIPELINE.md",
+        "Choosing a decomposition" => "PIPELINE.md",
+        "Advanced guide" => [
+            "Overview" => "advanced/index.md",
+            "CPD methods" => "advanced/cpd.md",
+            "Tucker methods" => "advanced/tucker.md",
+            "BTD methods" => "advanced/btd.md",
+            "Optimization methods" => "advanced/optimization.md",
+            "Join routing" => "advanced/join.md",
+        ],
         "References" => "references.md",
     ],
 )

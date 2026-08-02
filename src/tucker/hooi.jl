@@ -1,10 +1,25 @@
 export hooi
 
 """
-High-order orthogonal iteration (HOOI) for Tucker decomposition.
+    hooi(A, ranks; maxiter=50, tol=1e-8, init=:sthosvd, verbose=false)
 
+Refine a Tucker decomposition with higher-order orthogonal iteration (HOOI).
+
+# Inputs
+
+- `A`: numerical input tensor.
+- `ranks`: target multilinear rank, with one rank per mode.
+
+# Keywords
+
+- `maxiter=50`: maximum number of alternating sweeps.
+- `tol=1e-8`: stopping tolerance for the change in relative error.
+- `init=:sthosvd`: initial factor matrices. A compatible `TuckerResult` may be
+  supplied instead.
+- `verbose=false`: display iteration progress.
+
+Returns a [`TuckerResult`](@ref).
 """
-
 function hooi(
     A::AbstractArray{T,N},
     ranks::NTuple{N,Int};

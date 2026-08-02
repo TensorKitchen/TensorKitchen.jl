@@ -4,3 +4,6 @@ TensorKitchen = "3630a16b-0f2f-4d88-afbf-c7d59eccf553"
 
 [sources]
 TensorKitchen = {path = ".."}
+
+[compat]
+Documenter = "1"

@@ -6,6 +6,16 @@ export LBFGSSolver
         nonpositive_curvature_behavior=:ignore, linesearch=:wolfe, preconditioner=nothing)
 
 Limited-memory Riemannian BFGS wrapper built on `Manopt.quasi_Newton`.
+
+- `memory_size` is the number of curvature pairs retained.
+- `cautious_update` lets Manopt reject unsuitable quasi-Newton updates.
+- `initial_scale` sets the initial inverse-Hessian scale.
+- `linesearch=:wolfe` is always supported; `:hagerzhang` is available when the
+  installed Manopt version provides `HagerZhangLinesearch`.
+- `preconditioner` is passed to Manopt.
+- `nonpositive_curvature_behavior` is retained in configuration and reported
+  in `solver_info`, but the current Manopt update path does not consume it;
+  `solver_info.uses_nonpositive_curvature_behavior` is therefore `false`.
 """
 struct LBFGSSolver <: AbstractSecondOrderROSolver
     memory_size::Int
