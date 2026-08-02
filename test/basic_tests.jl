@@ -26,6 +26,9 @@ end
 # tucker/sthosvd.jl
 # =========================================================================
 @testset "sthosvd.jl: sthosvd, thosvd, TuckerResult, relative_error" begin
+    @test optimal_mode_order((120, 40, 30), (10, 20, 20)) == [1, 2, 3]
+    @test optimal_mode_order((120, 40, 30)) == [3, 2, 1]
+
     dims = (10, 8, 6)
     r = (4, 3, 3)
     core = randn(r...)
@@ -39,6 +42,7 @@ end
     @test TensorKitchen.relative_frobenius_error(A2, B2) ≈ rel_ref rtol = 1e-12 atol = 1e-12
     @test rel_error(A2, B2) ≈ rel_ref rtol = 1e-12 atol = 1e-12
     td = sthosvd(A, r)
+    @test processing_order(td) == optimal_mode_order(dims, r)
     @test td isa TuckerResult
     @test size(td.core) == r
     @test length(td.factors) == 3
