@@ -3303,6 +3303,31 @@ end
     @test r0.gradient ≈ [-115.5, -752.5]
 end
 
+@testset "save_result and load_result preserve experiment records" begin
+    A = randn(8, 6, 4)
+    ranks = (3, 2, 2)
+    result = tucker(A, ranks)
+    record = (
+        result = result,
+        method = :tucker,
+        ranks = ranks,
+        input_size = size(A),
+        preprocessing = :none,
+        julia_version = string(VERSION),
+        tensorkitchen_version = string(pkgversion(TensorKitchen)),
+    )
+
+    mktemp() do path, io
+        close(io)
+        @test save_result(path, record) == path
+        loaded = load_result(path)
+        @test loaded.ranks == ranks
+        @test loaded.input_size == size(A)
+        @test reconstruct(loaded.result) ≈ reconstruct(result)
+        @test processing_order(loaded.result) == processing_order(result)
+    end
+end
+
 @testset "norm re-exported" begin
     @test norm([1.0, 0.0, 0.0]) ≈ 1.0
 end
