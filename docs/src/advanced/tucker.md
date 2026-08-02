@@ -167,6 +167,8 @@ therefore cannot use `error_bound`.
 
 ```@docs
 optimal_mode_order
+processing_order
+singular_values
 sthosvd
 error_bound
 ```
