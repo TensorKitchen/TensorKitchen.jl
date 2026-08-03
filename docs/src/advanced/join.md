@@ -4,14 +4,16 @@ Join decomposition approximates a target as a sum of structured components
 generated from one or more manifolds. Its basic mathematical form is
 
 ```math
-\hat{x}=x_1+x_2+\cdots+x_R,
+\Phi(p)
+=\phi_1(p_1)+\phi_2(p_2)+\cdots+\phi_R(p_R)
+=\sum_{r=1}^{R}\phi_r(p_r),
 \qquad
-x_r=\Phi_r(p_r),
-\quad p_r\in\mathcal M_r,
+p=(p_1,\ldots,p_R),
+\quad p_r\in\mathcal M_r.
 ```
 
 where ``\mathcal M_r`` specifies the allowed parameter structure of component
-``r`` and ``\Phi_r`` maps that parameter to the ambient target space. The
+``r`` and ``\phi_r`` maps that parameter to the ambient target space. The
 sections below make this parameter-space and image-space distinction precise.
 
 ## Mathematical model
@@ -20,11 +22,11 @@ Let the target tensor have shape ``n_1 \times \cdots \times n_d``. Its ambient
 space can be viewed either as a tensor space or as its flattened vector space,
 
 ```math
-\mathcal V
+\mathcal T
 = \mathbb R^{n_1\times\cdots\times n_d}
-\cong \mathbb R^n,
+\cong \mathbb R^N,
 \qquad
-n=\prod_{j=1}^{d}n_j.
+N=\prod_{m=1}^{d}n_m.
 ```
 
 The Frobenius norm of a tensor is the Euclidean norm of its flattened vector,
@@ -36,21 +38,21 @@ Component ``r`` is described by a parameter manifold ``\mathcal M_r``. The
 complete parameter space is the product manifold
 
 ```math
-\mathcal P
+\mathcal M
 = \mathcal M_1 \times \cdots \times \mathcal M_R,
 \qquad
-p=(p_1,\ldots,p_R)\in\mathcal P.
+p=(p_1,\ldots,p_R)\in\mathcal M.
 ```
 
-This ``\mathcal P`` is the domain on which the optimizer moves. In
+This ``\mathcal M`` is the domain on which the optimizer moves. In
 TensorKitchen, `ProductManifold(M1, ..., MR)` represents this parameter space;
 it is not the set of reconstructed tensors.
 
 At ``p``, the tangent space and product metric are
 
 ```math
-T_p\mathcal P
-= T_{p_1}\mathcal M_1 \times \cdots \times T_{p_R}\mathcal M_R,
+T_p\mathcal M
+= T_{p_1}\mathcal M_1 \oplus \cdots \oplus T_{p_R}\mathcal M_R,
 ```
 
 ```math
@@ -66,15 +68,15 @@ while respecting the geometry of each component manifold.
 A parameter point is converted into an ambient component by an image map
 
 ```math
-\Phi_r:\mathcal M_r\longrightarrow\mathcal V,
+\phi_r:\mathcal M_r\longrightarrow\mathcal T,
 \qquad
-x_r=\Phi_r(p_r).
+x_r=\phi_r(p_r).
 ```
 
 For a Segre component this map produces a rank-one tensor,
 
 ```math
-\Phi_r\!\left(\lambda_r,u_r^{(1)},\ldots,u_r^{(d)}\right)
+\phi_r\!\left(\lambda_r,u_r^{(1)},\ldots,u_r^{(d)}\right)
 = \lambda_r
   u_r^{(1)}\otimes\cdots\otimes u_r^{(d)},
 ```
@@ -82,12 +84,12 @@ For a Segre component this map produces a rank-one tensor,
 whereas a Tucker component maps its core and factors to
 
 ```math
-\Phi_r\!\left(G_r,U_r^{(1)},\ldots,U_r^{(d)}\right)
+\phi_r\!\left(G_r,U_r^{(1)},\ldots,U_r^{(d)}\right)
 =G_r\times_1U_r^{(1)}\times_2\cdots\times_dU_r^{(d)}.
 ```
 
 For a manifold already embedded in the target vector space, such as the sphere
-example below, ``\Phi_r`` is the usual ambient embedding. Every component map
+example below, ``\phi_r`` is the usual ambient embedding. Every component map
 must have the same ambient output size as the flattened target.
 
 ### Join map and least-squares objective
@@ -95,35 +97,43 @@ must have the same ambient output size as the flattened target.
 The joint image map adds the ambient components,
 
 ```math
-\Phi:\mathcal P\longrightarrow\mathcal V,
+\Phi:\mathcal M\longrightarrow\mathcal T,
 \qquad
-\Phi(p)=\sum_{r=1}^{R}\Phi_r(p_r).
+\Phi(p)=\sum_{r=1}^{R}\phi_r(p_r).
 ```
 
-Given a target ``A\in\mathcal V``, the generic Join path solves
+Given a target ``A\in\mathcal T``, the generic Join path solves
 
 ```math
-\min_{p\in\mathcal P} f(p),
+\min_{p\in\mathcal M} f(p),
 \qquad
 f(p)
 =\frac12\left\|\Phi(p)-A\right\|_F^2
 =\frac12\left\|
-  \sum_{r=1}^{R}\Phi_r(p_r)-A
+  \sum_{r=1}^{R}\phi_r(p_r)-A
  \right\|_F^2.
 ```
 
-Writing the residual as ``e(p)=\Phi(p)-A``, the differential of the Join map is
+The residual tensor and residual vector are
+
+```math
+\mathcal R(p)=\Phi(p)-A,
+\qquad
+\rho(p)=\operatorname{vec}(\mathcal R(p))\in\mathbb R^N.
+```
+
+The differential of the Join map is
 
 ```math
 D\Phi(p)[\xi]
-=\sum_{r=1}^{R}D\Phi_r(p_r)[\xi_r],
+=\sum_{r=1}^{R}D\phi_r(p_r)[\xi_r],
 ```
 
 and therefore
 
 ```math
 Df(p)[\xi]
-=\left\langle e(p),D\Phi(p)[\xi]\right\rangle_F.
+=\left\langle \mathcal R(p),D\Phi(p)[\xi]\right\rangle_F.
 ```
 
 The component Riemannian gradients are characterized by
@@ -131,7 +141,7 @@ The component Riemannian gradients are characterized by
 ```math
 g^{(r)}_{p_r}\!\left(\operatorname{grad}_r f,\xi_r\right)
 =\left\langle
-  e(p),D\Phi_r(p_r)[\xi_r]
+  \mathcal R(p),D\phi_r(p_r)[\xi_r]
  \right\rangle_F
 \quad
 \text{for every }\xi_r\in T_{p_r}\mathcal M_r.
@@ -148,14 +158,14 @@ The representable tensors form the image set
 
 ```math
 \mathcal J
-=\Phi(\mathcal P)
+=\Phi(\mathcal M)
 =\left\{
-  \sum_{r=1}^{R}\Phi_r(p_r)
+  \sum_{r=1}^{R}\phi_r(p_r)
   : p_r\in\mathcal M_r
- \right\}\subseteq\mathcal V.
+ \right\}\subseteq\mathcal T.
 ```
 
-The smooth optimization domain is ``\mathcal P``; the image ``\mathcal J``
+The smooth optimization domain is ``\mathcal M``; the image ``\mathcal J``
 need not be a smooth manifold everywhere. The number of parameter-space
 directions that are visible to first order in the ambient space at ``p`` is
 ``\operatorname{rank}D\Phi(p)``, with
@@ -164,7 +174,7 @@ directions that are visible to first order in the ambient space at ``p`` is
 \operatorname{rank}D\Phi(p)
 \leq
 \min\!\left(
-  n,\sum_{r=1}^{R}\dim\mathcal M_r
+  N,\sum_{r=1}^{R}\dim\mathcal M_r
 \right).
 ```
 
