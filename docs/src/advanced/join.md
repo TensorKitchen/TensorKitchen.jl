@@ -1,13 +1,180 @@
-# Advanced Join Routing
+# Advanced Join Models
 
-A Join model represents
+Join decomposition approximates a target as a sum of structured components
+generated from one or more manifolds. Its basic mathematical form is
 
 ```math
-\hat{x}=x_1+\cdots+x_R,
-\qquad x_r\in\mathcal M_r,
+\hat{x}=x_1+x_2+\cdots+x_R,
+\qquad
+x_r=\Phi_r(p_r),
+\quad p_r\in\mathcal M_r,
 ```
 
-with each component constrained to a selected manifold.
+where ``\mathcal M_r`` specifies the allowed parameter structure of component
+``r`` and ``\Phi_r`` maps that parameter to the ambient target space. The
+sections below make this parameter-space and image-space distinction precise.
+
+## Mathematical model
+
+Let the target tensor have shape ``n_1 \times \cdots \times n_d``. Its ambient
+space can be viewed either as a tensor space or as its flattened vector space,
+
+```math
+\mathcal V
+= \mathbb R^{n_1\times\cdots\times n_d}
+\cong \mathbb R^n,
+\qquad
+n=\prod_{j=1}^{d}n_j.
+```
+
+The Frobenius norm of a tensor is the Euclidean norm of its flattened vector,
+so these two views give the same least-squares problem.
+
+### Parameter space and product manifold
+
+Component ``r`` is described by a parameter manifold ``\mathcal M_r``. The
+complete parameter space is the product manifold
+
+```math
+\mathcal P
+= \mathcal M_1 \times \cdots \times \mathcal M_R,
+\qquad
+p=(p_1,\ldots,p_R)\in\mathcal P.
+```
+
+This ``\mathcal P`` is the domain on which the optimizer moves. In
+TensorKitchen, `ProductManifold(M1, ..., MR)` represents this parameter space;
+it is not the set of reconstructed tensors.
+
+At ``p``, the tangent space and product metric are
+
+```math
+T_p\mathcal P
+= T_{p_1}\mathcal M_1 \times \cdots \times T_{p_R}\mathcal M_R,
+```
+
+```math
+g_p(\xi,\eta)
+= \sum_{r=1}^{R}g^{(r)}_{p_r}(\xi_r,\eta_r).
+```
+
+Thus a tangent direction ``\xi=(\xi_1,\ldots,\xi_R)`` updates all components
+while respecting the geometry of each component manifold.
+
+### Component image maps
+
+A parameter point is converted into an ambient component by an image map
+
+```math
+\Phi_r:\mathcal M_r\longrightarrow\mathcal V,
+\qquad
+x_r=\Phi_r(p_r).
+```
+
+For a Segre component this map produces a rank-one tensor,
+
+```math
+\Phi_r\!\left(\lambda_r,u_r^{(1)},\ldots,u_r^{(d)}\right)
+= \lambda_r
+  u_r^{(1)}\otimes\cdots\otimes u_r^{(d)},
+```
+
+whereas a Tucker component maps its core and factors to
+
+```math
+\Phi_r\!\left(G_r,U_r^{(1)},\ldots,U_r^{(d)}\right)
+=G_r\times_1U_r^{(1)}\times_2\cdots\times_dU_r^{(d)}.
+```
+
+For a manifold already embedded in the target vector space, such as the sphere
+example below, ``\Phi_r`` is the usual ambient embedding. Every component map
+must have the same ambient output size as the flattened target.
+
+### Join map and least-squares objective
+
+The joint image map adds the ambient components,
+
+```math
+\Phi:\mathcal P\longrightarrow\mathcal V,
+\qquad
+\Phi(p)=\sum_{r=1}^{R}\Phi_r(p_r).
+```
+
+Given a target ``A\in\mathcal V``, the generic Join path solves
+
+```math
+\min_{p\in\mathcal P} f(p),
+\qquad
+f(p)
+=\frac12\left\|\Phi(p)-A\right\|_F^2
+=\frac12\left\|
+  \sum_{r=1}^{R}\Phi_r(p_r)-A
+ \right\|_F^2.
+```
+
+Writing the residual as ``e(p)=\Phi(p)-A``, the differential of the Join map is
+
+```math
+D\Phi(p)[\xi]
+=\sum_{r=1}^{R}D\Phi_r(p_r)[\xi_r],
+```
+
+and therefore
+
+```math
+Df(p)[\xi]
+=\left\langle e(p),D\Phi(p)[\xi]\right\rangle_F.
+```
+
+The component Riemannian gradients are characterized by
+
+```math
+g^{(r)}_{p_r}\!\left(\operatorname{grad}_r f,\xi_r\right)
+=\left\langle
+  e(p),D\Phi_r(p_r)[\xi_r]
+ \right\rangle_F
+\quad
+\text{for every }\xi_r\in T_{p_r}\mathcal M_r.
+```
+
+TensorKitchen evaluates the component embeddings and their pushforwards, sums
+the pushforwards to obtain ``D\Phi(p)[\xi]``, and converts the resulting
+component gradients to the corresponding tangent spaces. This same
+differential supplies the Jacobian action required by the LM solver.
+
+### Parameter space versus image geometry
+
+The representable tensors form the image set
+
+```math
+\mathcal J
+=\Phi(\mathcal P)
+=\left\{
+  \sum_{r=1}^{R}\Phi_r(p_r)
+  : p_r\in\mathcal M_r
+ \right\}\subseteq\mathcal V.
+```
+
+The smooth optimization domain is ``\mathcal P``; the image ``\mathcal J``
+need not be a smooth manifold everywhere. The number of parameter-space
+directions that are visible to first order in the ambient space at ``p`` is
+``\operatorname{rank}D\Phi(p)``, with
+
+```math
+\operatorname{rank}D\Phi(p)
+\leq
+\min\!\left(
+  n,\sum_{r=1}^{R}\dim\mathcal M_r
+\right).
+```
+
+At regular points this rank agrees with the local image dimension. At critical
+or singular points, the image can require a more careful local analysis.
+
+Different parameter points can produce the same tensor because of component
+permutations, scaling or gauge symmetries, coincident components, or
+cancellation. Consequently, Join optimization identifies a good reconstructed
+tensor but does not by itself guarantee a unique component parameterization.
 
 ## Supported input forms
 

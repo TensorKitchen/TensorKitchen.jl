@@ -18,7 +18,7 @@ makedocs(
             "Tucker methods" => "advanced/tucker.md",
             "BTD methods" => "advanced/btd.md",
             "Optimization methods" => "advanced/optimization.md",
-            "Join routing" => "advanced/join.md",
+            "Join models" => "advanced/join.md",
         ],
         "References" => "references.md",
     ],

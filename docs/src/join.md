@@ -58,7 +58,7 @@ means that the fitted components reproduce the target more closely.
 TensorKitchen may return a specialized `CPDResult` or `BTDResult` when all
 components match one of those decomposition families.
 
-See [Advanced Join routing](advanced/join.md) for supported input forms and
+See [Advanced Join models](advanced/join.md) for supported input forms and
 automatic routing behavior.
 
 ## API reference

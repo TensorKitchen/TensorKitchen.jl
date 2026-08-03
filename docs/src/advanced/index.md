@@ -14,7 +14,7 @@ pages remain focused on inputs, outputs, and basic examples.
   robustness controls.
 - [Optimization methods](optimization.md): objective functions, solver choices,
   stopping criteria, and diagnostics.
-- [Join routing](join.md): supported `approx` forms and automatic routing to
+- [Join models](join.md): supported `approx` forms and automatic routing to
   specialized decompositions.
 
 The public API reference on each decomposition page remains the source of truth
