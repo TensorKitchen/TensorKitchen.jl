@@ -4,7 +4,7 @@ Tucker decomposition compresses a tensor into a smaller core tensor together
 with one factor matrix for each mode. It is useful when different modes need
 different compression levels.
 
-For an ``N``-way tensor, the Tucker approximation is
+For a ``d``-way tensor, the Tucker approximation is
 
 ```math
 \hat{\mathcal A}
@@ -12,11 +12,11 @@ For an ``N``-way tensor, the Tucker approximation is
   \times_1 U^{(1)}
   \times_2 U^{(2)}
   \cdots
-  \times_N U^{(N)}.
+  \times_d U^{(d)}.
 ```
 
-The core ``\mathcal G`` has size ``(r_1,\ldots,r_N)``, and each factor matrix
-``U^{(n)}`` maps the compressed mode of size ``r_n`` back to the original mode.
+The core ``\mathcal G`` has size ``(r_1,\ldots,r_d)``, and each factor matrix
+``U^{(k)}`` maps the compressed mode of size ``r_k`` back to the original mode.
 
 ## Inputs
 

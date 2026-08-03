@@ -5,7 +5,7 @@ A homogeneous block term decomposition with ``B`` Tucker blocks is
 ```math
 \hat{\mathcal A}
 = \sum_{b=1}^{B}
-  \mathcal G_b \times_1 U_b^{(1)} \cdots \times_N U_b^{(N)},
+  \mathcal G_b \times_1 U_b^{(1)} \cdots \times_d U_b^{(d)},
 ```
 
 where every block uses the same multilinear rank tuple in the current API.

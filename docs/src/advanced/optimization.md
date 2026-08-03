@@ -1,14 +1,52 @@
 # Advanced Optimization Methods
 
-Optimization-based decompositions minimize a squared reconstruction objective
-of the form
+## Optimization model
+
+An optimization-based decomposition uses a parameter manifold ``\mathcal P``
+and a reconstruction map
 
 ```math
-f(\theta)
-= \frac{1}{2}\left\|\mathcal A-\hat{\mathcal A}(\theta)\right\|_F^2,
+\Phi:\mathcal P\longrightarrow
+\mathbb R^{n_1\times\cdots\times n_d}.
 ```
 
-where ``\theta`` denotes the decomposition parameters.
+For a parameter point ``\theta\in\mathcal P`` and target tensor
+``\mathcal A``, the solver minimizes
+
+```math
+\min_{\theta\in\mathcal P} f(\theta),
+\qquad
+f(\theta)
+=\frac12\left\|
+  \mathcal A-\Phi(\theta)
+ \right\|_F^2.
+```
+
+Thus the optimizer updates ``\theta`` on ``\mathcal P``; it does not optimize
+the entries of the reconstructed tensor independently.
+
+For example, a rank-``R`` CP model uses
+
+```math
+\Phi_{\mathrm{CP}}(\theta)
+=\sum_{r=1}^{R}\lambda_r
+  u_r^{(1)}\otimes\cdots\otimes u_r^{(d)},
+```
+
+with
+
+```math
+\theta
+=\left(\lambda,U^{(1)},\ldots,U^{(d)}\right),
+\qquad
+U^{(k)}
+=\left[u_1^{(k)},\ldots,u_R^{(k)}\right].
+```
+
+The selected geometry determines the precise representation of
+``\mathcal P`` and its metric, while the reconstruction objective remains the
+same. See [Join models](join.md) for the product-manifold, image-map, and
+differential formulation of sums of structured components.
 
 ## Methods by decomposition
 

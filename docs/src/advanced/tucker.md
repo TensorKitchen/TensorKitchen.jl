@@ -1,34 +1,34 @@
 # Advanced Tucker Methods
 
-For an input tensor ``\mathcal A \in \mathbb R^{I_1\times\cdots\times I_N}``, a
-Tucker approximation of multilinear rank ``(r_1,\ldots,r_N)`` is
+For an input tensor ``\mathcal A \in \mathbb R^{n_1\times\cdots\times n_d}``, a
+Tucker approximation of multilinear rank ``(r_1,\ldots,r_d)`` is
 
 ```math
 \hat{\mathcal A}
-= \mathcal G \times_1 U^{(1)} \cdots \times_N U^{(N)},
-\qquad U^{(n)} \in \mathbb R^{I_n\times r_n}.
+= \mathcal G \times_1 U^{(1)} \cdots \times_d U^{(d)},
+\qquad U^{(k)} \in \mathbb R^{n_k\times r_k}.
 ```
 
 ## ST-HOSVD
 
 Sequentially Truncated HOSVD processes one mode at a time. If ``\mathcal B`` is
-the current working tensor, the update for mode ``n`` is:
+the current working tensor, the update for mode ``k`` is:
 
-1. obtain the leading ``r_n`` left singular vectors of the mode-``n`` unfolding
-   ``B_{(n)}``;
-2. store them as ``U^{(n)}``;
+1. obtain the leading ``r_k`` left singular vectors of the mode-``k`` unfolding
+   ``B_{(k)}``;
+2. store them as ``U^{(k)}``;
 3. project the working tensor with ``\mathcal B \leftarrow
-   \mathcal B\times_n U^{(n)\mathsf T}``.
+   \mathcal B\times_k U^{(k)\mathsf T}``.
 
 The processing order can affect runtime and the final approximation. The
 automatic rank-aware heuristic processes modes in decreasing order of
-``I_n/r_n`` (equivalently, increasing ``r_n/I_n``), so the mode with the
+``n_k/r_k`` (equivalently, increasing ``r_k/n_k``), so the mode with the
 strongest fractional compression reduces the working tensor first. This is a
 storage-reduction heuristic, not a proof of optimal runtime or error.
 
 When ranks are unavailable, `optimal_mode_order(dims)` instead follows the
 size-only compact-SVD heuristic from the ST-HOSVD paper and processes modes in
-increasing order of ``I_n``. Domain knowledge or benchmarking can still justify
+increasing order of ``n_k``. Domain knowledge or benchmarking can still justify
 an explicit `processing_order`.
 
 ```julia
@@ -49,19 +49,19 @@ tucker
 
 ## Implicit randomized sketching
 
-For a target rank ``r_n``, randomized ST-HOSVD uses a sketch size
-``\ell=r_n+p``, where ``p`` is the oversampling parameter. With a Gaussian test
+For a target rank ``r_k``, randomized ST-HOSVD uses a sketch size
+``\ell=r_k+p``, where ``p`` is the oversampling parameter. With a Gaussian test
 matrix ``\Omega``, it forms
 
 ```math
-Y = B_{(n)}\Omega,
+Y = B_{(k)}\Omega,
 \qquad Q = \operatorname{orth}(Y).
 ```
 
 Optional power iterations replace the basic sketch by
 
 ```math
-Y = \left(B_{(n)}B_{(n)}^{\mathsf T}\right)^q B_{(n)}\Omega,
+Y = \left(B_{(k)}B_{(k)}^{\mathsf T}\right)^q B_{(k)}\Omega,
 ```
 
 which can improve the subspace estimate when singular values decay slowly.
@@ -69,16 +69,16 @@ After constructing ``Q``, TensorKitchen forms the projected matrix conceptually
 as
 
 ```math
-B = Q^{\mathsf T}B_{(n)}.
+C = Q^{\mathsf T}B_{(k)}.
 ```
 
 It then diagonalizes the small Gram matrix
-``BB^{\mathsf T}=R\Lambda R^{\mathsf T}`` and uses
+``CC^{\mathsf T}=R\Lambda R^{\mathsf T}`` and uses
 
 ```math
-U^{(n)} = QR_{[:,1:r_n]},
+U^{(k)} = QR_{[:,1:r_k]},
 \qquad
-B_{\mathrm{new}} = R_{[:,1:r_n]}^{\mathsf T}B.
+C_{\mathrm{new}} = R_{[:,1:r_k]}^{\mathsf T}C.
 ```
 
 TensorKitchen evaluates these products through tensor contractions and generates
@@ -103,18 +103,18 @@ increases computation. `block_columns` controls temporary sketch memory rather
 than the target rank.
 
 The implemented power loop is algebraically the randomized power method
-``(B_{(n)}B_{(n)}^{\mathsf T})^qB_{(n)}\Omega`` and orthonormalizes after each
+``(B_{(k)}B_{(k)}^{\mathsf T})^qB_{(k)}\Omega`` and orthonormalizes after each
 complete Gram application. It does not perform the intermediate
-orthonormalization between every multiplication by ``B_{(n)}^{\mathsf T}`` and
-``B_{(n)}`` used by the fully stabilized subspace-iteration variant. Large
+orthonormalization between every multiplication by ``B_{(k)}^{\mathsf T}`` and
+``B_{(k)}`` used by the fully stabilized subspace-iteration variant. Large
 `power_iterations` values can therefore lose weak singular directions through
 roundoff; use small values and verify `rel_error(A, result)`.
 
 ## HOOI
 
 Higher-Order Orthogonal Iteration alternates over the factor matrices. When
-updating mode ``n``, it projects ``\mathcal A`` along all other modes and then
-selects the leading ``r_n`` left singular vectors of that projected tensor.
+updating mode ``k``, it projects ``\mathcal A`` along all other modes and then
+selects the leading ``r_k`` left singular vectors of that projected tensor.
 Repeated sweeps seek a lower reconstruction error than the initial Tucker fit.
 
 ```julia
@@ -155,7 +155,7 @@ residuals gives
 
 ```math
 \left\|\mathcal A-\hat{\mathcal A}\right\|_F^2
-= \sum_{k=1}^{N}\sum_{j>r_{p_k}}\sigma_{k,j}^2,
+= \sum_{k=1}^{d}\sum_{j>r_{p_k}}\sigma_{k,j}^2,
 ```
 
 where ``p_k`` is the mode processed at step ``k`` and ``\sigma_{k,j}`` are the

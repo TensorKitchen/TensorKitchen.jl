@@ -13,7 +13,7 @@ With ``B`` blocks, a BTD approximation is
   \times_1 U_b^{(1)}
   \times_2 U_b^{(2)}
   \cdots
-  \times_N U_b^{(N)}.
+  \times_d U_b^{(d)}.
 ```
 
 Each summand is a Tucker decomposition with its own core and factor matrices.

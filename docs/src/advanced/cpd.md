@@ -1,6 +1,6 @@
 # Advanced CPD Methods
 
-For an input tensor ``\mathcal A \in \mathbb R^{I_1\times\cdots\times I_d}``,
+For an input tensor ``\mathcal A \in \mathbb R^{n_1\times\cdots\times n_d}``,
 a rank-``R`` CP approximation is
 
 ```math
