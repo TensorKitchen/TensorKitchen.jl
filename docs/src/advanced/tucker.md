@@ -1,4 +1,4 @@
-# Advanced Tucker Methods
+# Tucker Methods for Advanced Usage
 
 For an input tensor ``\mathcal A \in \mathbb R^{n_1\times\cdots\times n_d}``, a
 Tucker approximation of multilinear rank ``(r_1,\ldots,r_d)`` is

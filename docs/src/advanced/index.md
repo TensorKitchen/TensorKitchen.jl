@@ -1,8 +1,9 @@
 # Advanced Guide
 
-This section collects algorithm and solver details that are useful for method
-selection, reproducibility, and performance tuning. The main decomposition
-pages remain focused on inputs, outputs, and basic examples.
+This section provides advanced mathematical explanations and collects algorithm
+and solver details that are useful for method selection, reproducibility, and
+performance tuning. The main decomposition pages remain focused on inputs,
+outputs, and basic examples.
 
 ## Topics
 

@@ -1,4 +1,4 @@
-# Advanced Optimization Methods
+# Optimization Methods for Advanced Understanding
 
 ## Optimization model
 

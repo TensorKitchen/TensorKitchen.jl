@@ -1,4 +1,4 @@
-# Advanced CPD Methods
+# CPD Methods for Advanced Usage
 
 For an input tensor ``\mathcal A \in \mathbb R^{n_1\times\cdots\times n_d}``,
 a rank-``R`` CP approximation is

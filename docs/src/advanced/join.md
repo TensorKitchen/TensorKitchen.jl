@@ -1,4 +1,4 @@
-# Advanced Join Models
+# Join Models for Advanced Understanding
 
 Join decomposition approximates a target as a sum of structured components
 generated from one or more manifolds. Its basic mathematical form is

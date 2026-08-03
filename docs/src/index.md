@@ -17,6 +17,16 @@ using Pkg
 Pkg.add("TensorKitchen")
 ```
 
+If you are already in the Julia REPL, press `]` to enter package mode, then
+run:
+
+```julia-repl
+pkg> add TensorKitchen
+```
+
+The `pkg>` text is the package-mode prompt; type only `add TensorKitchen` after
+pressing `]`. Press Backspace to return to the regular `julia>` prompt.
+
 ## Quick start
 
 ```julia
@@ -52,5 +62,5 @@ See [Choosing a decomposition](PIPELINE.md) for a longer comparison.
 - [Block term decomposition](btd.md)
 - [Join decomposition](join.md)
 - [Saving and loading results](utils.md)
-- [Advanced methods](advanced/index.md)
+- [Advanced guide](advanced/index.md)
 - [References](references.md)
