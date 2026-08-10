@@ -119,7 +119,7 @@ The residual tensor and residual vector are
 ```math
 \mathcal R(p)=\Phi(p)-A,
 \qquad
-\rho(p)=\operatorname{vec}(\mathcal R(p))\in\mathbb R^N.
+\rho(p)=\mathrm{vec}(\mathcal R(p))\in\mathbb R^N.
 ```
 
 The differential of the Join map is
@@ -139,7 +139,7 @@ Df(p)[\xi]
 The component Riemannian gradients are characterized by
 
 ```math
-g^{(r)}_{p_r}\!\left(\operatorname{grad}_r f,\xi_r\right)
+g^{(r)}_{p_r}\!\left(\mathrm{grad}_r f,\xi_r\right)
 =\left\langle
   \mathcal R(p),D\phi_r(p_r)[\xi_r]
  \right\rangle_F
@@ -168,10 +168,10 @@ The representable tensors form the image set
 The smooth optimization domain is ``\mathcal M``; the image ``\mathcal J``
 need not be a smooth manifold everywhere. The number of parameter-space
 directions that are visible to first order in the ambient space at ``p`` is
-``\operatorname{rank}D\Phi(p)``, with
+``\mathrm{rank}D\Phi(p)``, with
 
 ```math
-\operatorname{rank}D\Phi(p)
+\mathrm{rank}D\Phi(p)
 \leq
 \min\!\left(
   N,\sum_{r=1}^{R}\dim\mathcal M_r

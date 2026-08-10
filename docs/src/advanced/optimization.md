@@ -60,7 +60,7 @@ Define the residual tensor and its vectorization by
 ```math
 \mathcal R(p)=\Phi(p)-A,
 \qquad
-\rho(p)=\operatorname{vec}(\mathcal R(p))\in\mathbb R^N,
+\rho(p)=\mathrm{vec}(\mathcal R(p))\in\mathbb R^N,
 \qquad
 N=\prod_{m=1}^{d}n_m.
 ```
@@ -79,7 +79,7 @@ Df(p)[\xi]
 The Riemannian gradient is the tangent vector characterized by
 
 ```math
-g_p\!\left(\operatorname{grad}f(p),\xi\right)
+g_p\!\left(\mathrm{grad}f(p),\xi\right)
 =Df(p)[\xi]
 \qquad
 \text{for every }\xi\in T_p\mathcal M,
@@ -95,7 +95,7 @@ coordinate Jacobian is
 J(p)\in\mathbb R^{N\times q},
 \qquad
 J(p)_{:,j}=D\rho(p)[E_j]
-=\operatorname{vec}\!\left(D\Phi(p)[E_j]\right).
+=\mathrm{vec}\!\left(D\Phi(p)[E_j]\right).
 ```
 
 Because the basis is orthonormal, the tangent-coordinate representation of the
@@ -104,12 +104,12 @@ use the same reconstruction objective while producing different tangent bases,
 metrics, and optimization steps.
 
 A Riemannian gradient step first chooses a tangent direction and then maps it
-back to the manifold with a retraction ``\operatorname{Retr}``:
+back to the manifold with a retraction ``\mathrm{Retr}``:
 
 ```math
-\xi_k=-\alpha_k\operatorname{grad}f(p_k),
+\xi_k=-\alpha_k\mathrm{grad}f(p_k),
 \qquad
-p_{k+1}=\operatorname{Retr}_{p_k}(\xi_k).
+p_{k+1}=\mathrm{Retr}_{p_k}(\xi_k).
 ```
 
 The step size ``\alpha_k`` may be fixed or selected by line search. RCG and
@@ -128,7 +128,7 @@ s\in\mathbb R^q.
 
 The coordinate vector ``s`` defines the tangent step
 ``\xi=\sum_{j=1}^q s_jE_j``, and the next iterate is
-``p^+=\operatorname{Retr}_p(\xi)``. The parameter ``\mu_{\mathrm{LM}}>0``
+``p^+=\mathrm{Retr}_p(\xi)``. The parameter ``\mu_{\mathrm{LM}}>0``
 controls the damping. Smaller damping approaches a
 Gauss--Newton step, while larger damping produces a more conservative,
 gradient-like step. Consequently, LM requires both residual evaluation and

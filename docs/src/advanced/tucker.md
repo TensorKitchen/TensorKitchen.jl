@@ -55,7 +55,7 @@ matrix ``\Omega``, it forms
 
 ```math
 Y = B_{(k)}\Omega,
-\qquad Q = \operatorname{orth}(Y).
+\qquad Q = \mathrm{orth}(Y).
 ```
 
 Optional power iterations replace the basic sketch by
