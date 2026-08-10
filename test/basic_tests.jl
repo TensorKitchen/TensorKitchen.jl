@@ -1169,7 +1169,7 @@ end
     @test res_init_sym.solver_info.function_evaluations >= 0
     @test res_init_sym.solver_info.gradient_evaluations >= 1
 
-    res_trace = cpd(
+    res_trace = @test_logs min_level = Base.CoreLogging.Warn cpd(
         A,
         r;
         solver = :rgd,
@@ -1202,6 +1202,9 @@ end
     @test hasproperty(trace_info, :component_trace_rgrad_failed_count)
     @test isfinite(trace_info.component_trace_start_rel_error)
     @test trace_info.component_trace_rgrad_failed_count == 0
+    @test length(trace_info.component_trace_iterations) == res_trace.iterations
+    @test length(trace_info.component_trace_cost_history) == res_trace.iterations
+    @test length(trace_info.component_trace_max_delta_history) == res_trace.iterations
     @test length(trace_info.component_trace_iterations) ==
           length(trace_info.component_trace_max_delta_history)
     @test length(trace_info.component_trace_delta_history) ==
