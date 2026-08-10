@@ -47,9 +47,10 @@ Returns a [`CPDResult`](@ref) with nonnegative weights and factors. Use
 - `gradient_mode`, `normalization`, `scale_by_lambda`, `lambda_eps`,
   `vector_transport_method`, and `pullback_eps` have the meanings described for
   [`cpd`](@ref).
-- `component_trace=false` records per-component diagnostics for manifold
-  solvers. With `solver=:als`, `miniter`, `projected_grad_tol`, `nn_update`, and
-  `mttkrp_method` are documented by [`fit_cp_als`](@ref).
+- `component_trace=false` disables tracing by default. Set it to `true` to
+  record per-component diagnostics for manifold solvers. With `solver=:als`,
+  `miniter`, `projected_grad_tol`, `nn_update`, and `mttkrp_method` are
+  documented by [`fit_cp_als`](@ref).
 
 `A` must have floating-point element type. If `rank`/`r` is omitted, the
 smallest tensor dimension is used as a heuristic; pass it explicitly for

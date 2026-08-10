@@ -16,7 +16,8 @@ Refine a Tucker decomposition with higher-order orthogonal iteration (HOOI).
 - `tol=1e-8`: stopping tolerance for the change in relative error.
 - `init=:sthosvd`: initial factor matrices. A compatible `TuckerResult` may be
   supplied instead.
-- `verbose=false`: display iteration progress.
+- `verbose=false`: progress output is disabled by default; set it to `true` to
+  display iteration progress.
 
 Returns a [`TuckerResult`](@ref).
 """

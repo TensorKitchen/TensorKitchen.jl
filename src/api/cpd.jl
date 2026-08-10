@@ -1025,8 +1025,9 @@ approximation, and `rel_error(A, result)` to measure reconstruction error.
 - `pullback_eps=1e-8`: regularization for pullback-style nonnegative geometry.
 - `vector_transport_method=nothing`: use the solver's default transport, or
   provide a ManifoldsBase transport object.
-- `component_trace=false`: record per-component diagnostics for manifold
-  solvers; it is not supported by `solver=:als`.
+- `component_trace=false`: tracing is disabled by default. Set it to `true` to
+  record per-component diagnostics for manifold solvers; it is not supported
+  by `solver=:als`.
 - With `solver=:als`, the additional `miniter`, `projected_grad_tol`,
   `nn_update`, and `mttkrp_method` keywords are forwarded to
   [`fit_cp_als`](@ref), which documents their accepted values and defaults.
