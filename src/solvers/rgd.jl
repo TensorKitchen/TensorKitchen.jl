@@ -105,6 +105,7 @@ function solve_rgd(
         stepsize = armijo,
         stopping_criterion = stopping,
         debug = callbacks.debug_actions,
+        callbacks = callbacks.solver_callbacks,
         count = [:Cost, :Gradient],
         return_state = true,
     )
@@ -189,6 +190,7 @@ function solve_rgd_fixed(
         stepsize = Manopt.ConstantStepsize(M, T(stepsize) * setup.objective_scale),
         stopping_criterion = stopping,
         debug = callbacks.debug_actions,
+        callbacks = callbacks.solver_callbacks,
         count = [:Cost, :Gradient],
         return_state = true,
     )

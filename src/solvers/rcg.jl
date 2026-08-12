@@ -131,6 +131,7 @@ function solve_rcg(
         restart_condition = restart_rule,
         stopping_criterion = stopping,
         debug = callbacks.debug_actions,
+        callbacks = callbacks.solver_callbacks,
         count = [:Cost, :Gradient],
         return_state = true,
     )

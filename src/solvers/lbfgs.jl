@@ -143,6 +143,7 @@ function solve_lbfgs(
         stepsize = _lbfgs_linesearch(linesearch),
         stopping_criterion = stopping,
         debug = callbacks.debug_actions,
+        callbacks = callbacks.solver_callbacks,
         count = [:Cost, :Gradient],
         return_state = true,
     )

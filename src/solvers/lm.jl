@@ -218,6 +218,7 @@ function solve_lm(
         sub_objective = sub_objective,
         sub_state = sub_state,
         debug = callbacks.debug_actions,
+        callbacks = callbacks.solver_callbacks,
         return_state = true,
     )
 
