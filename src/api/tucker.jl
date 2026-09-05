@@ -1,88 +1,36 @@
 export tucker
 
 """
-    tucker(A, ranks; method = :sthosvd, kwargs...) returns a TuckerResult
+    tucker(A, ranks; method=:sthosvd, kwargs...)
 
-Computes a Tucker decomposition of `A` with multilinear rank `ranks`.
+Compress `A` into a Tucker core and one factor matrix per tensor mode.
 
-## Main Options
+# Inputs
 
-* `method = :sthosvd`: Sets the Tucker decomposition algorithm. Possible options are:
-    - `:sthosvd` (default): Sequentially Truncated HOSVD. A direct one-pass decomposition, mainly used as a fast standalone Tucker approximation or as the default initializer for `:hooi`. Fast, deterministic, and usually a good initial point.
-    - `:hooi`: High-Order Orthogonal Iteration. Iteratively refines the Tucker factors, initialized by ST-HOSVD by default.
+- `A`: numerical input tensor.
+- `ranks`: tuple with one retained rank per mode of `A`.
 
-## Extended Options
+# Output
 
-For `method = :hooi`:
+Returns a [`TuckerResult`](@ref). Use `core` and `factors` to access the compact
+representation, `reconstruct` to rebuild the
+approximation, and `rel_error(A, result)` to measure reconstruction error.
 
-* `maxiter = 50`: Maximum number of HOOI iterations.
-* `tol = 1e-8`: Convergence tolerance based on change in relative reconstruction error.
-* `init = :sthosvd`
-    - `:sthosvd`: Uses ST-HOSVD to initialize the Tucker factors.
-    - `TuckerResult`: Uses an existing Tucker decomposition as the initial point.
+# Common options
 
-For fixed-rank `method = :sthosvd`:
+- `method=:sthosvd` performs a direct decomposition.
+- `method=:hooi` iteratively refines a Tucker decomposition.
+- `svd_backend=:randomized` can reduce memory use for large inputs when used
+  with `method=:sthosvd`.
 
-* `svd_backend = :exact` preserves the deterministic dense implementation.
-* `svd_backend = :randomized` computes truncated mode subspaces through implicit
-  tensor contractions. It avoids materializing mode unfoldings and is intended for
-  large tensors whose target ranks are much smaller than their mode dimensions.
-* `oversampling = 16`, `power_iterations = 1`, `block_columns = 65_536`, and
-  `rng = Random.default_rng()` configure the randomized backend.
+# Example
 
 ```julia
-result = tucker(
-    A,
-    (100, 40, 60);
-    method = :sthosvd,
-    svd_backend = :randomized,
-    processing_order = [2, 3, 1],
-    oversampling = 16,
-    power_iterations = 1,
-    block_columns = 65_536,
-    rng = MersenneTwister(0),
-)
+A = randn(20, 15, 10)
+result = tucker(A, (5, 4, 3))
+compressed = core(result)
+A_approx = reconstruct(result)
 ```
-
-The randomized backend records empty per-mode singular-value vectors because it
-does not compute the complete discarded spectra. Consequently, [`error_bound`](@ref)
-is unavailable for those results; reconstruction-based error metrics remain valid.
-
-## Example
-
-```julia-repl
-julia> using Random
-julia> Random.seed!(0)
-julia> A = randn(20, 15, 10); ranks = (5, 4, 3)
-julia> res = tucker(A, ranks; verbose = false)
-TuckerResult{Float64, 3}
-  Original size:    (20, 15, 10)
-  Core size:        (5, 4, 3)
-  Multilinear rank: (5, 4, 3)
-  Compression:      12.0x
-
-```
-The core tensor and factor matrices can be accessed by
-
-```julia-repl
-core(res)
-factors(res)
-```
-A tensor approximation can be reconstructed by
-
-```julia-repl
-reconstruct(res)
-```
-or equivalently
-
-```julia-repl
-reconstruct_tucker(core(res), factors(res))
-```
-## Notes
-* `:sthosvd` is not an iterative solver. It directly returns a `TuckerResult` and does not expose solver-style outputs such as iteration counts or convergence diagnostics.
-* `:hooi` is the iterative refinement method in the current Tucker implementation.
-* Important distinction: For the current Tucker implementation, do not use `solver = :rgd`, `init = :auto`, or manifold solvers like RGD, RCG, LBFGS, etc.
-
 """
 function tucker(A, ranks; method::Symbol = :sthosvd, kwargs...)
     return _tucker(Val(method), A, ranks; kwargs...)

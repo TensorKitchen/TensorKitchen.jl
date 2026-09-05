@@ -26,6 +26,9 @@ end
 # tucker/sthosvd.jl
 # =========================================================================
 @testset "sthosvd.jl: sthosvd, thosvd, TuckerResult, relative_error" begin
+    @test optimal_mode_order((120, 40, 30), (10, 20, 20)) == [1, 2, 3]
+    @test optimal_mode_order((120, 40, 30)) == [3, 2, 1]
+
     dims = (10, 8, 6)
     r = (4, 3, 3)
     core = randn(r...)
@@ -39,6 +42,7 @@ end
     @test TensorKitchen.relative_frobenius_error(A2, B2) ≈ rel_ref rtol = 1e-12 atol = 1e-12
     @test rel_error(A2, B2) ≈ rel_ref rtol = 1e-12 atol = 1e-12
     td = sthosvd(A, r)
+    @test processing_order(td) == optimal_mode_order(dims, r)
     @test td isa TuckerResult
     @test size(td.core) == r
     @test length(td.factors) == 3
@@ -3300,6 +3304,31 @@ end
     @test r0.C2 ≈ 26.25
     @test r0.value ≈ 1286.25
     @test r0.gradient ≈ [-115.5, -752.5]
+end
+
+@testset "save_result and load_result preserve experiment records" begin
+    A = randn(8, 6, 4)
+    ranks = (3, 2, 2)
+    result = tucker(A, ranks)
+    record = (
+        result = result,
+        method = :tucker,
+        ranks = ranks,
+        input_size = size(A),
+        preprocessing = :none,
+        julia_version = string(VERSION),
+        tensorkitchen_version = string(pkgversion(TensorKitchen)),
+    )
+
+    mktemp() do path, io
+        close(io)
+        @test save_result(path, record) == path
+        loaded = load_result(path)
+        @test loaded.ranks == ranks
+        @test loaded.input_size == size(A)
+        @test reconstruct(loaded.result) ≈ reconstruct(result)
+        @test processing_order(loaded.result) == processing_order(result)
+    end
 end
 
 @testset "norm re-exported" begin

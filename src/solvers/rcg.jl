@@ -167,9 +167,24 @@ function solve_rcg(
 end
 
 """
-    RCGSolver(; coefficient=:hager_zhang, restart=:non_descent, ...)
+    RCGSolver(; coefficient=:hager_zhang, restart=:non_descent,
+        restart_threshold=0.2, sufficient_descent_kappa=1e-4,
+        denom_threshold=1e-10, beale_restart=false)
 
-Riemannian conjugate gradient solver.
+Riemannian conjugate-gradient solver.
+
+- `coefficient` selects the search-direction update. Accepted long names and
+  aliases are `:conjugate_descent`/`:cd`, `:hager_zhang`/`:hz`,
+  `:polak_ribiere`/`:pr`/`:prp`, `:fletcher_reeves`/`:fr`,
+  `:dai_yuan`/`:dy`, `:hestenes_stiefel`/`:hs`, `:liu_storey`/`:ls`, and
+  `:steepest`/`:steepest_descent`/`:gd`/`:gradient_descent`.
+- `restart` accepts `:never` (aliases `:none`, `:no_restart`), `:non_descent`
+  (alias `:nondescent`), or `:non_sufficient_descent` (alias
+  `:sufficient_descent`).
+- `restart_threshold` is used by optional Beale restart;
+  `sufficient_descent_kappa` is used by the sufficient-descent restart rule;
+  and `denom_threshold` safeguards the Hager--Zhang coefficient.
+- `beale_restart=true` wraps the selected coefficient rule in Beale restart.
 """
 Base.@kwdef struct RCGSolver <: AbstractFirstOrderROSolver
     coefficient::Symbol = :hager_zhang

@@ -9,37 +9,63 @@ function _nncpd_effective_geometry(geometry, solver::AbstractSolver)
 end
 
 """
-     nncpd(A, r; kwargs...)
+    nncpd(A, rank; init=:auto, p0=nothing, warm_steps=500,
+        warm_init=TuckerInit(), solver=:rgd, geometry=nothing,
+        maxiter=500, stepsize=0.01, tol=1e-6,
+        gradient_mode=:riemannian, normalization=:auto,
+        scale_by_lambda=true, lambda_eps=1e-10, verbose=true,
+        vector_transport_method=nothing, pullback_eps=1e-8,
+        component_trace=false, kwargs...)
+    nncpd(A; r=nothing, kwargs...)
 
-Computes a nonnegative rank-`r` CP approximation of `A` in two steps: (1) the first step finds an initial point; (2) the second step refines the initial point. Returns a [`CPDResult`](@ref). 
-If `r` is omitted, uses the smallest tensor mode as a heuristic rank.
-`cpd(A, r; nonnegative=true, ...)` routes here and adopts the same effective defaults.
-With the default manifold refinement path, this means an ALS warm start followed
-by `solver = :rgd`.
+Approximate `A` with a nonnegative CP decomposition containing `rank`
+components. This is intended for nonnegative data such as counts,
+intensities, and concentrations.
 
-## Options 
-The options are the same as for [`cpd`](@ref).
+# Inputs
 
-Geometry guide:
-- `geometry=:softplus_metric`
-  Default and usually the safest choice. 
-- `geometry=:squaring_metric`
-  Uses a regularized pullback-inspired geometry induced by the squaring chart.
-- `geometry=:canonical`
-  Plain nonnegative CP coordinates without the pullback-style manifold geometry.
-  This is the natural choice with `solver=:als`.
+- `A`: numerical input tensor.
+- `rank`: number of nonnegative rank-one components.
 
-## Example 
-```julia-repl
-julia> A = randn(20, 15, 10); r = 35;
-julia> B = abs.(A)
-julia> nncpd(B, r)
-CPDResult{Float64}
-  Order:        3
-  Dimensions:   (20, 15, 10)
-  Rank:         35
-  Rel. error:   0.3765605093526155
-``` 
+# Output
+
+Returns a [`CPDResult`](@ref) with nonnegative weights and factors. Use
+`weights`, `factors`, `reconstruct`, and
+`rel_error(A, result)` to inspect the fit.
+
+# Options
+
+- `solver=:rgd`: supports `:als`, `:rgd`, `:rgd_fixed`, `:rcg`, `:lbfgs`, and
+  `:lm`.
+- `init=:auto`, `warm_steps=500`, and `warm_init=TuckerInit()` configure
+  initialization in the same way as [`cpd`](@ref).
+- `geometry=nothing`: selects `:canonical` for ALS and `:softplus_metric` for
+  manifold solvers. Explicit choices are `:canonical`, `:softplus_metric`, and
+  `:squaring_metric`.
+- `maxiter=500`, `stepsize=0.01`, `tol=1e-6`, and `verbose=true` control the
+  solve.
+- `gradient_mode`, `normalization`, `scale_by_lambda`, `lambda_eps`,
+  `vector_transport_method`, and `pullback_eps` have the meanings described for
+  [`cpd`](@ref).
+- `component_trace=false` disables tracing by default. Set it to `true` to
+  record per-component diagnostics for manifold solvers. With `solver=:als`,
+  `miniter`, `projected_grad_tol`, `nn_update`, and `mttkrp_method` are
+  documented by [`fit_cp_als`](@ref).
+
+`A` must have floating-point element type. If `rank`/`r` is omitted, the
+smallest tensor dimension is used as a heuristic; pass it explicitly for
+reproducible model selection.
+
+# Example
+
+```julia
+A = abs.(randn(20, 15, 10))
+result = nncpd(A, 5; verbose=false)
+A_approx = reconstruct(result)
+```
+
+Unlike unconstrained CPD, every returned weight and factor is nonnegative up to
+floating-point roundoff.
 """
 function nncpd(
     A::AbstractArray{T,N};

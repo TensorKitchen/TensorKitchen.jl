@@ -1,42 +1,73 @@
-# Block Term Decomposition 
+# Block Term Decomposition
 
-A block term decomposition (BTD) with `r` blocks writes
+Block term decomposition (BTD) represents a tensor as a sum of Tucker blocks.
+It can be useful when one Tucker decomposition is not flexible enough to
+describe the data.
+
+With ``B`` blocks, a BTD approximation is
+
 ```math
-\hat A = \sum_{i=1}^r A_i,
-```
-where each block $A_i$ is represented as a Tucker decomposition. At present, only homogeneous BTDs are supported, that is, all blocks must have the same multilinear rank.
-
-To compute a block term decomposition of A with 10 blocks, each of multilinear rank (5, 4, 3), use
-
-```julia-repl
-julia> r = 10
-julia> mlrank = (5, 4, 3)
-julia> btd_res = btd(A, r, mlrank)
-BTDResult{Float64}
-  Blocks:       10
-  Rel. error:   0.2551559591470521
+\hat{\mathcal A}
+= \sum_{b=1}^{B}
+  \mathcal G_b
+  \times_1 U_b^{(1)}
+  \times_2 U_b^{(2)}
+  \cdots
+  \times_d U_b^{(d)}.
 ```
 
-The blocks of `btd_res` can be obtained as follows:
+Each summand is a Tucker decomposition with its own core and factor matrices.
+
+## Inputs
+
+- `A`: the numerical tensor to approximate.
+- `blocks`: the number of Tucker blocks.
+- `ranks`: the multilinear rank used for each block.
+
+TensorKitchen currently uses the same `ranks` for every block.
+
+## Example
 
 ```julia
-blocks = blocks(btd_res)
+using TensorKitchen
+
+A = randn(20, 15, 10)
+result = btd(A, 3, (5, 4, 3); verbose = false)
 ```
 
-Each block is represented as a Tucker decomposition, so we can access its core and factor matrices via:
+## Output
+
+`result` is a `BTDResult`.
 
 ```julia
-blk = blocks[1]
-core(blk)
-factors(blk)
+terms = blocks(result)
+first_core = core(terms[1])
+first_factors = factors(terms[1])
+
+A_approx = reconstruct(result)
+error = rel_error(A, result)
 ```
 
-## BTD Docs
+`terms` contains the fitted Tucker blocks. `A_approx` has the same dimensions
+as `A`, and a smaller relative error means a closer reconstruction.
+
+## Choosing blocks and ranks
+
+Start with a small number of blocks and small ranks. Increase them only when
+the reconstruction error is too large for your application. More blocks and
+larger ranks can improve the fit, but they require more memory and computation.
+
+For large tensors, fitting the compact BTD factors avoids storing a full
+reconstruction during most of the calculation. Calling `reconstruct(result)`
+still creates a full-size tensor.
+
+See [Advanced BTD methods](advanced/btd.md) for initialization, solver, and
+refinement controls.
+
+## API reference
 
 ```@docs
-btd
 BTDResult
 blocks
 reconstruct(::BTDResult)
-
 ```

@@ -1,136 +1,65 @@
-# TensorKitchen Pipeline
+# Choosing a Decomposition
 
-This document explains how public APIs route into models, solvers, and result
-converters.
+TensorKitchen provides several decompositions with similar workflows. The main
+difference is the structure used to represent the input tensor.
 
-## Public entry points
+## Quick comparison
 
-- CP Decomposition `cpd(A, r; ...)` 
-- Nonnegative CP Decomposition `nncpd(A, r; ...)` 
-- Block Term Decomposition `btd(A, blocks, ranks; ...)` 
-- Tucker Decomposition `tucker(A, ranks; method=...)` 
-- Join Decomposition `approx(...)` 
+| Use case | Function | Main size parameter | Output |
+| --- | --- | --- | --- |
+| Shared rank-one components across all modes | `cpd(A, rank)` | Number of components | `CPDResult` |
+| Nonnegative data and components | `nncpd(A, rank)` | Number of components | `CPDResult` |
+| A compact core with a separate rank per mode | `tucker(A, ranks)` | Rank tuple | `TuckerResult` |
+| A sum of several Tucker blocks | `btd(A, blocks, ranks)` | Blocks and rank tuple | `BTDResult` |
+| A custom collection of component types | `approx(manifolds, target)` | Component manifolds | `ApproxResult` |
 
-## Default behavior (quick reference)
+## Common workflow
 
-- `cpd(A, r)`:
-  - `init = :alswarm`
-  - `solver = :rgd`
-- `nncpd(A, r)`:
-  - `init = :alswarm`
-  - `solver = :rgd`
-- `btd(A, blocks, ranks)`:
-  - `init = :alswarm`
-  - `warm_steps = 200`
-  - `warm_init = BTDHOSVDMultistartInit(candidates=64, screening_steps=10, block_maxiter=12)`
-  - `warm_rel_error_gate = nothing` (run manifold refinement by default; set e.g. `5e-2` to short-circuit on poor warm starts)
-  - `solver = :rgd`
-  - final BTD-ALS polish enabled by default for non-ALS solvers
-  - `max_stagnation_restarts = 1` (retry with stronger multistart when ALS fit-change stalls at high rel-error)
-- `tucker(A, ranks)`:
-  - `method = :sthosvd`
-- `approx(model::JoinModel)`:
-  - `init = :random`
-  - `solver = :rgd`
+All result types can be inspected and reconstructed in a similar way:
 
-## Core execution architecture
+```julia
+using TensorKitchen
 
-Most optimization APIs share this core pattern:
+A = randn(20, 15, 10)
+result = tucker(A, (5, 4, 3))
 
-1. Build a model (`JoinModel` + backend)
-2. Call `_solve_model(...)`
-3. Convert to a public result struct
+A_approx = reconstruct(result)
+error = rel_error(A, result)
+```
 
-`_solve_model` lives in `src/solvers/solve_dispatch.jl` and is the common
-symbol-to-solver dispatch layer (`:rgd`, `:rgd_fixed`, `:rcg`, `:lbfgs`, `:lm`,
-`:als`, `:btd_tsd`).
+`A_approx` has the same dimensions as `A`. Relative error is zero for an exact
+reconstruction, and smaller values indicate a closer approximation.
 
-## API flows
+## Choosing a rank
 
-### CPD (`cpd`, `nncpd`)
+There is no single best rank for every dataset. A practical approach is:
 
-`cpd(A, r; ...)`:
+1. Start with a small rank.
+2. Fit the decomposition.
+3. Measure the reconstruction error.
+4. Increase the rank until the improvement is no longer worth the additional
+   storage or runtime.
 
-1. Build `JoinModel(A, r; geometry=...)` with `CPDBackend`
-2. Normalize/validate options (`solver`, `geometry`, `gradient_mode`, normalization policy)
-3. Solve through `_solve_model(...)`
-4. Convert to `CPDResult`
+For Tucker and BTD, each entry of the rank tuple corresponds to one tensor
+mode. For example, `(8, 3, 5)` retains different amounts of information along
+the three modes.
 
-Notes:
+## Understanding the outputs
 
-- `:als` means CP-ALS.
-- Manifold solvers (`:rgd`, `:rgd_fixed`, `:rcg`, `:lbfgs`, `:lm`) share dispatch with other pipelines.
-- For `solver != :als`, `init = :auto` resolves to `:alswarm`, so CPD and NNCPD start from an ALS warm point before manifold refinement.
-- Generic `approx(...)` does not use CPD's ALS warm-start path unless it auto-routes to `cpd(...)`.
+- `CPDResult`: component weights and factor matrices.
+- `TuckerResult`: a core tensor and factor matrices.
+- `BTDResult`: a collection of Tucker blocks.
+- `ApproxResult`: components from a custom join model.
 
-### BTD (`btd`)
+Use `reconstruct(result)` when you need the approximation in the original
+tensor shape. For large data, remember that the reconstructed array can be much
+larger than the compact decomposition result.
 
-`btd(A, blocks, ranks; ...)`:
+## Next steps
 
-1. Build a uniform Tucker family via `TuckerJoin(...)`
-2. Wrap as `JoinModel` with `BTDBackend`
-3. Choose effective initializer:
-   - `solver == :als`: use requested init directly (default multistart)
-   - `solver != :als`: use `BTDALSWarmStartInit(...)` so first-order methods start from a good BTD-ALS warm point
-4. If the warm-start rel-error exceeds `warm_rel_error_gate`, return the warm BTD-ALS result directly
-5. Otherwise solve through `_solve_model(...)`
-6. If `solver != :als`, optionally polish with BTD-ALS (`btd_als_polish_maxiter`)
-7. Convert to `BTDResult`
-
-Polish step usefulness:
-
-- Usually helpful for a small final `rel_error` reduction after RGD converges near a good basin.
-- Most useful for quality-focused runs (benchmarks, final fits).
-- Can be skipped for speed-sensitive runs (`btd_als_polish_maxiter=0`) when small extra gains are not worth runtime.
-
-BTD-specific initialization options:
-
-- `:hosvd`: sequential block initialization on residual
-- `:hosvd_multistart`: HOSVD subspace split candidates, optional screening ALS, keep lowest-cost candidate
-- `:alswarm`: short BTD-ALS warm-start wrapper around base initializer
-
-BTD-ALS stabilization behavior:
-
-- Tracks per-iteration fit change (`|rel_t - rel_{t-1}|`)
-- Detects stagnation when fit change is tiny but `rel_error` remains high
-- Can restart from fresh multistart pool (`max_stagnation_restarts`)
-- Reports true final Riemannian gradient norm (`grad_norm`) 
-
-### Tucker (`tucker`)
-
-`tucker(A, ranks; method=...)` does not use `_solve_model`.
-It dispatches directly to decomposition routines:
-
-- `:sthosvd`
-- `:hooi`
-
-## Generic `approx(...)` routing
-
-`approx(manifolds, target; dispatch=:auto)` routes by manifold family:
-
-- uniform `Manifolds.Segre` -> `cpd(...)`
-- uniform `Manifolds.Tucker` matching target shape/rank -> `btd(...)`
-- mixed or non-uniform family -> generic `JoinModel(...)` path -> `ApproxResult`
-
-`dispatch=:cpd`, `:btd`, and `:generic` force behavior.
-
-For the generic `JoinModel` path, `approx(...)` starts from `init = :random`
-by default and then runs the selected manifold solver. It does not run an ALS
-warm-start stage, because a general join component does not necessarily expose
-factor matrices or least-squares block updates.
-
-## Result types and post-processing
-
-- `CPDResult`
-- `BTDResult`
-- `TuckerResult`
-- `ApproxResult`
-
-Common utilities:
-
-- `reconstruct(result)`
-- `rel_error(A, result)`
-
-## File map
-
-- API entry points: `src/api/approx.jl`, `src/api/cpd.jl`, `src/api/nncpd.jl`, `src/api/btd.jl`, `src/api/tucker.jl`
+- [CP decomposition](cpd.md)
+- [Tucker decomposition](tucker.md)
+- [Block term decomposition](btd.md)
+- [Join decomposition](join.md)
+- [Saving and loading results](utils.md)
+- [Advanced methods](advanced/index.md)
