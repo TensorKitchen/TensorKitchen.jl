@@ -10,5 +10,6 @@ using TensorKitchen
 
 Random.seed!(42)
 
+include("data_tests.jl")
 include("basic_tests.jl")
 include("convergence_tests.jl")

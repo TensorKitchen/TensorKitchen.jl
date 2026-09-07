@@ -2,6 +2,7 @@
 include("core/abstract.jl")
 include("core/types.jl")
 include("core/progress.jl")
+include("data/compute_array.jl")
 include("core/tensor_ops.jl")
 include("core/layout.jl")
 include("cpd/core/cp_points.jl")
