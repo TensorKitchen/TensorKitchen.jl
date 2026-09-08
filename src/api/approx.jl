@@ -29,111 +29,63 @@ function approx(
     return _to_approx_result(model, result)
 end
 
-"""
-## Generic Join Approximation
+@doc """
+    approx(model; kwargs...)
+    approx(manifolds, target; dispatch=:auto, kwargs...)
+    approx(product_manifold, target; dispatch=:auto, kwargs...)
+    approx(base, component_count, target; dispatch=:auto, kwargs...)
+    approx(base, target; dispatch=:auto, kwargs...)
 
-`approx(...)` is the main frontend for join decomposition, which works in two stages:
+Approximate `target` with components described by one or more manifolds, or
+solve an existing `JoinModel`.
 
-1. build an initial point
-2. refine it with the selected solver
+# Inputs
 
-### Supported Forms
+- `manifolds`: one manifold or a collection of allowed component manifolds.
+- `product_manifold`: a `ProductManifold` whose factors are the components.
+- `base`: one component manifold used once or repeated `component_count` times.
+- `component_count`: positive number of repeated components.
+- `target`: vector or tensor to approximate.
+- `model`: an existing `JoinModel` containing both the structure and target.
 
-* `approx(model; kwargs...)` : It is for an already constructed join model (`JoinModel(...)`) and routes to the generic join solver. Model can be a `JoinModel` of a tuple of manifolds, a `ProductManifold`, or a single manifold.
-    - model means an already constructed JoinModel.
-    - It fully fixes the decomposition structure and target.
-    - `approx(model; ...)` just solves that model.
-    Example: If you want to approximate a point on the sphere, you can build a `JoinModel` and then use `approx` to refine it.
+# Output
+
+Returns an [`ApproxResult`](@ref) for a general join. A compatible collection
+of CP or Tucker components may return a specialized `CPDResult` or `BTDResult`.
+Use `components`, `reconstruct`, and `rel_error(target, result)`
+to inspect the fit.
+
+# Common options
+
+- `dispatch=:auto` routes uniform Segre components to `cpd`, uniform compatible
+  Tucker components to `btd`, and other component families to the general Join
+  solver. Use `:generic`, `:cpd`, or `:btd` to request a compatible route.
+- For the general Join path, `init=:random`, `solver=:rgd`, `maxiter=500`,
+  `stepsize=1.0`, `tol=1e-6`, `p0=nothing`, and `verbose=true` are the current
+  defaults. Use `p0` to supply an explicit packed starting point.
+- `gradient_mode=:riemannian` selects the intrinsic gradient supplied to the
+  manifold optimizer. `vector_transport_method=nothing` uses the default
+  transport associated with the selected retraction.
+- The general Join path supports `:rgd`, `:rgd_fixed`, `:rcg`, `:lbfgs`, and
+  `:lm`; generic `:als` is not available. A specialized CPD or BTD route
+  accepts the options of that pipeline instead.
+- Supported generic initializers depend on the component family: Sphere
+  components accept `:random`, `:deterministic`, or `:target`; Segre components
+  accept `:random` or `:deterministic`; Tucker components accept `:random`,
+  `:tucker`, `:tucker_diag`, or `:sthosvd`.
+- `target` must have a floating-point element type.
+
+# Example
 
 ```julia
-target = [1.2, 0.4, -0.3]
-model = JoinModel(Manifolds.Sphere(2), target)
-approx(model; maxiter = 100, verbose = false)
-# returns an ApproxResult
+using TensorKitchen, Manifolds
+
+target = [1.2, 0.4]
+circle = Sphere(1)
+result = approx((circle, circle), target; verbose = false)
+target_approx = reconstruct(result)
 ```
-
-* `approx(manifolds, target; kwargs...)` : Builds a generic join model from a tuple of existing manifolds and routes to according to dispatch.
-    Example:
-
-```julia
-target = randn(2, 3)
-approx((Manifolds.Segre((2, 3)), Manifolds.Segre((2, 3))), target; verbose = false)
-# This builds a join with 2 copies of Manifolds.Segre((2, 3))".
-```  
-    
-* `approx(M::ProductManifold, target; kwargs...)` : Uses the factors of a product manifold and route to CPD, BTD, or the generic join solver according to `dispatch`. 
-    - M::ProductManifold means that you already have a product manifold whose factors are the join components.
-    - approx(M, target; ...) uses those factors directly.
-    - It is more explicit than `base`, because the components are already listed.
-    
-   Example:
-
-```julia
-# Example 1
-target = randn(2, 3)
-M = ProductManifold(Manifolds.Segre((2, 3)), Manifolds.Segre((2, 3)))
-approx(M, target; verbose = false)
-# returns an CPDResult
-
-# Example 2
-target = randn(4, 3, 2)
-M = ProductManifold(
-    Manifolds.Tucker((4, 3, 2), (2, 2, 2)),
-    Manifolds.Tucker((4, 3, 2), (2, 2, 2)),
-)
-approx(M, target; verbose = false)
-# returns an BTDResult
-```
-
-* `approx(base, r, target; kwargs...)` : builds a rank-r Segre join and routes by the type of `base`: `Manifolds.Segre` uses CPD and `Manifolds.Tucker` uses BTD unless generic
-dispatch is explicitly requested. 
-    - base means one manifold template, not yet a full join.
-    - `approx(base, r, target; ...)` repeats that same manifold r times to build a join.
-    - `approx(base, target; ...)` builds a one-component join.
-
-```julia
-target = randn(2, 3)
-approx(Manifolds.Segre((2, 3)), 2, target; verbose = false)
-# returns an CPDResult
-```
-
-* `approx(base, target; kwargs...)` : Builds a single-component generic join and route to the generic join solver.
-    Example:
-
-```julia
-target = [1.2, 0.4, -0.3]   
-approx(Manifolds.Sphere(2), target; verbose = false)
-# returns an ApproxResult
-```
-
-* By default, `approx` auto-routes by manifold family:
-    - uniform `Manifolds.Segre` summands calls `cpd(...)`
-    - uniform `Manifolds.Tucker` summands calls `btd(...)`
-    - otherwise calls `JoinModel(...)` and returns a `ApproxResult`
-
-### Return Types
-
-* Depending on the manifold family, `approx(...)` may return:
-    - `ApproxResult` for the generic join path
-    - `CPDResult` when auto-routed to `cpd(...)`
-    - `BTDResult` when auto-routed to `btd(...)`
-
-### Main Options
-
-For the generic join path:
-* `init = :random`: Sets the algorithm to find the initial point.
-* `solver = :rgd`: Sets the algorithm for refinement. Possible options are:
-    - `rgd` (default): Riemannian gradient descent
-    - `rgd_fixed`: Riemannian gradient descent with fixed step size
-    - `rcg`: Riemannian conjugate gradient
-    - `lbfgs`: Limited-memory quasi-Newton
-    - `lm`: Levenberg-Marquardt on residual/Jacobian least squares
-
-##Notes##
-* `:als` is not a solver option for `approx(...)`. However, if `approx(...)` auto-routes to `cpd(...)` or `btd(...)`, then those specialized pipelines may support ALS separately.
-* `warm_steps` and `warm_init` are not part of the generic `approx(...)` path. Generic joins start from random initial point and then use manifold solvers for refinement.
-* For generic mixed joins, use manifold solvers such as `:rgd`, `:rcg`, `:lbfgs`, or `:lm`.
-"""
+""" approx
 function _approx_manifold_collection(
     dispatch::AutoApproxDispatch,
     manifolds,

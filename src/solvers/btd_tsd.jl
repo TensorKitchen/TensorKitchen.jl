@@ -25,6 +25,14 @@ This solver is inspired by tangent-subspace descent (TSD) in
 Gutman and Ho-Nguyen, "Coordinate Descent Without Coordinates:
 Tangent Subspace Descent on Riemannian Manifolds",
 Mathematics of Operations Research, 48(1):127–159, 2023.
+DOI: `10.1287/moor.2022.1253`.
+
+- `stepsize` is the initial trial step for each block update.
+- `schedule=:cyclic` visits blocks in order; `:random` visits every block once
+  per sweep in a fresh random permutation (not sampling with replacement).
+- `block_repeats` repeats the selected block sequence within each outer step.
+- `armijo_contraction`, `armijo_sufficient_decrease`, and `armijo_alpha_min`
+  control the blockwise Armijo backtracking search.
 """
 struct BTDTSDSolver <: AbstractFirstOrderSolver
     stepsize::Float64
@@ -35,23 +43,6 @@ struct BTDTSDSolver <: AbstractFirstOrderSolver
     armijo_alpha_min::Float64
 end
 
-"""
-    BTDTSDSolver(; schedule=:cyclic, block_repeats=1, ...)
-
-Blockwise tangent-subspace descent for BTD.
-
-The `schedule` keyword controls the order in which Tucker blocks are updated.
-
-- `schedule = :cyclic`: updates blocks in the deterministic order
-  `1, 2, ..., R` at every sweep.
-
-- `schedule = :random`: updates all blocks once per sweep, but in a fresh
-  random permutation. This is random reshuffling, not sampling with replacement.
-
-The cyclic schedule is the default because it is deterministic and easiest to
-analyze. The random schedule can be useful experimentally when different BTD
-blocks compete strongly for the same residual structure.
-"""
 function BTDTSDSolver(;
     stepsize::Real = 1.0,
     schedule::Symbol = :cyclic,

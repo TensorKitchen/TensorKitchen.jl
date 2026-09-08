@@ -421,7 +421,7 @@ function _manopt_stopping(maxiter::Int, grad_stop_tol, dual_stop; extra = ())
     )
 end
 
-# Create progress and debug callbacks shared by Manopt-backed solvers.
+# Create progress, lifecycle callbacks, and debug actions shared by Manopt-backed solvers.
 function _manopt_callbacks(
     make_progress::Function,
     maxiter::Int,
@@ -444,18 +444,21 @@ function _manopt_callbacks(
         M;
         diagnostics_recorder,
     )
-    debug_actions = _solver_debug_actions(
-        verbose,
+    step_callback = _solver_callback_group(
         post_step_callback,
         diagnostics_callback,
         progress_callback,
         iteration_callbacks...,
     )
+    solver_callbacks =
+        isnothing(step_callback) ? Any[] : Any[:Init=>step_callback, :Step=>step_callback]
+    debug_actions = _solver_debug_actions(verbose)
     return (
         progress = progress,
         diagnostics_callback = diagnostics_callback,
         progress_callback = progress_callback,
         debug_actions = debug_actions,
+        solver_callbacks = solver_callbacks,
     )
 end
 
@@ -595,12 +598,20 @@ function _solver_stats(
     )
 end
 
-# Collect only active Manopt debug callbacks, dropping omitted hooks.
-_solver_debug_callbacks(callbacks...) = Any[cb for cb in callbacks if !isnothing(cb)]
+# Combine active solver callbacks in their declared execution order.
+function _solver_callback_group(callbacks...)
+    active_callbacks = Any[callback for callback in callbacks if !isnothing(callback)]
+    isempty(active_callbacks) && return nothing
+    return function (problem, state, k)
+        for callback in active_callbacks
+            callback(problem, state, k)
+        end
+        return nothing
+    end
+end
 
-# Build Manopt debug actions and attach TensorKitchen callback hooks.
-function _solver_debug_actions(verbose::Union{Nothing,Bool}, callbacks...)
-    callback_actions = _solver_debug_callbacks(callbacks...)
+# Build only Manopt display/debug actions; solver callbacks use `callbacks=`.
+function _solver_debug_actions(verbose::Union{Nothing,Bool})
     if verbose === true
         io = _SOLVER_DEBUG_SINK
         init_group = Manopt.DebugGroup([
@@ -619,11 +630,9 @@ function _solver_debug_actions(verbose::Union{Nothing,Bool}, callbacks...)
             ]),
             100,
         )
-        iteration_actions = Any[iter_group]
-        append!(iteration_actions, callback_actions)
-        return Any[:Start=>Any[init_group], :Iteration=>iteration_actions]
+        return Any[:Start=>Any[init_group], :Iteration=>Any[iter_group]]
     end
-    return callback_actions
+    return Any[]
 end
 
 # Create a Manopt iteration callback that updates TensorKitchen progress output.

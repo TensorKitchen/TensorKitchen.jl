@@ -24,6 +24,15 @@ struct ALSWarmStartInit{I} <: AbstractInitializer
     base_init::I
 end
 
+"""
+    BTDALSWarmStartInit(nsteps=20; base_init=TuckerInit(),
+        block_method=:hooi, block_maxiter=5)
+
+Configure a BTD-ALS warm start before manifold refinement. `base_init` selects
+the starting BTD point, and each block update uses `block_method` with at most
+`block_maxiter` inner sweeps. `block_method` accepts `:hooi` or `:sthosvd`;
+`nsteps=0` disables the warm iterations while retaining the base initializer.
+"""
 struct BTDALSWarmStartInit{I} <: AbstractInitializer
     nsteps::Int
     base_init::I
@@ -31,6 +40,18 @@ struct BTDALSWarmStartInit{I} <: AbstractInitializer
     block_maxiter::Int
 end
 
+"""
+    BTDHOSVDMultistartInit(candidates=24; screening_steps=5,
+        include_sequential=true, block_method=:hooi, block_maxiter=10,
+        seed=nothing)
+
+Configure BTD initialization from several splits of shared HOSVD mode
+subspaces. `screening_steps` optionally runs short BTD-ALS fits before selecting
+the lowest-cost candidate. `include_sequential=true` includes the deterministic
+sequential split, while the remaining candidates use randomized rotations.
+`block_method` accepts `:hooi` or `:sthosvd`; `block_maxiter` sets its inner
+budget. Set `seed` for reproducible candidate generation.
+"""
 struct BTDHOSVDMultistartInit <: AbstractInitializer
     candidates::Int
     screening_steps::Int

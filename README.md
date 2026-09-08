@@ -68,12 +68,17 @@ CPDResult{Float64}
   Rel. error:   0.4359141301703327
 ```
 
-Now, `res` contains a CP approximation of the 3-way tensor `A`,
+Now, `res` contains a rank-$R$ CP approximation of a $d$-way tensor,
 
 ```math
-\hat A = \sum_{i=1}^r \lambda_i\, a_i \otimes b_i \otimes c_i
+\hat{\mathcal A}
+= \sum_{r=1}^{R} \lambda_r
+  u_r^{(1)} \otimes u_r^{(2)} \otimes \cdots \otimes u_r^{(d)}.
 ```
-It approximates `A` with relative error about `0.436`.
+
+For the 3-way example above, the three factor vectors of component $r$ are
+column `r` of the three factor matrices. The result approximates `A`
+with relative error about `0.436`.
 
 We access the decomposition as follows.
 ```julia

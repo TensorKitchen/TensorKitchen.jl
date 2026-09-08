@@ -55,22 +55,10 @@ end
 """
     CPDResult{T}
 
-Result of a Canonical Polyadic Decomposition.
-
-
-Stores the decoded CP representation together with solver diagnostics:
-- `components`: rank-one tensor components
-- `weights`: component weights
-- `factors`: factor matrices
-- `cost`: final objective function value at the returned solution
-- `rel_error`: final relative reconstruction error
-- `grad_norm`: norm of the final optimization gradient reported by the solver; for manifold solvers this is the Riemannian gradient norm
-- `iterations`: number of refinement iterations
-- `converged`: whether the solver reported convergence
-- `solver`: solver optimization method used to produce the result
-- `solver_info`: solver-specific diagnostics/metadata (`NamedTuple`). Typical keys include:
-    - `initial_stepsize_eff` (RGD), `memory_size` (LBFGS), `cautious_update` (LBFGS),
-    - `initial_scale`, `linesearch`, `has_preconditioner` (LBFGS), and `nncp_pullback_eps` (NNCP).
+Result returned by [`cpd`](@ref) or [`nncpd`](@ref). Use `weights(result)` and
+`factors(result)` to inspect the components, `reconstruct(result)` to rebuild
+the approximation, and `rel_error(result)` to read the final relative
+reconstruction error.
 """
 struct CPDResult{T<:AbstractFloat,C,W,F,S}
     components::C
@@ -150,16 +138,9 @@ end
 """
     ApproxResult{T}
 
-Generic result of `approx(manifolds, target)` (generic join decomposition).
-- `point`: final point on the join manifold
-- `components`: extracted component descriptions
-- `cost`: the value of the optimization objective at the final returned point, that is typically the least-squares objective.
-- `rel_error`: relative error of the decomposition which is the ratio of the cost to the target norm. is scale-normalized and easier to compare across problems
-- `grad_norm`: norm of the final optimization gradient reported by the solver; for manifold solvers this is typically the Riemannian gradient norm
-- `iterations`: number of iterations used
-- `converged`: whether the decomposition converged
-- `solver`: solver used for the decomposition
-- `solver_info`: solver-specific diagnostics/metadata (`NamedTuple`)
+Result returned by a general [`approx`](@ref) call. Use `components(result)` to
+inspect the fitted terms, `reconstruct(result)` to rebuild the approximation,
+and `rel_error(result)` to read the final relative reconstruction error.
 """
 struct ApproxResult{T<:AbstractFloat,P,C,S}
     point::P
@@ -176,13 +157,9 @@ end
 """
     BTDResult{T}
 
-Result of block-term decomposition (`btd`); block
-components expose Tucker structure through accessors like
-`core(blk)`, `factors(blk)`, and `blk.tensor`.
-- `solver_info`: solver-specific diagnostics/metadata (`NamedTuple`). Typical keys include
-  BTD-ALS restart diagnostics (`total_iterations`, `stagnation_restarts`,
-  `restart_rel_error_history`) and BTD-TSD run settings (`schedule`, `block_repeats`,
-  `block_count`, `stepsize`).
+Result returned by [`btd`](@ref). Use `blocks(result)` to inspect the fitted
+Tucker terms, `reconstruct(result)` to rebuild the approximation, and
+`rel_error(result)` to read the final relative reconstruction error.
 """
 struct BTDResult{T<:AbstractFloat,P,C,S}
     point::P
@@ -208,22 +185,10 @@ _cpd_components(weights::Vector{T}, factors::Vector{Matrix{T}}) where {T<:Abstra
 """
     CPDResult{T}
 
-Result of a Canonical Polyadic Decomposition.
-
-
-Stores the decoded CP representation together with solver diagnostics:
-- `components`: rank-one tensor components
-- `weights`: component weights
-- `factors`: factor matrices
-- `cost`: final objective function value at the returned solution
-- `rel_error`: final relative reconstruction error
-- `grad_norm`: norm of the final optimization gradient reported by the solver; for manifold solvers this is the Riemannian gradient norm
-- `iterations`: number of refinement iterations
-- `converged`: whether the solver reported convergence
-- `solver`: solver optimization method used to produce the result
-- `solver_info`: solver-specific diagnostics/metadata (`NamedTuple`). Typical keys include:
-    - `initial_stepsize_eff` (RGD), `memory_size` (LBFGS), `cautious_update` (LBFGS),
-    - `initial_scale`, `linesearch`, `has_preconditioner` (LBFGS), and `nncp_pullback_eps` (NNCP).
+Result returned by [`cpd`](@ref) or [`nncpd`](@ref). Use `weights(result)` and
+`factors(result)` to inspect the components, `reconstruct(result)` to rebuild
+the approximation, and `rel_error(result)` to read the final relative
+reconstruction error.
 """
 function CPDResult(
     weights::Vector{T},
@@ -452,11 +417,12 @@ end
 """
     TuckerResult{T, N}
 
-Stores a Tucker decomposition: core tensor and factor matrices.
-- `core::Array{T,N}` — core tensor
-- `factors::Vector{Matrix{T}}` — orthonormal factor matrices
-- `processing_order::Vector{Int}` — order modes were processed
-- `singular_values::Vector{Vector{T}}` — singular values per truncation
+Result returned by [`tucker`](@ref). Use `core(result)` to access the compressed
+tensor, `factors(result)` to access the mode factor matrices, and
+`reconstruct(result)` to rebuild the approximation. `multilinear_rank(result)`,
+`processing_order(result)`, and `singular_values(result)` expose the recorded
+rank and truncation metadata. Unlike optimization-based CPD, BTD, and Join
+results, `TuckerResult` does not store solver-convergence diagnostics.
 """
 struct TuckerResult{T<:AbstractFloat,N}
     core::Array{T,N}
@@ -479,6 +445,11 @@ Return the Tucker factor matrices.
 """
 factors(td::TuckerResult) = td.factors
 
+"""
+    processing_order(td::TuckerResult)
+
+Return the tensor-mode processing order recorded by the Tucker decomposition.
+"""
 processing_order(td::TuckerResult) = td.processing_order
 
 """

@@ -34,22 +34,30 @@ function reconstruct(td::TuckerResult{T,N}) where {T,N}
 end
 
 # rel_error / relative_error(A, td::TuckerResult) — defined in results/rel_error.jl.
-# Processing order heuristics (Section 6.3 of the paper)
+# Processing-order heuristics
 
 """
-    optimal_mode_order(dims::Tuple, ranks::Tuple) returns a vector of indices for the optimal mode order
+    optimal_mode_order(dims, ranks)
+    optimal_mode_order(dims)
 
 Heuristic for choosing a good processing order for ST-HOSVD.
 
-Following Section 6.3 of Vannieuwenhoven et al., a good heuristic is to process
-modes in increasing order of nₖ / rₖ (i.e., process the most compressible modes
-first). When ranks are not known a priori, processing from smallest to largest
-dimension is a reasonable default.
+With known ranks, modes are sorted by decreasing `dims[k] / ranks[k]`
+(equivalently, increasing `ranks[k] / dims[k]`). This prioritizes the largest
+fractional reduction of the working tensor.
+
+Without ranks, modes are sorted by increasing mode dimension. This is the
+size-only compact-SVD heuristic proposed in section 6.4 of Vannieuwenhoven,
+Vandebril, and Meerbergen (2012).
+
+Both are inexpensive greedy heuristics, not globally optimal order solvers for
+runtime or approximation error. Supply `processing_order` explicitly when
+domain knowledge or benchmarking identifies a better order.
 """
 function optimal_mode_order(dims::NTuple{N,Int}, ranks::NTuple{N,Int}) where {N}
-    # Sort modes by compression ratio nk/rk (ascending = most compressible first)
+    # Rank-aware storage-reduction heuristic: strongest fractional shrink first.
     ratios = [dims[k] / ranks[k] for k = 1:N]
-    return sortperm(ratios)  # most compressible first
+    return sortperm(ratios; rev = true)
 end
 
 function optimal_mode_order(dims::NTuple{N,Int}) where {N}
@@ -62,7 +70,9 @@ end
 
 
 """
-    sthosvd(A, ranks; [processing_order], [svd_backend], [verbose])
+    sthosvd(A, ranks; processing_order=optimal_mode_order(size(A), ranks),
+        svd_backend=:exact, oversampling=16, power_iterations=1,
+        block_columns=65_536, rng=Random.default_rng(), verbose=false)
     Computes the rank-(r₁,…,r_d) Sequentially Truncated HOSVD (ST-HOSVD).
 
 # Exact algorithm (Definition 6.1, Algorithm 1)
@@ -100,6 +110,12 @@ products in steps 1, 3, and 4 are evaluated as blockwise tensor contractions.
 The implementation materializes only the small sketch and basis, the small Gram
 matrix, and the progressively compressed tensor `B`/`S_new`.
 
+The power loop orthonormalizes after each complete `A_(k) A_(k)ᵀ`
+application. It does not orthonormalize between the individual transpose and
+forward products as in fully stabilized randomized subspace iteration. Keep
+`power_iterations` small and verify reconstruction error when singular values
+span a wide numerical range.
+
 # References
 - N. Halko, P. G. Martinsson, and J. A. Tropp, "Finding Structure with
   Randomness: Probabilistic Algorithms for Constructing Approximate Matrix
@@ -112,7 +128,7 @@ through blockwise tensor contractions is TensorKitchen's implementation strategy
 for efficient computation.
 
 # Arguments
-- `A::Array{T,N}`: input tensor
+- `A::AbstractArray{T,N}`: floating-point input tensor
 - `ranks::NTuple{N,Int}`: target multilinear rank (r₁,…,r_d)
 
 # Keyword arguments
@@ -124,7 +140,8 @@ for efficient computation.
 - `power_iterations::Int`: randomized subspace power iterations (default: `1`)
 - `block_columns::Int`: approximate maximum number of implicit unfolding columns per
   random-projection block (default: `65_536`)
-- `rng::AbstractRNG`: random-number generator used by `:randomized`
+- `rng::AbstractRNG`: random-number generator used by `:randomized` (default:
+  `Random.default_rng()`)
 - `verbose::Bool`: print progress information (default: false)
 
 # Returns
@@ -293,7 +310,7 @@ end
 
 
 """
-    sthosvd(A, tol; [processing_order], [verbose]) computes TuckerResult
+    sthosvd(A, tol; processing_order=optimal_mode_order(size(A)), verbose=false)
 
 Tolerance-based ST-HOSVD: automatically determine ranks to achieve
     ‖A - Â‖_F ≤ tol · ‖A‖_F
@@ -303,12 +320,16 @@ squared errors from each truncation step. By distributing the error budget equal
 across modes (ϵₖ = ϵ/√d for each mode), the final error is bounded by ϵ.
 
 # Arguments
-- `A::Array{T,N}`: input tensor
-- `tol::Float64`: relative error tolerance
+- `A::AbstractArray{T,N}`: floating-point input tensor
+- `tol::Float64`: requested relative Frobenius-error tolerance
 
 # Keyword arguments
 - `processing_order::Vector{Int}`: order in which to process modes (default: smallest first)
 - `verbose::Bool`: print progress information (default: false)
+
+This overload uses exact SVDs to choose the ranks and returns a
+[`TuckerResult`](@ref). The randomized backend is available only for the
+fixed-rank overload.
 """
 function sthosvd(
     A::AbstractArray{T,N},
@@ -395,15 +416,19 @@ end
 # T-HOSVD (classical truncated HOSVD) for comparison
 
 """
-    thosvd(A, ranks; [verbose]) computes TuckerResult
+    thosvd(A, ranks; verbose=false)
 
 Classical Truncated HOSVD (T-HOSVD).
 
 Computes all factor matrices from the *original* tensor (no sequential truncation),
 then computes the core tensor at the end.
 
-The ST-HOSVD is generally preferred: it requires fewer operations and typically
-yields a better approximation.
+ST-HOSVD often requires fewer operations because it shrinks the working tensor
+between modes. Approximation quality can depend on the tensor and processing
+order, so compare reconstruction errors when the distinction matters.
+
+`A` must be a floating-point tensor, and `ranks` must contain one valid rank per
+mode. Returns a [`TuckerResult`](@ref).
 """
 function thosvd(
     A::AbstractArray{T,N},
@@ -454,11 +479,18 @@ end
 
 # Error analysis utilities (Theorem 6.4)
 """
-    error_bound(td::TuckerResult) 
+    error_bound(td::TuckerResult)
 
-    Returns the a posteriori error bound from Theorem 6.4:
-    ‖A - Â‖²_F = Σₖ Σ_{j > rₖ} σ²_{k,j}
-    where σ_{k,j} are the singular values at step k of the ST-HOSVD.
+Return the square root of the summed discarded singular-value energy stored in
+`td`. For an exact ST-HOSVD result, Theorem 6.4 gives
+
+`‖A - Â‖²_F = Σₖ Σ_{j > rₖ} σ²_{k,j}`,
+
+so this is the absolute Frobenius reconstruction error. The interpretation is
+specific to the spectra generated by exact ST-HOSVD. Use `rel_error(A, td)` for
+HOOI, T-HOSVD, or other Tucker results. Randomized ST-HOSVD does not store the
+complete discarded spectra, and this function throws `ArgumentError` for such a
+result.
 """
 function error_bound(td::TuckerResult{T,N}) where {T,N}
     sq_error = zero(T)

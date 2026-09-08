@@ -1,47 +1,73 @@
+# CP Decomposition
 
-# CPD 
+CP decomposition represents a tensor as a sum of rank-one components. It is a
+good starting point when the same number of components should describe every
+mode of the tensor.
 
-Here is how to approximate a tensor `A` by a CPD of rank `r`.
-
-```julia-repl
-julia> using TensorKitchen
-julia> A = randn(20, 15, 10)
-julia> r = 35
-julia> res = cpd(A, r)
-CPDResult{Float64}
-  Order:        3
-  Dimensions:   (20, 15, 10)
-  Rank:         35
-  Rel. error:   0.4359141301703327
-```
-
-Now, `res` contains a CP approximation of the 3-way tensor `A`,
+For a ``d``-way tensor, a rank-``R`` CP approximation is
 
 ```math
-\hat A = \sum_{i=1}^r \lambda_i\, a_i \otimes b_i \otimes c_i
+\hat{\mathcal A}
+= \sum_{r=1}^{R} \lambda_r
+  u_r^{(1)} \otimes u_r^{(2)} \otimes \cdots \otimes u_r^{(d)}.
 ```
-It approximates `A` with relative error about `0.436`.
 
-We access the decomposition as follows.
+Each outer product is one rank-one component. The scalar ``\lambda_r`` is its
+weight, and ``u_r^{(k)}`` is its factor vector for mode ``k``.
+
+## Inputs
+
+- `A`: the numerical tensor to approximate.
+- `rank`: the number of rank-one components to keep.
+
+Larger ranks can improve reconstruction accuracy, but they also use more
+storage and take longer to fit.
+
+## Example
+
 ```julia
-λ = weights(res)
-U = factors(res)
-```
-Here, `U` is a triple of matrices $(A,B,C)$, where the columns of $A$ are the $a_i$ and so on. These are called *factor matrices*.
+using TensorKitchen
 
-We get the whole reconstructed tensor by 
+A = randn(20, 15, 10)
+result = cpd(A, 5; verbose = false)
+```
+
+## Output
+
+`result` is a `CPDResult`. It stores one weight per component and one factor
+matrix per tensor mode.
+
 ```julia
-Â = reconstruct(res)
+component_weights = weights(result)
+factor_matrices = factors(result)
+A_approx = reconstruct(result)
+error = rel_error(A, result)
 ```
 
+`A_approx` has the same dimensions as `A`. Relative error is zero for an exact
+reconstruction, and smaller values indicate a closer approximation.
 
-## CPD Docs
+## Nonnegative data
+
+Use `nncpd` when both the input data and the fitted components should be
+nonnegative:
+
+```julia
+A_nonnegative = abs.(A)
+result = nncpd(A_nonnegative, 5; verbose = false)
+```
+
+See [Advanced optimization methods](advanced/optimization.md) for solver,
+initialization, and nonnegative-geometry details.
+
+## API reference
 
 ```@docs
-cpd
-nncpd
 CPDResult
 weights(::CPDResult)
 factors(::CPDResult)
 reconstruct(::CPDResult)
 ```
+
+The complete method and option reference is on the
+[Advanced CPD methods](advanced/cpd.md) page.
