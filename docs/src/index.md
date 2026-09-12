@@ -57,6 +57,7 @@ See [Choosing a decomposition](PIPELINE.md) for a longer comparison.
 
 ## Guides
 
+- [Preparing large data](preparing_data.md)
 - [CP decomposition](cpd.md)
 - [Tucker decomposition](tucker.md)
 - [Block term decomposition](btd.md)

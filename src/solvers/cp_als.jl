@@ -272,9 +272,12 @@ function fit_cp_als(
     verbose::Bool = true,
     return_stats::Bool = false,
     progress_phase::Symbol = :refinement,
+    observation_norm2_cache = nothing,
 ) where {T<:AbstractFloat,N}
     dims = size(A)
-    normA2 = A isa ComputeArray ? observation_norm2(A) : sum(abs2, A)
+    normA2 =
+        isnothing(observation_norm2_cache) ? observation_norm2(A) :
+        T(observation_norm2_cache)
     update_policy = _cp_update_policy(nonnegative, nn_update)
 
     if !isnothing(init_factors)
@@ -525,6 +528,7 @@ function solve(
     verbose::Bool = true,
     return_stats::Bool = false,
     progress_phase::Symbol = :refinement,
+    observation_norm2_cache = nothing,
     kwargs...,
 ) where {T<:AbstractFloat}
     A, r = cp_als_data(model)
@@ -545,6 +549,7 @@ function solve(
         verbose = verbose,
         return_stats = true,
         progress_phase = progress_phase,
+        observation_norm2_cache,
         mttkrp_method = get(kwargs, :mttkrp_method, :auto),
         nonnegative,
     )

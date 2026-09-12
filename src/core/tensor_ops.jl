@@ -77,10 +77,22 @@ function unfold_mode(A::AbstractArray, mode::Int)
     return reshape(Aperm, dims[mode], :)
 end
 
-function mode_n_product(A::AbstractArray, U::AbstractMatrix, mode::Int)
+function mode_n_product(
+    A::AbstractArray,
+    U::AbstractMatrix,
+    mode::Int;
+    block_columns::Int = 65_536,
+)
     dims = size(A)
     N = length(dims)
+    1 <= mode <= N || throw(ArgumentError("mode must be in 1:$N; received $mode"))
+    block_columns >= 1 || throw(ArgumentError("block_columns must be positive"))
     n, newn = dims[mode], size(U, 1)
+    size(U, 2) == n || throw(
+        DimensionMismatch(
+            "size(U, 2)=$(size(U, 2)) must match size(A, mode)=$(size(A, mode))",
+        ),
+    )
     perm = _mode_first_perm(N, mode)
     Aperm = mode == 1 ? A : permutedims(A, perm)
     A2 = reshape(Aperm, n, :)
@@ -88,6 +100,15 @@ function mode_n_product(A::AbstractArray, U::AbstractMatrix, mode::Int)
     newdims = (newn, dims[perm[2:end]]...)
     Bperm = reshape(B2, newdims)
     return permutedims(Bperm, invperm(perm))
+end
+
+function mode_n_product(
+    A::ComputeArray,
+    U::AbstractMatrix,
+    mode::Int;
+    block_columns::Int = 65_536,
+)
+    return _implicit_mode_product(A, U, mode; block_columns)
 end
 
 """

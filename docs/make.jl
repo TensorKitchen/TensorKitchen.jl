@@ -11,6 +11,7 @@ makedocs(
         "BTD" => "btd.md",
         "Join" => "join.md",
         "Utilities" => "utils.md",
+        "Preparing large data" => "preparing_data.md",
         "Choosing a decomposition" => "PIPELINE.md",
         "Advanced guide" => [
             "Overview" => "advanced/index.md",
