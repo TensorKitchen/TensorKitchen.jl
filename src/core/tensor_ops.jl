@@ -77,10 +77,22 @@ function unfold_mode(A::AbstractArray, mode::Int)
     return reshape(Aperm, dims[mode], :)
 end
 
-function mode_n_product(A::AbstractArray, U::AbstractMatrix, mode::Int)
+function mode_n_product(
+    A::AbstractArray,
+    U::AbstractMatrix,
+    mode::Int;
+    block_columns::Int = 65_536,
+)
     dims = size(A)
     N = length(dims)
+    1 <= mode <= N || throw(ArgumentError("mode must be in 1:$N; received $mode"))
+    block_columns >= 1 || throw(ArgumentError("block_columns must be positive"))
     n, newn = dims[mode], size(U, 1)
+    size(U, 2) == n || throw(
+        DimensionMismatch(
+            "size(U, 2)=$(size(U, 2)) must match size(A, mode)=$(size(A, mode))",
+        ),
+    )
     perm = _mode_first_perm(N, mode)
     Aperm = mode == 1 ? A : permutedims(A, perm)
     A2 = reshape(Aperm, n, :)
@@ -90,115 +102,13 @@ function mode_n_product(A::AbstractArray, U::AbstractMatrix, mode::Int)
     return permutedims(Bperm, invperm(perm))
 end
 
-# These helpers perform mode contractions from tensor index labels instead of
-# first constructing a mode unfolding. They are intentionally internal: the
-# public API remains `mode_n_product`, while scalable Tucker algorithms can use
-# these operations without materializing a tensor-sized `permutedims` copy.
-function _implicit_mode_product(
-    A::AbstractArray,
+function mode_n_product(
+    A::ComputeArray,
     U::AbstractMatrix,
     mode::Int;
     block_columns::Int = 65_536,
 )
-    N = ndims(A)
-    1 <= mode <= N || throw(ArgumentError("mode must be in 1:$N; received $mode"))
-    block_columns >= 1 || throw(ArgumentError("block_columns must be positive"))
-    size(U, 2) == size(A, mode) || throw(
-        DimensionMismatch(
-            "size(U, 2)=$(size(U, 2)) must match size(A, mode)=$(size(A, mode))",
-        ),
-    )
-
-    tensor_labels = ntuple(identity, N)
-    new_label = N + 1
-    matrix_labels = (new_label, mode)
-    output_labels = ntuple(m -> m == mode ? new_label : m, N)
-    output_dims = ntuple(m -> m == mode ? size(U, 1) : size(A, m), N)
-    output = Array{promote_type(eltype(A), eltype(U))}(undef, output_dims)
-    block_lengths = _mode_block_lengths(size(A), mode, block_columns)
-    block_axes = ntuple(m -> _axis_chunks(axes(A, m), block_lengths[m]), N)
-
-    for block in Iterators.product(block_axes...)
-        block_indices = Tuple(block)
-        A_block = @view A[block_indices...]
-        partial = TensorOperations.tensorcontract(
-            output_labels,
-            U,
-            matrix_labels,
-            A_block,
-            tensor_labels,
-        )
-        output_indices = ntuple(m -> m == mode ? axes(output, m) : block_indices[m], N)
-        @views output[output_indices...] .= partial
-    end
-    return output
-end
-
-function _implicit_mode_cross(
-    A::AbstractArray,
-    B::AbstractArray,
-    mode::Int;
-    block_columns::Int = 65_536,
-)
-    N = ndims(A)
-    ndims(B) == N || throw(DimensionMismatch("A and B must have the same number of modes"))
-    1 <= mode <= N || throw(ArgumentError("mode must be in 1:$N; received $mode"))
-    block_columns >= 1 || throw(ArgumentError("block_columns must be positive"))
-    @inbounds for m = 1:N
-        m == mode && continue
-        size(A, m) == size(B, m) || throw(
-            DimensionMismatch(
-                "A and B must agree outside mode $mode; " *
-                "size(A, $m)=$(size(A, m)), size(B, $m)=$(size(B, m))",
-            ),
-        )
-    end
-
-    labels_A = ntuple(identity, N)
-    new_label = N + 1
-    labels_B = ntuple(m -> m == mode ? new_label : m, N)
-    output = zeros(promote_type(eltype(A), eltype(B)), size(A, mode), size(B, mode))
-    block_lengths = _mode_block_lengths(size(A), mode, block_columns)
-    block_axes = ntuple(m -> _axis_chunks(axes(A, m), block_lengths[m]), N)
-
-    for block in Iterators.product(block_axes...)
-        block_indices_A = Tuple(block)
-        block_indices_B = ntuple(m -> m == mode ? axes(B, m) : block_indices_A[m], N)
-        A_block = @view A[block_indices_A...]
-        B_block = @view B[block_indices_B...]
-        partial = TensorOperations.tensorcontract(
-            (mode, new_label),
-            A_block,
-            labels_A,
-            B_block,
-            labels_B,
-        )
-        output .+= partial
-    end
-    return output
-end
-
-@inline function _axis_chunks(axis::AbstractUnitRange, chunk_length::Int)
-    chunk_length >= 1 || throw(ArgumentError("chunk length must be positive"))
-    first_index = first(axis)
-    last_index = last(axis)
-    return [
-        start:min(start+chunk_length-1, last_index) for
-        start = first_index:chunk_length:last_index
-    ]
-end
-
-function _mode_block_lengths(dims::NTuple{N,Int}, mode::Int, block_columns::Int) where {N}
-    block_columns >= 1 || throw(ArgumentError("block_columns must be positive"))
-    lengths = ones(Int, N)
-    lengths[mode] = dims[mode]
-    remaining = block_columns
-    @inbounds for m = 1:N
-        m == mode && continue
-        lengths[m] = min(dims[m], max(remaining, 1))
-        remaining = max(div(remaining, lengths[m]), 1)
-    end
-    return Tuple(lengths)
+    return _implicit_mode_product(A, U, mode; block_columns)
 end
 
 """
@@ -674,6 +584,39 @@ function cp_residual_stats_explicit(
     X = reconstruct_cpd_rankr(λ, U)
     residual = X .- A
     n2 = sum(abs2, residual)
+    return (n2, T(0.5) * n2, _relative_error_frob_sq(n2, normA2))
+end
+
+function cp_residual_stats_explicit(
+    A::ComputeArray{T,N},
+    normA2::T,
+    λ::Vector{T},
+    U::Vector{Matrix{T}},
+) where {T<:AbstractFloat,N}
+    length(U) == N ||
+        throw(DimensionMismatch("expected $N factor matrices, got $(length(U))"))
+    length(λ) == size(U[1], 2) || throw(
+        DimensionMismatch(
+            "weight count $(length(λ)) does not match factor rank $(size(U[1], 2))",
+        ),
+    )
+
+    n2 = zero(T)
+    cartesian_indices = CartesianIndices(A)
+    foreach_compute_block(A; compute_type = T) do values, linear_indices
+        @inbounds for (block_index, linear_index) in enumerate(linear_indices)
+            I = cartesian_indices[linear_index]
+            approximation = zero(T)
+            for component in eachindex(λ)
+                rank_one_value = λ[component]
+                for mode = 1:N
+                    rank_one_value *= U[mode][I[mode], component]
+                end
+                approximation += rank_one_value
+            end
+            n2 += abs2(approximation - values[block_index])
+        end
+    end
     return (n2, T(0.5) * n2, _relative_error_frob_sq(n2, normA2))
 end
 

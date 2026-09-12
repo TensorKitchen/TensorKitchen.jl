@@ -588,6 +588,33 @@ _validate_cpd_solver_supported(
     ::Union{ALSSolver,RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver,LMSolver},
 ) = nothing
 
+@inline _is_observation_preserving_cpd_solver(solver) =
+    solver === :als || solver isa ALSSolver
+
+@inline _is_observation_preserving_cpd_init(init) =
+    init === :random || init isa Union{RandomInit,PointInit}
+
+function _validate_observation_preserving_cpd_path(A, solver, init, p0)
+    A isa ComputeArray || return nothing
+    _is_observation_preserving_cpd_solver(solver) || throw(
+        ArgumentError(
+            "A lazy ComputeArray currently supports CP decomposition only with " *
+            "solver=:als. Use solver=:als, or set materialize=true to use a manifold solver.",
+        ),
+    )
+    if isnothing(p0) && !_is_observation_preserving_cpd_init(init)
+        throw(
+            ArgumentError(
+                "A lazy ComputeArray currently supports CP-ALS initialization with " *
+                "init=:random, RandomInit(), PointInit(...), or an explicit p0. " *
+                "Structured initializers require a materialized tensor; choose a safe " *
+                "initializer or set materialize=true.",
+            ),
+        )
+    end
+    return nothing
+end
+
 function _validate_cpd_solver_options(
     solver::AbstractSolver,
     geometry::Symbol,
@@ -890,6 +917,7 @@ function _cpd_impl(
     vector_transport_method,
     pullback_eps = 1e-8,
     component_trace::Bool = false,
+    observation_norm2_cache = nothing,
     kwargs...,
 ) where {T<:AbstractFloat,N}
     haskey(kwargs, :softplus_beta) && throw(
@@ -945,6 +973,7 @@ function _cpd_impl(
             pullback_eps = pullback_eps_eff,
             component_trace,
             nonnegative,
+            observation_norm2_cache,
             kwargs...,
         )
     end
@@ -959,10 +988,10 @@ end
 #### MAIN CPD ####
 
 function cpd(
-    A::AbstractArray{T,N};
+    A::AbstractArray{<:Real,N};
     r::Union{Int,Nothing} = nothing,
     kwargs...,
-) where {T<:AbstractFloat,N}
+) where {N}
     dims = size(A)
     r_eff = r === nothing ? max(1, minimum(dims)) : r
     if r === nothing && get(kwargs, :verbose, true)
@@ -974,7 +1003,8 @@ function cpd(
 end
 
 """
-    cpd(A, rank; init=:auto, p0=nothing, warm_steps=500,
+    cpd(A, rank; compute_type=nothing, materialize=false,
+        conversion_block_length=65_536, init=:auto, p0=nothing, warm_steps=500,
         warm_init=TuckerInit(), solver=:rgd, geometry=:canonical,
         maxiter=500, stepsize=nothing, tol=1e-6,
         gradient_mode=:riemannian, normalization=:auto,
@@ -987,7 +1017,8 @@ Approximate `A` with a CP decomposition containing `rank` components.
 
 # Inputs
 
-- `A`: numerical input tensor.
+- `A`: real-valued input tensor. Integer and non-native floating-point storage
+  can be converted lazily at the public API boundary.
 - `rank`: number of rank-one components.
 
 # Output
@@ -997,6 +1028,15 @@ compact representation, `reconstruct` to rebuild the
 approximation, and `rel_error(A, result)` to measure reconstruction error.
 
 # Common options
+
+- `compute_type=nothing`: floating-point arithmetic type. Small integer storage
+  defaults to `Float32`; other integer storage defaults to `Float64`; native
+  floating-point inputs keep their element type.
+- `materialize=false`: preserve native storage and convert observations only as
+  exact kernels read them. Set `true` to explicitly allocate a full tensor in
+  `compute_type`.
+- `conversion_block_length=65_536`: conversion-buffer length used by streaming
+  preprocessing.
 
 - `solver=:rgd`: refinement solver. Supported symbols are `:als`, `:rgd`,
   `:rgd_fixed`, `:rcg`, `:lbfgs`, and `:lm`; a compatible solver object may be
@@ -1034,8 +1074,9 @@ approximation, and `rel_error(A, result)` to measure reconstruction error.
 
 If `rank`/`r` is omitted, the smallest tensor dimension is used as a heuristic
 rank and a message is printed when `verbose=true`. Passing the rank explicitly
-is recommended for reproducible model selection. `A` must have floating-point
-element type.
+is recommended for reproducible model selection. With `materialize=false`, a
+lazy converted input currently supports `solver=:als` together with
+`init=:random`, `RandomInit()`, `PointInit(...)`, or an explicit `p0`.
 
 # Example
 
@@ -1047,8 +1088,11 @@ A_approx = reconstruct(result)
 ```
 """
 function cpd(
-    A::AbstractArray{T,N},
+    A::AbstractArray{<:Real,N},
     r::Int;
+    compute_type = nothing,
+    materialize::Bool = false,
+    conversion_block_length::Int = 65_536,
     init = :auto,
     p0 = nothing,
     warm_steps = 500,
@@ -1068,7 +1112,10 @@ function cpd(
     pullback_eps = 1e-8,
     component_trace::Bool = false,
     kwargs...,
-) where {T<:AbstractFloat,N}
+) where {N}
+    A_prepared =
+        prepare_tensor(A; compute_type, materialize, block_length = conversion_block_length)
+    _validate_observation_preserving_cpd_path(A_prepared, solver, init, p0)
     if nonnegative
         # Align effective defaults with nncpd() on the nonnegative route.
         stepsize_nn = isnothing(stepsize) ? 0.01 : stepsize
@@ -1077,8 +1124,9 @@ function cpd(
         warm_steps_nn = warm_steps
         geometry_nn = _cpd_nonnegative_geometry(solver_obj, geometry)
         return nncpd(
-            A,
+            A_prepared,
             r;
+            conversion_block_length = conversion_block_length,
             init = init_nn,
             p0 = p0,
             warm_steps = warm_steps_nn,
@@ -1101,7 +1149,7 @@ function cpd(
     end
     stepsize_eff = isnothing(stepsize) ? 1.0 : stepsize
     return _cpd_impl(
-        A,
+        A_prepared,
         r;
         init = init,
         p0 = p0,
