@@ -40,6 +40,7 @@ end
 ) where {N}
     method == :auto && return _mttkrp_auto_method(dims, r, mode)
     method == :khatri_rao && return :khatri_rao
+    method == :implicit && return :implicit
     if method == :direct
         N == 3 && return :direct3
         N == 4 && return :direct4
@@ -47,10 +48,37 @@ end
     else
         throw(
             ArgumentError(
-                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, or :direct.",
+                "Unknown mttkrp method=$method. " *
+                "Use :auto, :khatri_rao, :direct, or :implicit.",
             ),
         )
     end
+end
+
+@inline function _mttkrp_resolve_method(
+    method::Symbol,
+    A::AbstractArray,
+    dims::NTuple{N,Int},
+    r::Int,
+    mode::Int,
+) where {N}
+    method === :auto && A isa ComputeArray && return :implicit
+    return _mttkrp_resolve_method(method, dims, r, mode)
+end
+
+@inline function _validate_mttkrp_compute_types(
+    method::Symbol,
+    ::Type{TA},
+    ::Type{TC},
+) where {TA,TC}
+    method === :implicit && return nothing
+    TA === TC && return nothing
+    throw(
+        ArgumentError(
+            "mttkrp method=$method requires the tensor and factors to have the same " *
+            "element type; use method=:implicit for storage type $TA and compute type $TC",
+        ),
+    )
 end
 
 # forming Khatri-Rao product helper, the loop is costly.
@@ -341,20 +369,20 @@ end
 
 #Public API
 function mttkrp(
-    A::AbstractArray{T,N},
-    components::Vector{RankOneTensor{T}},
+    A::AbstractArray{TA,N},
+    components::Vector{RankOneTensor{TC}},
     mode::Int;
     method::Symbol = :auto,
-) where {T<:AbstractFloat,N}
+) where {TA<:Real,TC<:AbstractFloat,N}
     return mttkrp(A, factors_from_components(components), mode; method)
 end
 
 function mttkrp(
-    A::AbstractArray{T,N},
-    U::AbstractVector{<:AbstractMatrix{T}},
+    A::AbstractArray{TA,N},
+    U::AbstractVector{<:AbstractMatrix{TC}},
     mode::Int;
     method::Symbol = :auto,
-) where {T<:AbstractFloat,N}
+) where {TA<:Real,TC<:AbstractFloat,N}
     dims = size(A)
     mode < 1 && throw(ArgumentError("mode must be >= 1"))
     mode > N && throw(ArgumentError("mode must be <= ndims(A)"))
@@ -373,9 +401,14 @@ function mttkrp(
             throw(DimensionMismatch("mttkrp: all factors must have same column count"))
     end
 
-    method_eff = _mttkrp_resolve_method(method, dims, r, mode)
+    method_eff =
+        method === :auto && TA !== TC ? :implicit :
+        _mttkrp_resolve_method(method, A, dims, r, mode)
+    _validate_mttkrp_compute_types(method_eff, TA, TC)
 
-    if method_eff == :khatri_rao
+    if method_eff == :implicit
+        return implicit_mttkrp(A, U, mode)
+    elseif method_eff == :khatri_rao
         return _mttkrp_khatri_rao(A, U, mode)
     elseif method_eff == :direct3
         N == 3 ||
@@ -390,22 +423,23 @@ function mttkrp(
     else
         throw(
             ArgumentError(
-                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, or :direct.",
+                "Unknown mttkrp method=$method. " *
+                "Use :auto, :khatri_rao, :direct, or :implicit.",
             ),
         )
     end
 end
 
 function mttkrp!(
-    out::AbstractMatrix{T},
-    A::AbstractArray{T,N},
-    U::AbstractVector{<:AbstractMatrix{T}},
+    out::AbstractMatrix{TC},
+    A::AbstractArray{TA,N},
+    U::AbstractVector{<:AbstractMatrix{TC}},
     mode::Int;
     method::Symbol = :auto,
     work = nothing,
     kr_buf = nothing,
     kr_work = nothing,
-) where {T<:AbstractFloat,N}
+) where {TA<:Real,TC<:AbstractFloat,N}
     dims = size(A)
     mode < 1 && throw(ArgumentError("mode must be >= 1"))
     mode > N && throw(ArgumentError("mode must be <= ndims(A)"))
@@ -430,8 +464,13 @@ function mttkrp!(
     size(out, 2) == r ||
         throw(DimensionMismatch("mttkrp!: out has $(size(out,2)) columns, expected $r"))
 
-    method_eff = _mttkrp_resolve_method(method, dims, r, mode)
-    if method_eff == :khatri_rao
+    method_eff =
+        method === :auto && TA !== TC ? :implicit :
+        _mttkrp_resolve_method(method, A, dims, r, mode)
+    _validate_mttkrp_compute_types(method_eff, TA, TC)
+    if method_eff == :implicit
+        implicit_mttkrp!(out, A, U, mode)
+    elseif method_eff == :khatri_rao
         isnothing(kr_buf) && throw(
             ArgumentError("mttkrp!: method=:khatri_rao requires a KR workspace buffer"),
         )
@@ -468,7 +507,8 @@ function mttkrp!(
     else
         throw(
             ArgumentError(
-                "Unknown mttkrp method=$method. Use :auto, :khatri_rao, or :direct.",
+                "Unknown mttkrp method=$method. " *
+                "Use :auto, :khatri_rao, :direct, or :implicit.",
             ),
         )
     end

@@ -69,7 +69,7 @@ function CPALSWorkspace(
     mttkrp_bufs = [_cp_als_matrix_workspace_like(A, dims[n], r) for n = 1:N]
     total_dim_prod = prod(dims)
     resolved_mttkrp_methods =
-        [_mttkrp_resolve_method(mttkrp_method, dims, r, n) for n = 1:N]
+        [_mttkrp_resolve_method(mttkrp_method, A, dims, r, n) for n = 1:N]
     mttkrp_tmp_work = Any[
         _mttkrp_needs_tmp_workspace(resolved_mttkrp_methods[n]) ?
         _cp_als_matrix_workspace_like(A, dims[n], r) : nothing for n = 1:N
@@ -239,8 +239,9 @@ Fit a rank-`rank` CP model by alternating factor updates.
   `init_factors=(weights, factors)` supplies an explicit start.
 - `normalization` accepts `:none`, `:lambda_separate`, or
   `:nn_lambda_separate` when compatible with the model.
-- `mttkrp_method` accepts `:auto`, `:khatri_rao`, or `:direct` and controls
-  the matrix-times-Khatri--Rao-product kernel.
+- `mttkrp_method` accepts `:auto`, `:khatri_rao`, `:direct`, or `:implicit` and
+  controls the matrix-times-Khatri--Rao-product kernel. `:auto` selects the
+  observation-preserving implicit kernel for a [`ComputeArray`](@ref).
 - With `nonnegative=false`, `nn_update=:auto` selects ordinary least squares
   (`:ls`). With `nonnegative=true`, it selects row NNLS (`:nnls`); the other
   nonnegative update choices are `:mu` and `:hals`.
@@ -251,8 +252,9 @@ Fit a rank-`rank` CP model by alternating factor updates.
 - `return_stats=false` returns `(weights, factors)`; `true` returns the fitted
   point and convergence statistics. `progress_phase` labels progress reporting.
 
-`A` must have a floating-point element type. This is a lower-level interface;
-use `cpd` or `nncpd` for standard result objects.
+`A` must expose a floating-point element type. A [`ComputeArray`](@ref) can keep
+its underlying observations in a different real storage type. This is a
+lower-level interface; use `cpd` or `nncpd` for standard result objects.
 """
 function fit_cp_als(
     A::AbstractArray{T,N},
@@ -272,7 +274,7 @@ function fit_cp_als(
     progress_phase::Symbol = :refinement,
 ) where {T<:AbstractFloat,N}
     dims = size(A)
-    normA2 = sum(abs2, A)
+    normA2 = A isa ComputeArray ? observation_norm2(A) : sum(abs2, A)
     update_policy = _cp_update_policy(nonnegative, nn_update)
 
     if !isnothing(init_factors)

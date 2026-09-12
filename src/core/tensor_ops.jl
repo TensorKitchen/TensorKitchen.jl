@@ -567,6 +567,39 @@ function cp_residual_stats_explicit(
 end
 
 function cp_residual_stats_explicit(
+    A::ComputeArray{T,N},
+    normA2::T,
+    λ::Vector{T},
+    U::Vector{Matrix{T}},
+) where {T<:AbstractFloat,N}
+    length(U) == N ||
+        throw(DimensionMismatch("expected $N factor matrices, got $(length(U))"))
+    length(λ) == size(U[1], 2) || throw(
+        DimensionMismatch(
+            "weight count $(length(λ)) does not match factor rank $(size(U[1], 2))",
+        ),
+    )
+
+    n2 = zero(T)
+    cartesian_indices = CartesianIndices(A)
+    foreach_compute_block(A; compute_type = T) do values, linear_indices
+        @inbounds for (block_index, linear_index) in enumerate(linear_indices)
+            I = cartesian_indices[linear_index]
+            approximation = zero(T)
+            for component in eachindex(λ)
+                rank_one_value = λ[component]
+                for mode = 1:N
+                    rank_one_value *= U[mode][I[mode], component]
+                end
+                approximation += rank_one_value
+            end
+            n2 += abs2(approximation - values[block_index])
+        end
+    end
+    return (n2, T(0.5) * n2, _relative_error_frob_sq(n2, normA2))
+end
+
+function cp_residual_stats_explicit(
     A::AbstractArray{T,N},
     normA2::T,
     components::Vector{RankOneTensor{T}},
