@@ -59,8 +59,9 @@ Returns a [`CPDResult`](@ref) with nonnegative weights and factors. Use
 
 If `rank`/`r` is omitted, the smallest tensor dimension is used as a heuristic;
 pass it explicitly for reproducible model selection. With `materialize=false`,
-a lazy converted input has the same currently supported path as CPD:
-`solver=:als` with a random or explicit initialization.
+a lazy converted input supports `solver=:als`, `:rgd`, `:rgd_fixed`, `:rcg`, or
+`:lbfgs` with a random or explicit initialization. Structured initializers and
+`solver=:lm` require `materialize=true`.
 
 # Example
 

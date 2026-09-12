@@ -589,7 +589,8 @@ _validate_cpd_solver_supported(
 ) = nothing
 
 @inline _is_observation_preserving_cpd_solver(solver) =
-    solver === :als || solver isa ALSSolver
+    solver in (:als, :rgd, :rgd_fixed, :rcg, :lbfgs) ||
+    solver isa Union{ALSSolver,RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver}
 
 @inline _is_observation_preserving_cpd_init(init) =
     init === :random || init isa Union{RandomInit,PointInit}
@@ -598,14 +599,16 @@ function _validate_observation_preserving_cpd_path(A, solver, init, p0)
     A isa ComputeArray || return nothing
     _is_observation_preserving_cpd_solver(solver) || throw(
         ArgumentError(
-            "A lazy ComputeArray currently supports CP decomposition only with " *
-            "solver=:als. Use solver=:als, or set materialize=true to use a manifold solver.",
+            "A lazy ComputeArray supports exact CP paths with solver=:als, :rgd, " *
+            ":rgd_fixed, :rcg, or :lbfgs. The requested solver accesses an " *
+            "input-sized ambient residual; choose a supported solver or set " *
+            "materialize=true.",
         ),
     )
     if isnothing(p0) && !_is_observation_preserving_cpd_init(init)
         throw(
             ArgumentError(
-                "A lazy ComputeArray currently supports CP-ALS initialization with " *
+                "A lazy ComputeArray supports observation-preserving initialization with " *
                 "init=:random, RandomInit(), PointInit(...), or an explicit p0. " *
                 "Structured initializers require a materialized tensor; choose a safe " *
                 "initializer or set materialize=true.",
@@ -784,7 +787,7 @@ function _cpd_manifold_grad_tol(
 end
 
 function _cpd_point_rel_error(model, p)
-    normA2 = sum(abs2, tensor(model))
+    normA2 = observation_norm2(tensor(model))
     cost_val = Float64(cost(model, p))
     return Float64(_relative_error_frob_sq(2 * cost_val, Float64(normA2)))
 end
@@ -1075,8 +1078,10 @@ approximation, and `rel_error(A, result)` to measure reconstruction error.
 If `rank`/`r` is omitted, the smallest tensor dimension is used as a heuristic
 rank and a message is printed when `verbose=true`. Passing the rank explicitly
 is recommended for reproducible model selection. With `materialize=false`, a
-lazy converted input currently supports `solver=:als` together with
-`init=:random`, `RandomInit()`, `PointInit(...)`, or an explicit `p0`.
+lazy converted input supports `solver=:als`, `:rgd`, `:rgd_fixed`, `:rcg`, or
+`:lbfgs` together with `init=:random`, `RandomInit()`, `PointInit(...)`, or an
+explicit `p0`. Structured initializers and `solver=:lm` require
+`materialize=true`.
 
 # Example
 

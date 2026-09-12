@@ -190,8 +190,8 @@ function _supports_vector_transport_to(M, p, vt, retraction_method)
     try
         X = zero_vector(M, p)
         q = retract(M, p, X, retraction_method)
-        Y = vector_transport_to(M, p, X, q, vt)
-        return isnothing(check_vector(M, q, Y))
+        vector_transport_to(M, p, X, q, vt)
+        return true
     catch
         return false
     end

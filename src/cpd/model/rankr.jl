@@ -169,6 +169,7 @@ end
 function model_cost_egrad_functions(model::RankRCPDModel{T,N}) where {T,N}
     if model.nonnegative
         cache = _CPRankrEvalCache(T, model.dims, model.r)
+        normA2 = observation_norm2(model.A)
         cost_fn = function (M, p)
             _require_vector_for_squaring_metric(M, p)
             λ̃, Ũ = unpack_point_rankr(p, model.dims, model.r)
@@ -178,7 +179,7 @@ function model_cost_egrad_functions(model::RankRCPDModel{T,N}) where {T,N}
                 use_softplus ? [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)] :
                 [Ũ[m] .^ 2 for m in eachindex(Ũ)]
             _cp_rankr_refresh_cache!(cache, model.A, U, p)
-            return cp_rankr_cost_value(sum(abs2, model.A), λ, cache.inner, cache.cross_mat)
+            return cp_rankr_cost_value(normA2, λ, cache.inner, cache.cross_mat)
         end
         egrad_fn = function (M, p)
             _require_vector_for_squaring_metric(M, p)
@@ -207,7 +208,7 @@ function model_cost_egrad_functions(model::RankRCPDModel{T,N}) where {T,N}
         return cost_fn, egrad_fn
     elseif model.geometry == :native
         cache = _CPRankrEvalCache(T, model.dims, model.r)
-        normA2 = sum(abs2, model.A)
+        normA2 = observation_norm2(model.A)
         cost_fn = function (M, p)
             λ, U = unpack_rankr_native(p, model.dims, model.r)
             _cp_rankr_refresh_cache!(cache, model.A, U, p)
@@ -236,7 +237,7 @@ function model_cost_egrad_functions(model::RankRCPDModel{T,N}) where {T,N}
         return cost_fn, egrad_fn
     else
         cache = _CPRankrEvalCache(T, model.dims, model.r)
-        normA2 = sum(abs2, model.A)
+        normA2 = observation_norm2(model.A)
         Nmodes = length(model.dims)
         Ubuf = Vector{Matrix{T}}(undef, Nmodes)
         cost_fn = function (M, p)

@@ -433,6 +433,6 @@ function _prepare_solver_problem(
         model_cost = model_cost,
         model_egrad = model_egrad,
         model_grad = model_grad,
-        normA2 = sum(abs2, tensor(model)),
+        normA2 = observation_norm2(tensor(model)),
     )
 end

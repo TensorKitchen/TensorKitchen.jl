@@ -16,7 +16,8 @@ Is converting the whole input the memory problem?
 │
 └─ yes → keep native storage and choose compute_type
          │
-         ├─ CP or nonnegative CP → exact ALS with implicit MTTKRP
+         ├─ CP or nonnegative CP → exact ALS or manifold optimization
+         │                          with implicit contractions
          │
          └─ Tucker → randomized ST-HOSVD when approximation is acceptable
 ```
@@ -46,6 +47,27 @@ result = cpd(
 This CP-ALS path uses all observations. It does not construct a dense unfolding
 or Khatri--Rao matrix and is not a randomized approximation.
 
+The same lazy input can be used by the gradient-based manifold solvers. Choose a
+random initializer or provide an explicit starting point so initialization does
+not request a materialized Tucker decomposition:
+
+```julia
+result = cpd(
+    counts,
+    10;
+    compute_type = Float32,
+    materialize = false,
+    solver = :lbfgs, # also :rgd, :rgd_fixed, or :rcg
+    init = :random,
+    verbose = false,
+)
+```
+
+For rank two and above, objective and gradient evaluations use exact implicit
+MTTKRP contractions. Rank-one models use exact tensor-vector contractions.
+Their norm, component trace, and final-error diagnostics also preserve lazy
+storage. These methods still inspect all observations; they are not sketches.
+
 For nonnegative data, use the same storage options with `nncpd`:
 
 ```julia
@@ -60,7 +82,8 @@ result = nncpd(
 ```
 
 `nncpd` checks the input for nonfinite and negative observations in a streaming
-pass before fitting.
+pass before fitting. Its lazy path supports the same `:als`, `:rgd`,
+`:rgd_fixed`, `:rcg`, and `:lbfgs` solver choices.
 
 ## Tucker decomposition
 
@@ -101,7 +124,9 @@ cores, and bounded workspaces are still allocated.
 
 Unsupported lazy combinations fail with an `ArgumentError` and explain which
 option must change. TensorKitchen does not silently materialize the input or
-silently replace an exact method with a randomized one.
+silently replace an exact method with a randomized one. In particular,
+structured CP initializers and `solver=:lm` still require a materialized input;
+LM constructs an input-sized ambient residual.
 
 BTD is not connected to the lazy input path yet. To use BTD with integer data,
 make the conversion explicit:

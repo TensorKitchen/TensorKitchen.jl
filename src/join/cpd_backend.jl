@@ -59,6 +59,16 @@ initial_point(
 ) = initial_point(cpd_model(model), init; kwargs...)
 cost(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p) = cost(cpd_model(model), p)
 egrad(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p) = egrad(cpd_model(model), p)
+model_cost_function(model::JoinModel{<:AbstractFloat,<:CPDBackend}) =
+    model_cost_function(cpd_model(model))
+model_egrad_function(model::JoinModel{<:AbstractFloat,<:CPDBackend}) =
+    model_egrad_function(cpd_model(model))
+model_cost_egrad_functions(model::JoinModel{<:AbstractFloat,<:CPDBackend}) =
+    model_cost_egrad_functions(cpd_model(model))
+model_rgrad_function(
+    model::JoinModel{<:AbstractFloat,<:CPDBackend};
+    model_egrad = nothing,
+) = model_rgrad_function(cpd_model(model); model_egrad)
 residual(model::JoinModel{<:AbstractFloat,<:CPDBackend}, p) = residual(cpd_model(model), p)
 differential_action!(
     out::AbstractVector,
@@ -133,8 +143,8 @@ function _cpd_result(model::JoinModel{<:AbstractFloat,<:CPDBackend}, result, dim
 
     rel_err = rel_error(result)
     if !isfinite(rel_err)
-        Xhat = reconstruct_cpd_rankr(λ_raw, U_raw)
-        rel_err = rel_error(m.A, Xhat)
+        normA2 = observation_norm2(m.A)
+        _, _, rel_err = cp_residual_stats_explicit(m.A, normA2, λ_raw, U_raw)
     end
     λ_pub, U_pub = _public_cpd_factors(m, λ_raw, U_raw)
     return CPDResult(

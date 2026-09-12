@@ -231,7 +231,7 @@ end
         raw,
         2;
         compute_type = Float32,
-        solver = :rgd,
+        solver = :lm,
         init = :random,
         maxiter = 0,
         verbose = false,
@@ -276,6 +276,107 @@ end
         1;
         solver = :als,
         init = :random,
+        maxiter = 0,
+        verbose = false,
+    )
+end
+
+function _test_lazy_manifold_cpd_solver(solver; component_trace::Bool = false)
+    raw = reshape(Int16.(1:24), 4, 3, 2)
+    dense = Float32.(raw)
+    rng = MersenneTwister(410 + Int(solver === :rcg) + 2 * Int(solver === :lbfgs))
+
+    rank2_start =
+        CPDPoint(ones(Float32, 2), [rand(rng, Float32, size(raw, mode), 2) for mode = 1:3])
+    lazy_cp = cpd(
+        raw,
+        2;
+        compute_type = Float32,
+        solver,
+        p0 = rank2_start,
+        maxiter = 1,
+        component_trace,
+        verbose = false,
+    )
+    dense_cp = cpd(
+        dense,
+        2;
+        solver,
+        p0 = rank2_start,
+        maxiter = 1,
+        component_trace,
+        verbose = false,
+    )
+    @test rel_error(lazy_cp) ≈ rel_error(dense_cp) rtol = 5.0f-4 atol = 5.0f-4
+    @test weights(lazy_cp) ≈ weights(dense_cp) rtol = 5.0f-4 atol = 5.0f-4
+    @test all(
+        isapprox(
+            factors(lazy_cp)[mode],
+            factors(dense_cp)[mode];
+            rtol = 5.0f-4,
+            atol = 5.0f-4,
+        ) for mode = 1:3
+    )
+
+    rank1_start =
+        CPDPoint(ones(Float32, 1), [rand(rng, Float32, size(raw, mode), 1) for mode = 1:3])
+    lazy_nn = nncpd(
+        raw,
+        1;
+        compute_type = Float32,
+        solver,
+        p0 = rank1_start,
+        maxiter = 1,
+        verbose = false,
+    )
+    dense_nn = nncpd(dense, 1; solver, p0 = rank1_start, maxiter = 1, verbose = false)
+    @test rel_error(lazy_nn) ≈ rel_error(dense_nn) rtol = 5.0f-4 atol = 5.0f-4
+    @test weights(lazy_nn) ≈ weights(dense_nn) rtol = 5.0f-4 atol = 5.0f-4
+    @test all(
+        isapprox(
+            factors(lazy_nn)[mode],
+            factors(dense_nn)[mode];
+            rtol = 5.0f-4,
+            atol = 5.0f-4,
+        ) for mode = 1:3
+    )
+
+    return lazy_cp
+end
+
+@testset "lazy CP RGD paths" begin
+    rgd_result = _test_lazy_manifold_cpd_solver(:rgd; component_trace = true)
+    @test isfinite(rgd_result.solver_info.component_trace_start_rel_error)
+    @test !isempty(rgd_result.solver_info.component_trace_cost_history)
+    _test_lazy_manifold_cpd_solver(:rgd_fixed)
+end
+
+@testset "lazy CP RCG path" begin
+    _test_lazy_manifold_cpd_solver(:rcg)
+end
+
+@testset "lazy CP L-BFGS path" begin
+    _test_lazy_manifold_cpd_solver(:lbfgs)
+end
+
+@testset "lazy CP initialization boundary" begin
+    raw = reshape(Int16.(1:24), 4, 3, 2)
+    random_result = cpd(
+        raw,
+        2;
+        compute_type = Float32,
+        solver = RGDSolver(0.1),
+        init = RandomInit(),
+        maxiter = 1,
+        verbose = false,
+    )
+    @test solver(random_result) == :rgd
+    @test_throws ArgumentError cpd(
+        raw,
+        2;
+        compute_type = Float32,
+        solver = :rgd,
+        init = :auto,
         maxiter = 0,
         verbose = false,
     )
