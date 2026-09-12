@@ -53,5 +53,6 @@ solver, geometry, normalization, stopping, and diagnostic options:
 ```@docs
 cpd
 nncpd
+ComputeArray
 fit_cp_als
 ```
