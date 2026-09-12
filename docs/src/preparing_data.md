@@ -66,7 +66,9 @@ result = cpd(
 For rank two and above, objective and gradient evaluations use exact implicit
 MTTKRP contractions. Rank-one models use exact tensor-vector contractions.
 Their norm, component trace, and final-error diagnostics also preserve lazy
-storage. These methods still inspect all observations; they are not sketches.
+storage. The target norm is computed once and reused across initialization,
+optimization, and diagnostics. These methods still inspect all observations;
+they are not sketches.
 
 For nonnegative data, use the same storage options with `nncpd`:
 

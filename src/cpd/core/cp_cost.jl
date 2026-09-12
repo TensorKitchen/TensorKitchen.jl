@@ -2,11 +2,19 @@
 export cost_segre, egrad_segre, cost_secant_rankr, egrad_secant_rankr
 
 function cost_segre(A::AbstractArray{T,N}, dims::NTuple{N,Int}) where {T<:AbstractFloat,N}
-    normA2 = observation_norm2(A)
+    return cost_segre(A, dims, observation_norm2(A))
+end
+
+function cost_segre(
+    A::AbstractArray{T,N},
+    dims::NTuple{N,Int},
+    normA2::Real,
+) where {T<:AbstractFloat,N}
+    normA2_T = T(normA2)
     return function (M, p)
         λ, U = unpack_point_rank1(p, dims)
         inner = rank1_inner(A, U)
-        return T(0.5) * (normA2 + λ^2 - 2 * λ * inner)
+        return T(0.5) * (normA2_T + λ^2 - 2 * λ * inner)
     end
 end
 
@@ -83,7 +91,15 @@ function cost_segre_nn(
     A::AbstractArray{T,N},
     dims::NTuple{N,Int},
 ) where {T<:AbstractFloat,N}
-    normA2 = observation_norm2(A)
+    return cost_segre_nn(A, dims, observation_norm2(A))
+end
+
+function cost_segre_nn(
+    A::AbstractArray{T,N},
+    dims::NTuple{N,Int},
+    normA2::Real,
+) where {T<:AbstractFloat,N}
+    normA2_T = T(normA2)
     return function (M, p)
         _require_vector_for_squaring_metric(M, p)
         λ̃, Ũ = unpack_point_rank1(p, dims)
@@ -96,7 +112,7 @@ function cost_segre_nn(
         end
         inner = rank1_inner(A, U)
         normX2 = λ^2 * prod(sum(abs2, Um) for Um in U)
-        return T(0.5) * (normA2 + normX2 - 2 * λ * inner)
+        return T(0.5) * (normA2_T + normX2 - 2 * λ * inner)
     end
 end
 

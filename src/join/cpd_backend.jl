@@ -65,6 +65,8 @@ model_egrad_function(model::JoinModel{<:AbstractFloat,<:CPDBackend}) =
     model_egrad_function(cpd_model(model))
 model_cost_egrad_functions(model::JoinModel{<:AbstractFloat,<:CPDBackend}) =
     model_cost_egrad_functions(cpd_model(model))
+model_cost_egrad_functions(model::JoinModel{<:AbstractFloat,<:CPDBackend}, normA2::Real) =
+    model_cost_egrad_functions(cpd_model(model), normA2)
 model_rgrad_function(
     model::JoinModel{<:AbstractFloat,<:CPDBackend};
     model_egrad = nothing,
@@ -133,7 +135,13 @@ function _cpd_solver_point(
     return cpd_point(m, p)
 end
 
-function _cpd_result(model::JoinModel{<:AbstractFloat,<:CPDBackend}, result, dims, r)
+function _cpd_result(
+    model::JoinModel{<:AbstractFloat,<:CPDBackend},
+    result,
+    dims,
+    r;
+    observation_norm2_cache = nothing,
+)
     m = cpd_model(model)
     solver_sym = _result_solver_symbol(solver(result))
     si = _result_solver_info(result)
@@ -143,7 +151,9 @@ function _cpd_result(model::JoinModel{<:AbstractFloat,<:CPDBackend}, result, dim
 
     rel_err = rel_error(result)
     if !isfinite(rel_err)
-        normA2 = observation_norm2(m.A)
+        normA2 =
+            isnothing(observation_norm2_cache) ? observation_norm2(m.A) :
+            eltype(m.A)(observation_norm2_cache)
         _, _, rel_err = cp_residual_stats_explicit(m.A, normA2, λ_raw, U_raw)
     end
     λ_pub, U_pub = _public_cpd_factors(m, λ_raw, U_raw)

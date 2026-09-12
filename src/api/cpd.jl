@@ -60,15 +60,20 @@ Base.@kwdef mutable struct _CPDComponentTraceHistory
     rgrad_failed_count::Int = 0
 end
 
-Base.@kwdef mutable struct _CPDComponentTraceRecorder{M}
+Base.@kwdef mutable struct _CPDComponentTraceRecorder{M,F,T<:Real}
     model::M
+    model_cost::F
+    normA2::T
     previous::Union{Nothing,CPDPoint} = nothing
     previous_cost::Float64 = NaN
     start_rel_error::Float64 = NaN
     history::_CPDComponentTraceHistory = _CPDComponentTraceHistory()
 end
 
-_CPDComponentTraceRecorder(model) = _CPDComponentTraceRecorder(; model)
+function _CPDComponentTraceRecorder(model, normA2::Real)
+    model_cost, _ = model_cost_egrad_functions(model, normA2)
+    return _CPDComponentTraceRecorder(; model, model_cost, normA2)
+end
 
 function _rankone_norm2(λ, U, k::Int)
     val = abs2(λ[k])
@@ -425,7 +430,7 @@ function _record_cpd_component_trace!(
     iter::Int,
 )
     q = cpd_point(rec.model, p)
-    cost_val = Float64(cost(rec.model, p))
+    cost_val = Float64(rec.model_cost(manifold(rec.model), p))
     grad_diags = _safe_cpd_component_gradient_diagnostics(rec, problem, p)
     if rec.previous !== nothing
         hist = rec.history
@@ -680,6 +685,7 @@ function _cpd_als_warm_then_pack(
             verbose = verbose,
             return_stats = true,
             progress_phase = :initialization,
+            observation_norm2_cache = get(kwargs, :observation_norm2_cache, nothing),
         )
         return pack_cpd_point(target, CPDPoint(warm_out.weights, warm_out.factors))
     end
@@ -708,7 +714,13 @@ function _cpd_als_warm_then_pack(
         progress_phase = :initialization,
         kwargs...,
     )
-    warm_cpd = _to_cpd_result(warm_model, warm_result, size(A), r)
+    warm_cpd = _to_cpd_result(
+        warm_model,
+        warm_result,
+        size(A),
+        r;
+        observation_norm2_cache = get(kwargs, :observation_norm2_cache, nothing),
+    )
     return pack_cpd_point(target, cpd_point(warm_cpd))
 end
 
@@ -786,10 +798,15 @@ function _cpd_manifold_grad_tol(
     return tol
 end
 
+function _cpd_point_rel_error(model, p, normA2::Real, model_cost)
+    cost_val = Float64(model_cost(manifold(model), p))
+    return Float64(_relative_error_frob_sq(2 * cost_val, Float64(normA2)))
+end
+
 function _cpd_point_rel_error(model, p)
     normA2 = observation_norm2(tensor(model))
-    cost_val = Float64(cost(model, p))
-    return Float64(_relative_error_frob_sq(2 * cost_val, Float64(normA2)))
+    model_cost, _ = model_cost_egrad_functions(model, normA2)
+    return _cpd_point_rel_error(model, p, normA2, model_cost)
 end
 
 function _cpd_initial_solve_point(model, init_eff, p0, solver::AbstractSolver; kwargs...)
@@ -805,6 +822,7 @@ function _cpd_initial_solve_point(
     warm_normalization,
     verbose::Bool,
     pullback_eps,
+    observation_norm2_cache,
     kwargs...,
 )
     return _cpd_als_warm_then_pack(
@@ -814,6 +832,7 @@ function _cpd_initial_solve_point(
         normalization = warm_normalization,
         verbose,
         pullback_eps,
+        observation_norm2_cache,
         kwargs...,
     )
 end
@@ -857,9 +876,12 @@ function _run_cpd_solver(
     vector_transport_method,
     pullback_eps,
     component_trace,
+    observation_norm2_cache,
     kwargs...,
 )
-    trace_recorder = component_trace ? _CPDComponentTraceRecorder(model) : nothing
+    trace_recorder =
+        component_trace ? _CPDComponentTraceRecorder(model, observation_norm2_cache) :
+        nothing
     iteration_callbacks =
         isnothing(trace_recorder) ? () : (_cpd_component_trace_callback(trace_recorder),)
     p_solve = _cpd_initial_solve_point(
@@ -871,11 +893,17 @@ function _run_cpd_solver(
         warm_normalization,
         verbose,
         pullback_eps,
+        observation_norm2_cache,
         kwargs...,
     )
     p_start = _cpd_solver_start_point(model, p_solve, init_eff, solver; verbose)
     if !isnothing(trace_recorder)
-        trace_recorder.start_rel_error = _cpd_point_rel_error(model, p_start)
+        trace_recorder.start_rel_error = _cpd_point_rel_error(
+            model,
+            p_start,
+            trace_recorder.normA2,
+            trace_recorder.model_cost,
+        )
     end
 
     result = _solve_model(
@@ -893,6 +921,7 @@ function _run_cpd_solver(
         vector_transport_method,
         grad_tol = _cpd_manifold_grad_tol(model, solver, tol),
         iteration_callbacks,
+        observation_norm2_cache,
         kwargs...,
     )
     return isnothing(trace_recorder) ? result :
@@ -958,6 +987,9 @@ function _cpd_impl(
         use_pullback_metric = (geometry_eff == :squaring_metric),
         pullback_eps = pullback_eps_eff,
     )
+    normA2_cache =
+        isnothing(observation_norm2_cache) ? observation_norm2(A) :
+        T(observation_norm2_cache)
 
     raw_result = with_phase_progress() do
         _run_cpd_solver(
@@ -976,7 +1008,7 @@ function _cpd_impl(
             pullback_eps = pullback_eps_eff,
             component_trace,
             nonnegative,
-            observation_norm2_cache,
+            observation_norm2_cache = normA2_cache,
             kwargs...,
         )
     end
@@ -985,7 +1017,7 @@ function _cpd_impl(
         nonnegative && geometry_eff in (:squaring_metric, :softplus_metric) ?
         _merge_res_solver_info(raw_result, (nncp_pullback_eps = pullback_eps_eff,)) :
         raw_result
-    return _to_cpd_result(model, result, size(A), r)
+    return _to_cpd_result(model, result, size(A), r; observation_norm2_cache = normA2_cache)
 end
 
 #### MAIN CPD ####

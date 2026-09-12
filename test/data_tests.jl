@@ -1,3 +1,20 @@
+struct _NormCountingArray{T,N,A<:AbstractArray{T,N}} <: AbstractArray{T,N}
+    data::A
+    norm_calls::Base.RefValue{Int}
+end
+
+Base.size(A::_NormCountingArray) = size(A.data)
+Base.axes(A::_NormCountingArray) = axes(A.data)
+Base.IndexStyle(::Type{<:_NormCountingArray{T,N,A}}) where {T,N,A} = Base.IndexStyle(A)
+Base.getindex(A::_NormCountingArray, I...) = getindex(A.data, I...)
+Base.similar(A::_NormCountingArray, ::Type{T}, dims::Dims) where {T} =
+    similar(A.data, T, dims)
+
+function TensorKitchen.observation_norm2(A::_NormCountingArray; kwargs...)
+    A.norm_calls[] += 1
+    return sum(abs2, A.data)
+end
+
 @testset "storage and compute precision separation" begin
     raw = reshape(Int16.(-12:11), 4, 3, 2)
 
@@ -380,4 +397,47 @@ end
         maxiter = 0,
         verbose = false,
     )
+end
+
+@testset "CP target norm is cached for one solver run" begin
+    data = reshape(Float32.(1:24), 4, 3, 2)
+    norm_calls = Ref(0)
+    counted = _NormCountingArray(data, norm_calls)
+    rng = MersenneTwister(501)
+    start =
+        CPDPoint(ones(Float32, 2), [rand(rng, Float32, size(data, mode), 2) for mode = 1:3])
+
+    cpd(
+        counted,
+        2;
+        solver = :rgd,
+        p0 = start,
+        maxiter = 2,
+        component_trace = true,
+        verbose = false,
+    )
+    @test norm_calls[] == 1
+
+    norm_calls[] = 0
+    cpd(
+        counted,
+        2;
+        solver = :rgd,
+        init = ALSWarmStartInit(1; base_init = RandomInit()),
+        maxiter = 1,
+        verbose = false,
+    )
+    @test norm_calls[] == 1
+
+    norm_calls[] = 0
+    nncpd(
+        counted,
+        2;
+        solver = :rgd,
+        p0 = start,
+        maxiter = 2,
+        component_trace = true,
+        verbose = false,
+    )
+    @test norm_calls[] == 0
 end

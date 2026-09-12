@@ -5,9 +5,10 @@ export observation_norm2, observation_stats
 """
     observation_norm2(A; compute_type=nothing, block_length=65_536)
 
-Compute the squared Frobenius norm from every observation using one bounded
-compute-precision buffer. No randomized approximation or full converted tensor
-is created.
+Compute the squared Frobenius norm from every observation. Native
+floating-point arrays use their backend reduction; lazy or converting inputs
+use one bounded compute-precision buffer. No randomized approximation or full
+converted tensor is created.
 """
 function observation_norm2(
     A::AbstractArray{<:Real};
