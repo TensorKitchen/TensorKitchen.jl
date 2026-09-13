@@ -114,6 +114,7 @@ function nncpd(
     pullback_eps = 1e-8,
     kwargs...,
 ) where {N}
+    _reject_public_observation_norm_cache(kwargs)
     A_prepared =
         prepare_tensor(A; compute_type, materialize, block_length = conversion_block_length)
     _validate_observation_preserving_cpd_path(A_prepared, solver, init, p0)

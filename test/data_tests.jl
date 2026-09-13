@@ -1,6 +1,7 @@
 struct _NormCountingArray{T,N,A<:AbstractArray{T,N}} <: AbstractArray{T,N}
     data::A
     norm_calls::Base.RefValue{Int}
+    norm_block_lengths::Vector{Int}
 end
 
 Base.size(A::_NormCountingArray) = size(A.data)
@@ -10,8 +11,13 @@ Base.getindex(A::_NormCountingArray, I...) = getindex(A.data, I...)
 Base.similar(A::_NormCountingArray, ::Type{T}, dims::Dims) where {T} =
     similar(A.data, T, dims)
 
-function TensorKitchen.observation_norm2(A::_NormCountingArray; kwargs...)
+function TensorKitchen.observation_norm2(
+    A::_NormCountingArray;
+    block_length::Int = 65_536,
+    kwargs...,
+)
     A.norm_calls[] += 1
+    push!(A.norm_block_lengths, block_length)
     return sum(abs2, A.data)
 end
 
@@ -402,23 +408,31 @@ end
 @testset "CP target norm is cached for one solver run" begin
     data = reshape(Float32.(1:24), 4, 3, 2)
     norm_calls = Ref(0)
-    counted = _NormCountingArray(data, norm_calls)
+    norm_block_lengths = Int[]
+    counted = _NormCountingArray(data, norm_calls, norm_block_lengths)
     rng = MersenneTwister(501)
     start =
         CPDPoint(ones(Float32, 2), [rand(rng, Float32, size(data, mode), 2) for mode = 1:3])
 
-    cpd(
-        counted,
-        2;
-        solver = :rgd,
-        p0 = start,
-        maxiter = 2,
-        component_trace = true,
-        verbose = false,
-    )
-    @test norm_calls[] == 1
+    for solver_name in (:als, :rgd, :rgd_fixed, :rcg, :lbfgs)
+        norm_calls[] = 0
+        empty!(norm_block_lengths)
+        cpd(
+            counted,
+            2;
+            solver = solver_name,
+            p0 = start,
+            maxiter = 2,
+            component_trace = solver_name == :rgd,
+            conversion_block_length = 7,
+            verbose = false,
+        )
+        @test norm_calls[] == 1
+        @test norm_block_lengths == [7]
+    end
 
     norm_calls[] = 0
+    empty!(norm_block_lengths)
     cpd(
         counted,
         2;
@@ -430,6 +444,7 @@ end
     @test norm_calls[] == 1
 
     norm_calls[] = 0
+    empty!(norm_block_lengths)
     nncpd(
         counted,
         2;
@@ -440,4 +455,21 @@ end
         verbose = false,
     )
     @test norm_calls[] == 0
+
+    @test_throws ArgumentError cpd(
+        data,
+        2;
+        observation_norm2_cache = sum(abs2, data),
+        p0 = start,
+        maxiter = 0,
+        verbose = false,
+    )
+    @test_throws ArgumentError nncpd(
+        data,
+        2;
+        observation_norm2_cache = sum(abs2, data),
+        p0 = start,
+        maxiter = 0,
+        verbose = false,
+    )
 end

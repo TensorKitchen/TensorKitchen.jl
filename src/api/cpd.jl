@@ -600,6 +600,16 @@ _validate_cpd_solver_supported(
 @inline _is_observation_preserving_cpd_init(init) =
     init === :random || init isa Union{RandomInit,PointInit}
 
+function _reject_public_observation_norm_cache(kwargs)
+    haskey(kwargs, :observation_norm2_cache) || return nothing
+    throw(
+        ArgumentError(
+            "observation_norm2_cache is an internal TensorKitchen keyword and " *
+            "cannot be supplied through cpd or nncpd",
+        ),
+    )
+end
+
 function _validate_observation_preserving_cpd_path(A, solver, init, p0)
     A isa ComputeArray || return nothing
     _is_observation_preserving_cpd_solver(solver) || throw(
@@ -1150,6 +1160,7 @@ function cpd(
     component_trace::Bool = false,
     kwargs...,
 ) where {N}
+    _reject_public_observation_norm_cache(kwargs)
     A_prepared =
         prepare_tensor(A; compute_type, materialize, block_length = conversion_block_length)
     _validate_observation_preserving_cpd_path(A_prepared, solver, init, p0)
@@ -1185,6 +1196,7 @@ function cpd(
         )
     end
     stepsize_eff = isnothing(stepsize) ? 1.0 : stepsize
+    normA2 = observation_norm2(A_prepared; block_length = conversion_block_length)
     return _cpd_impl(
         A_prepared,
         r;
@@ -1204,6 +1216,7 @@ function cpd(
         nonnegative = false,
         pullback_eps = pullback_eps,
         component_trace = component_trace,
+        observation_norm2_cache = normA2,
         verbose = verbose,
         vector_transport_method = vector_transport_method,
         kwargs...,
