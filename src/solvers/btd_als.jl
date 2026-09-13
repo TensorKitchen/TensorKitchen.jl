@@ -64,6 +64,56 @@ function _btd_block_fit_tucker(
     end
 end
 
+function _btd_block_fit_tucker_projected(
+    backend::BTDBackend{T,N},
+    parts,
+    b::Int,
+    ranks::NTuple{N,Int};
+    block_maxiter::Int = 5,
+    tol::Real = 1e-6,
+    warm::Manifolds.TuckerPoint{T},
+) where {T<:AbstractFloat,N}
+    warm_core, warm_factors = _tucker_data(warm)
+    size(warm_core) == ranks || throw(
+        DimensionMismatch(
+            "BTD projected HOOI warm-start core size $(size(warm_core)) != target ranks $ranks",
+        ),
+    )
+
+    factors = [copy(warm_factors[m]) for m = 1:N]
+    singular_values = [T[] for _ = 1:N]
+    residual_norm2 = _btd_residual_except_block_norm2(backend, parts, b)
+    previous_rel_error = T(Inf)
+    core = _btd_projected_residual_except_block_core(backend, parts, b, warm_factors)
+
+    for _ = 1:block_maxiter
+        factors_previous = copy(factors)
+        @inbounds for mode = 1:N
+            projection_factors = ntuple(k -> k < mode ? factors[k] : factors_previous[k], N)
+            projected = _btd_projected_residual_except_block_mode(
+                backend,
+                parts,
+                b,
+                mode,
+                projection_factors,
+            )
+            F = svd(unfold_mode(projected, mode))
+            rank_mode = min(ranks[mode], size(F.U, 2))
+            factors[mode] = Matrix(@view F.U[:, 1:rank_mode])
+        end
+
+        core = _btd_projected_residual_except_block_core(backend, parts, b, factors)
+        residual_error2 = max(residual_norm2 - sum(abs2, core), zero(T))
+        rel_error = _relative_error_frob_sq(residual_error2, residual_norm2)
+        if previous_rel_error < T(Inf) && abs(previous_rel_error - rel_error) < T(tol)
+            break
+        end
+        previous_rel_error = rel_error
+    end
+
+    return TuckerResult{T,N}(core, factors, collect(1:N), singular_values)
+end
+
 """
     fit_btd_als(A, backend; init=:random, p0=nothing, maxiter=50,
         tol=1e-6, block_method=:hooi, block_maxiter=5, verbose=true,
@@ -72,21 +122,12 @@ end
         restart_screening_steps=5, restart_block_maxiter=10,
         restart_seed=nothing, progress_phase=:refinement)
 
-Fit a BTD model with alternating block updates. `backend` defines the Tucker
-blocks and target layout.
+Fit a BTD model with alternating block updates. `backend` defines the Tucker blocks and target layout.
 
-`block_method` selects `:hooi` or `:sthosvd` for each block update. These are
-finite approximate block solves, so the measured objective is not guaranteed to
-decrease at every configured update. This version maintains each block and the
-full residual as dense tensors during a pass; memory-sensitive workloads should
-account for those ambient-size arrays.
-`max_stagnation_restarts` controls optional reinitialization when a converged
-pass remains above `stagnation_rel_error`; the `restart_*` keywords configure
-that retry. With `return_stats=true`, return optimization statistics including
-the fitted point and relative error; otherwise return the fitted manifold point.
+`block_method` selects `:hooi` or `:sthosvd` for each block update. These are finite approximate block solves, so the measured objective is not guaranteed to decrease at every configured update. This version maintains each block and the full residual as dense tensors during a pass; memory-sensitive workloads should account for those ambient-size arrays.
+`max_stagnation_restarts` controls optional reinitialization when a converged pass remains above `stagnation_rel_error`; the `restart_*` keywords configure that retry. With `return_stats=true`, return optimization statistics including the fitted point and relative error; otherwise return the fitted manifold point.
 
-Most users should call [`btd`](@ref). This lower-level function is intended for
-experiments that already have a `BTDBackend`.
+Most users should call [`btd`](@ref). This lower-level function is intended for experiments that already have a `BTDBackend`.
 """
 function fit_btd_als(
     A::AbstractArray{T,N},

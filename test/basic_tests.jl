@@ -844,6 +844,52 @@ end
     )
 end
 
+@testset "BTD projected HOOI block solve matches dense residual solve" begin
+    rng = MersenneTwister(714)
+    dims = (7, 6, 5)
+    ranks = (2, 2, 2)
+    A = randn(rng, dims...)
+    manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(dims, ranks, 3))
+    backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
+    model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
+    parts = TensorKitchen.point_parts(TensorKitchen.initial_point(model, :random))
+
+    for b = 1:backend.r
+        residual_without_b = copy(A)
+        for c = 1:backend.r
+            c == b && continue
+            residual_without_b .-= TensorKitchen._btd_block_tensor(parts[c])
+        end
+
+        dense = TensorKitchen._btd_block_fit_tucker(
+            residual_without_b,
+            ranks;
+            method = :hooi,
+            block_maxiter = 2,
+            tol = 0.0,
+            warm = parts[b],
+        )
+        projected = TensorKitchen._btd_block_fit_tucker_projected(
+            backend,
+            parts,
+            b,
+            ranks;
+            block_maxiter = 2,
+            tol = 0.0,
+            warm = parts[b],
+        )
+
+        @test reconstruct(projected) ≈ reconstruct(dense) rtol = 1e-11 atol = 1e-11
+        @test projected.core ≈ dense.core rtol = 1e-11 atol = 1e-11
+        for mode = 1:length(dims)
+            dense_projector = dense.factors[mode] * transpose(dense.factors[mode])
+            projected_projector =
+                projected.factors[mode] * transpose(projected.factors[mode])
+            @test projected_projector ≈ dense_projector rtol = 1e-11 atol = 1e-11
+        end
+    end
+end
+
 # =========================================================================
 # cpd/cp_rank.jl (cost/egrad functions)
 # =========================================================================
