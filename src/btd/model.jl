@@ -28,8 +28,9 @@ BTDContractionWorkspace{T,N}() where {T,N} = BTDContractionWorkspace{T,N}(
     BTDBackend
 
 Backend state for block-term decomposition as a sum of Tucker blocks. Stores
-the target tensor, product manifold, reusable work buffers, and per-block
-ambient reconstruction buffers used by cost, gradient, and ALS routines.
+the target tensor, product manifold, contraction workspace, and target norm.
+Ambient reconstruction buffers are allocated only by legacy operations that
+explicitly request an ambient tensor.
 """
 struct BTDBackend{
     T,
@@ -37,25 +38,20 @@ struct BTDBackend{
     CT<:Tuple,
     MT<:Tuple,
     A<:AbstractArray{T,N},
-    V,
     MP<:ProductManifold,
     I,
-    C,
+    S<:Real,
 } <: AbstractJoinBackend
     components::CT
     manifolds::MT
     r::Int
-    # Preserve the target array/backend so BTD shares the generic join storage behavior.
+    # Preserve the target array/backend without conversion or copying.
     target::A
     target_shape::NTuple{N,Int}
-    target_flat::V
     M_product::MP
     init_point::I
-    work_rec::V
-    work_residual::V
     workspace::BTDContractionWorkspace{T,N}
-    target_normsq::T
-    component_bufs::C # Reusable ambient reconstruction buffers, one per block.
+    target_normsq::S
 end
 
 egrad(model::JoinModel{<:AbstractFloat,<:BTDBackend}, p) = _btd_egrad(model.backend, p)
@@ -67,25 +63,50 @@ model_exact_native_function(model::JoinModel{<:AbstractFloat,<:BTDBackend}) = th
     ),
 )
 model_exact_join_basis_function(model::JoinModel{<:AbstractFloat,<:BTDBackend}) =
-    (M, p) -> begin
-        backend = model.backend
-        residual = _join_residual!(backend, p)
-        _join_basis_project(backend.components, p, residual)
-    end
+    (_, p) -> rgrad(model, p)
 
+function _require_materialized_btd_ambient_target(
+    backend::BTDBackend,
+    operation::AbstractString,
+)
+    is_materialized(backend.target) && return nothing
+    throw(
+        ArgumentError(
+            "$operation requires an explicit materialized tensor for BTD. " *
+            "Call materialize_tensor(A) before constructing the model, or use the " *
+            "observation-preserving BTD cost, gradient, and projected ALS paths.",
+        ),
+    )
+end
+
+"""Copy a materialized BTD target for an explicitly ambient operation."""
+function _btd_ambient_target_copy(backend::BTDBackend)
+    _require_materialized_btd_ambient_target(backend, "BTD structured initialization")
+    target_flat = vec(backend.target)
+    residual_flat = _join_vector_workspace_like(backend.target, length(target_flat))
+    copyto!(residual_flat, target_flat)
+    return reshape(residual_flat, backend.target_shape)
+end
+
+"""Allocate one operation-local ambient vector for a legacy BTD operation."""
+function _btd_ambient_work_vector(backend::BTDBackend)
+    _require_materialized_btd_ambient_target(backend, "BTD ambient operation")
+    return _join_vector_workspace_like(backend.target, length(backend.target))
+end
 
 function _btd_sequential_tucker_init(model::JoinModel{<:AbstractFloat,<:BTDBackend}, init)
     backend = model.backend
     # Initialize Tucker blocks on the current residual rather than cloning the
     # same full-tensor fit into every block.
-    residual = copy(backend.target)
+    residual = _btd_ambient_target_copy(backend)
+    component_buf = _btd_ambient_work_vector(backend)
     parts = Vector{Manifolds.TuckerPoint{eltype(backend.target)}}(undef, backend.r)
     for k = 1:backend.r
         component = _backend_component(backend, k)
         Mk = _backend_manifold(backend, k)
         pk = _component_init(component, residual, init)
         parts[k] = pk
-        _subtract_ambient_tensor!(residual, Mk, pk, backend.component_bufs[k])
+        _subtract_ambient_tensor!(residual, Mk, pk, component_buf)
     end
     return ArrayPartition(parts...)
 end
@@ -156,7 +177,8 @@ function _btd_hosvd_split_candidate(
         _btd_split_columns(rng, size(subspaces[mode], 2), ranks_m, candidate)
     end
 
-    residual = copy(backend.target)
+    residual = _btd_ambient_target_copy(backend)
+    component_buf = _btd_ambient_work_vector(backend)
     # Candidate blocks are always Tucker points here
     parts = Vector{Manifolds.TuckerPoint{T}}(undef, backend.r)
     for b = 1:backend.r
@@ -169,7 +191,7 @@ function _btd_hosvd_split_candidate(
             residual,
             _backend_manifold(backend, b),
             pk,
-            backend.component_bufs[b],
+            component_buf,
         )
     end
     return ArrayPartition(parts...)

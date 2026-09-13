@@ -267,8 +267,9 @@ end
 """
     _sum_backend_instance(B, manifolds, target; init_point=nothing) returns AbstractJoinBackend
 
-Construct either a generic `JoinBackend` or `BTDBackend` with shared target,
-product manifold, and reusable reconstruction/residual buffers.
+Construct either a generic `JoinBackend` or `BTDBackend` with shared target and
+product manifold state. Backend-specific constructors decide whether ambient
+workspaces are required.
 """
 function _sum_backend_instance(
     B::Type,
@@ -279,7 +280,7 @@ function _sum_backend_instance(
     throw(ArgumentError("Unsupported join backend type $B. Use JoinBackend or BTDBackend."))
 end
 
-function _sum_backend_parts(
+function _sum_backend_common_parts(
     components,
     target::AbstractArray{T,N};
     init_point = nothing,
@@ -290,12 +291,7 @@ function _sum_backend_parts(
     tgt = target
     _validate_join_ambient_compatibility(components_tuple, tgt)
 
-    tflat = vec(tgt)
     tgt_len = length(tgt)
-    # One ambient buffer per component lets reconstruction reuse storage across iterations.
-    component_bufs = [_join_vector_workspace_like(tgt, tgt_len) for _ = 1:r]
-    work_rec = _join_vector_workspace_like(tgt, tgt_len)
-    work_residual = _join_vector_workspace_like(tgt, tgt_len)
     manifolds = ntuple(k -> _component_manifold(components_tuple[k]), r)
 
     return (;
@@ -304,14 +300,26 @@ function _sum_backend_parts(
         r,
         target = tgt,
         target_size = size(tgt),
-        target_flat = tflat,
         target_len = tgt_len,
         product = ProductManifold(manifolds...),
         init_point,
-        work_rec,
-        work_residual,
-        component_bufs,
     )
+end
+
+function _join_backend_parts(
+    components,
+    target::AbstractArray{T,N};
+    init_point = nothing,
+) where {T<:AbstractFloat,N}
+    parts = _sum_backend_common_parts(components, target; init_point)
+    target_flat = vec(parts.target)
+    # Generic joins retain ambient workspaces for their reconstruction-based
+    # cost and gradient implementation.
+    component_bufs =
+        [_join_vector_workspace_like(parts.target, parts.target_len) for _ = 1:parts.r]
+    work_rec = _join_vector_workspace_like(parts.target, parts.target_len)
+    work_residual = _join_vector_workspace_like(parts.target, parts.target_len)
+    return merge(parts, (; target_flat, work_rec, work_residual, component_bufs))
 end
 
 function _sum_backend_instance(
@@ -320,7 +328,7 @@ function _sum_backend_instance(
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
-    parts = _sum_backend_parts(components, target; init_point)
+    parts = _join_backend_parts(components, target; init_point)
     return JoinBackend(
         parts.components,
         parts.r,
@@ -342,21 +350,17 @@ function _sum_backend_instance(
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
-    parts = _sum_backend_parts(components, target; init_point)
+    parts = _sum_backend_common_parts(components, target; init_point)
     return BTDBackend(
         parts.components,
         parts.manifolds,
         parts.r,
         parts.target,
         parts.target_size,
-        parts.target_flat,
         parts.product,
         parts.init_point,
-        parts.work_rec,
-        parts.work_residual,
         BTDContractionWorkspace{T,N}(),
-        sum(abs2, parts.target),
-        parts.component_bufs,
+        observation_norm2(parts.target),
     )
 end
 
@@ -759,11 +763,11 @@ This backend implements the mathematical core of that model:
 - `extract_components(model, p)` converts the optimized component points
   `p_k` into result components.
 
-The method writes each component embedding into preallocated component buffers,
-then accumulates those buffers into `out`. This avoids allocating one dense
-ambient tensor per component during solver iterations.
+`JoinBackend` writes component embeddings into its preallocated buffers.
+`BTDBackend` uses one operation-local component buffer so constructing a BTD
+model does not allocate ambient-sized workspace.
 """
-function _join_reconstruct!(out::AbstractArray, backend::Union{JoinBackend,BTDBackend}, p)
+function _join_reconstruct!(out::AbstractArray, backend::JoinBackend, p)
     components = _backend_components(backend)
     r = backend.r
     bufs = backend.component_bufs
@@ -784,20 +788,50 @@ function _join_reconstruct!(out::AbstractArray, backend::Union{JoinBackend,BTDBa
     return out
 end
 
-function _join_residual!(backend::Union{JoinBackend,BTDBackend}, p)
+function _join_reconstruct!(out::AbstractArray, backend::BTDBackend, p)
+    components = _backend_components(backend)
+    parts = point_parts(p)
+    _check_parts_len(parts, backend.r, "_join_reconstruct")
+    length(out) == length(backend.target) || throw(
+        DimensionMismatch(
+            "_join_reconstruct! output length $(length(out)) != ambient length $(length(backend.target)).",
+        ),
+    )
+
+    out_flat = vec(out)
+    component_buf = _btd_ambient_work_vector(backend)
+    fill!(out_flat, zero(eltype(out_flat)))
+    @inbounds for k = 1:backend.r
+        _component_ambient_embedding!(component_buf, components[k], parts[k])
+        out_flat .+= component_buf
+    end
+    return out
+end
+
+function _join_residual!(backend::JoinBackend, p)
     _join_reconstruct!(backend.work_rec, backend, p)
     backend.work_residual .= backend.work_rec
     backend.work_residual .-= backend.target_flat
     return backend.work_residual
 end
 
-function residual(model::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}}, p)
+function _join_residual!(backend::BTDBackend, p)
+    residual = _btd_ambient_work_vector(backend)
+    _join_reconstruct!(residual, backend, p)
+    residual .-= vec(backend.target)
+    return residual
+end
+
+function residual(model::JoinModel{<:AbstractFloat,<:JoinBackend}, p)
     return copy(_join_residual!(model.backend, p))
 end
 
+residual(model::JoinModel{<:AbstractFloat,<:BTDBackend}, p) =
+    _join_residual!(model.backend, p)
+
 function differential_action!(
     out::AbstractVector{T},
-    model::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}},
+    model::JoinModel{<:AbstractFloat,<:JoinBackend},
     p,
     X,
 ) where {T<:AbstractFloat}
@@ -824,6 +858,42 @@ function differential_action!(
     return out
 end
 
+function differential_action!(
+    out::AbstractVector{T},
+    model::JoinModel{<:AbstractFloat,<:BTDBackend},
+    p,
+    X,
+) where {T<:AbstractFloat}
+    backend = model.backend
+    _require_materialized_btd_ambient_target(backend, "BTD differential action")
+    parts = point_parts(p)
+    xparts = point_parts(X)
+    _check_parts_len(parts, backend.r, "differential_action!")
+    _check_parts_len(xparts, backend.r, "differential_action!")
+    length(out) == length(backend.target) || throw(
+        DimensionMismatch(
+            "differential_action! output length $(length(out)) != ambient length $(length(backend.target)).",
+        ),
+    )
+
+    fill!(out, zero(T))
+    backend.r == 0 && return out
+    component_ambient_pushforward!(out, _backend_component(backend, 1), parts[1], xparts[1])
+    backend.r == 1 && return out
+
+    component_buf = _btd_ambient_work_vector(backend)
+    @inbounds for k = 2:backend.r
+        component_ambient_pushforward!(
+            component_buf,
+            _backend_component(backend, k),
+            parts[k],
+            xparts[k],
+        )
+        out .+= component_buf
+    end
+    return out
+end
+
 function adjoint_action(
     model::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}},
     p,
@@ -831,9 +901,9 @@ function adjoint_action(
     kwargs...,
 )
     backend = model.backend
-    length(a) == length(backend.target_flat) || throw(
+    length(a) == length(backend.target) || throw(
         DimensionMismatch(
-            "adjoint_action expected ambient vector of length $(length(backend.target_flat)), got $(length(a)).",
+            "adjoint_action expected ambient vector of length $(length(backend.target)), got $(length(a)).",
         ),
     )
     return _join_basis_project(_backend_components(backend), p, a)

@@ -1,4 +1,13 @@
+struct _NoSimilarArray{T,N,A<:AbstractArray{T,N}} <: AbstractArray{T,N}
+    data::A
+end
 
+Base.size(A::_NoSimilarArray) = size(A.data)
+Base.axes(A::_NoSimilarArray) = axes(A.data)
+Base.IndexStyle(::Type{<:_NoSimilarArray{T,N,A}}) where {T,N,A} = Base.IndexStyle(A)
+Base.getindex(A::_NoSimilarArray, I...) = getindex(A.data, I...)
+Base.similar(::_NoSimilarArray, ::Type, ::Dims) =
+    error("BTDBackend construction must not allocate target-shaped storage")
 
 # =========================================================================
 # tucker/hosvd.jl
@@ -732,6 +741,11 @@ end
     @test size(J0) == (length(A), manifold_dimension(M))
     @test all(isfinite, residual0)
     @test all(isfinite, J0)
+    reconstructed = zeros(size(A))
+    for part in TensorKitchen.point_parts(p0_solver)
+        reconstructed .+= TensorKitchen._btd_block_tensor(part)
+    end
+    @test residual0 ≈ vec(reconstructed .- A)
 
     coeff = zeros(Float64, manifold_dimension(M))
     coeff[1] = 1.0
@@ -746,6 +760,77 @@ end
         TensorKitchen.adjoint_action(model, p0_solver, vec(ambient)),
     )
     @test isapprox(lhs, rhs; atol = 1e-8, rtol = 1e-8)
+
+    exact_basis_gradient =
+        TensorKitchen.model_exact_join_basis_function(model)(M, p0_solver)
+    direct_gradient = TensorKitchen.rgrad(model, p0_solver)
+    @test norm(M, p0_solver, exact_basis_gradient - direct_gradient) ≤ 1e-12
+end
+
+@testset "BTD backend construction is ambient-workspace-free" begin
+    dims = (5, 4, 3)
+    ranks = (2, 2, 2)
+    data = reshape(Float32.(1:prod(dims)), dims)
+    target = _NoSimilarArray(data)
+    manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(dims, ranks, 2))
+
+    backend =
+        TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, target)
+    @test backend.target === target
+    @test backend.target_normsq == observation_norm2(target)
+    @test !hasfield(typeof(backend), :target_flat)
+    @test !hasfield(typeof(backend), :work_rec)
+    @test !hasfield(typeof(backend), :work_residual)
+    @test !hasfield(typeof(backend), :component_bufs)
+    @test all(
+        isempty(cache.bufs) for cache in (
+            backend.workspace.tensor_slot1,
+            backend.workspace.tensor_slot2,
+            backend.workspace.perm_in,
+            backend.workspace.perm_out,
+            backend.workspace.persist,
+        )
+    )
+
+    lazy = prepare_tensor(Int16.(data); compute_type = Float32)
+    lazy_backend =
+        TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, lazy)
+    @test lazy_backend.target === lazy
+    @test !is_materialized(lazy_backend.target)
+    @test lazy_backend.target_normsq == observation_norm2(lazy)
+    @test all(
+        isempty(cache.bufs) for cache in (
+            lazy_backend.workspace.tensor_slot1,
+            lazy_backend.workspace.tensor_slot2,
+            lazy_backend.workspace.perm_in,
+            lazy_backend.workspace.perm_out,
+            lazy_backend.workspace.persist,
+        )
+    )
+
+    lazy_model = TensorKitchen.JoinModel{Float32,typeof(lazy_backend)}(lazy_backend)
+    lazy_point = TensorKitchen.initial_point(lazy_model, :random)
+    @test TensorKitchen.cost(lazy_model, lazy_point) isa Float32
+    @test TensorKitchen.rgrad(lazy_model, lazy_point) isa ArrayPartition
+    @test TensorKitchen.model_exact_join_basis_function(lazy_model)(
+        TensorKitchen.manifold(lazy_model),
+        lazy_point,
+    ) isa ArrayPartition
+    @test_throws ArgumentError TensorKitchen.initial_point(lazy_model, :sthosvd)
+    @test_throws ArgumentError TensorKitchen.residual(lazy_model, lazy_point)
+
+    norm_calls = Ref(0)
+    counted = _NormCountingArray(data, norm_calls, Int[])
+    counted_backend =
+        TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, counted)
+    @test counted_backend.target === counted
+    @test norm_calls[] == 1
+
+    join_backend =
+        TensorKitchen._sum_backend_instance(TensorKitchen.JoinBackend, manifolds, data)
+    @test length(join_backend.work_rec) == length(data)
+    @test length(join_backend.work_residual) == length(data)
+    @test length(join_backend.component_bufs) == length(manifolds)
 end
 
 @testset "BTD rejects LMSolver until nested Tucker LM support lands" begin
