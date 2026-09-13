@@ -60,15 +60,20 @@ Base.@kwdef mutable struct _CPDComponentTraceHistory
     rgrad_failed_count::Int = 0
 end
 
-Base.@kwdef mutable struct _CPDComponentTraceRecorder{M}
+Base.@kwdef mutable struct _CPDComponentTraceRecorder{M,F,T<:Real}
     model::M
+    model_cost::F
+    normA2::T
     previous::Union{Nothing,CPDPoint} = nothing
     previous_cost::Float64 = NaN
     start_rel_error::Float64 = NaN
     history::_CPDComponentTraceHistory = _CPDComponentTraceHistory()
 end
 
-_CPDComponentTraceRecorder(model) = _CPDComponentTraceRecorder(; model)
+function _CPDComponentTraceRecorder(model, normA2::Real)
+    model_cost, _ = model_cost_egrad_functions(model, normA2)
+    return _CPDComponentTraceRecorder(; model, model_cost, normA2)
+end
 
 function _rankone_norm2(λ, U, k::Int)
     val = abs2(λ[k])
@@ -425,7 +430,7 @@ function _record_cpd_component_trace!(
     iter::Int,
 )
     q = cpd_point(rec.model, p)
-    cost_val = Float64(cost(rec.model, p))
+    cost_val = Float64(rec.model_cost(manifold(rec.model), p))
     grad_diags = _safe_cpd_component_gradient_diagnostics(rec, problem, p)
     if rec.previous !== nothing
         hist = rec.history
@@ -589,24 +594,44 @@ _validate_cpd_solver_supported(
 ) = nothing
 
 @inline _is_observation_preserving_cpd_solver(solver) =
-    solver === :als || solver isa ALSSolver
+    solver in (:als, :rgd, :rgd_fixed, :rcg, :lbfgs) ||
+    solver isa Union{ALSSolver,RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver}
 
 @inline _is_observation_preserving_cpd_init(init) =
     init === :random || init isa Union{RandomInit,PointInit}
+@inline _is_observation_preserving_cpd_init(init::ALSWarmStartInit) =
+    _is_observation_preserving_cpd_init(init.base_init)
+
+@inline function _resolve_observation_preserving_cpd_init(A, init)
+    return A isa ComputeArray && init === :auto ? RandomInit() : init
+end
+
+function _reject_public_observation_norm_cache(kwargs)
+    haskey(kwargs, :observation_norm2_cache) || return nothing
+    throw(
+        ArgumentError(
+            "observation_norm2_cache is an internal TensorKitchen keyword and " *
+            "cannot be supplied through cpd or nncpd",
+        ),
+    )
+end
 
 function _validate_observation_preserving_cpd_path(A, solver, init, p0)
     A isa ComputeArray || return nothing
     _is_observation_preserving_cpd_solver(solver) || throw(
         ArgumentError(
-            "A lazy ComputeArray currently supports CP decomposition only with " *
-            "solver=:als. Use solver=:als, or set materialize=true to use a manifold solver.",
+            "A lazy ComputeArray supports exact CP paths with solver=:als, :rgd, " *
+            ":rgd_fixed, :rcg, or :lbfgs. The requested solver accesses an " *
+            "input-sized ambient residual; choose a supported solver or set " *
+            "materialize=true.",
         ),
     )
     if isnothing(p0) && !_is_observation_preserving_cpd_init(init)
         throw(
             ArgumentError(
-                "A lazy ComputeArray currently supports CP-ALS initialization with " *
-                "init=:random, RandomInit(), PointInit(...), or an explicit p0. " *
+                "A lazy ComputeArray supports observation-preserving initialization with " *
+                "init=:auto, init=:random, RandomInit(), PointInit(...), a recursively " *
+                "safe ALSWarmStartInit(...), or an explicit p0. " *
                 "Structured initializers require a materialized tensor; choose a safe " *
                 "initializer or set materialize=true.",
             ),
@@ -677,6 +702,7 @@ function _cpd_als_warm_then_pack(
             verbose = verbose,
             return_stats = true,
             progress_phase = :initialization,
+            observation_norm2_cache = get(kwargs, :observation_norm2_cache, nothing),
         )
         return pack_cpd_point(target, CPDPoint(warm_out.weights, warm_out.factors))
     end
@@ -705,7 +731,13 @@ function _cpd_als_warm_then_pack(
         progress_phase = :initialization,
         kwargs...,
     )
-    warm_cpd = _to_cpd_result(warm_model, warm_result, size(A), r)
+    warm_cpd = _to_cpd_result(
+        warm_model,
+        warm_result,
+        size(A),
+        r;
+        observation_norm2_cache = get(kwargs, :observation_norm2_cache, nothing),
+    )
     return pack_cpd_point(target, cpd_point(warm_cpd))
 end
 
@@ -783,10 +815,15 @@ function _cpd_manifold_grad_tol(
     return tol
 end
 
-function _cpd_point_rel_error(model, p)
-    normA2 = sum(abs2, tensor(model))
-    cost_val = Float64(cost(model, p))
+function _cpd_point_rel_error(model, p, normA2::Real, model_cost)
+    cost_val = Float64(model_cost(manifold(model), p))
     return Float64(_relative_error_frob_sq(2 * cost_val, Float64(normA2)))
+end
+
+function _cpd_point_rel_error(model, p)
+    normA2 = observation_norm2(tensor(model))
+    model_cost, _ = model_cost_egrad_functions(model, normA2)
+    return _cpd_point_rel_error(model, p, normA2, model_cost)
 end
 
 function _cpd_initial_solve_point(model, init_eff, p0, solver::AbstractSolver; kwargs...)
@@ -802,6 +839,7 @@ function _cpd_initial_solve_point(
     warm_normalization,
     verbose::Bool,
     pullback_eps,
+    observation_norm2_cache,
     kwargs...,
 )
     return _cpd_als_warm_then_pack(
@@ -811,6 +849,7 @@ function _cpd_initial_solve_point(
         normalization = warm_normalization,
         verbose,
         pullback_eps,
+        observation_norm2_cache,
         kwargs...,
     )
 end
@@ -854,9 +893,12 @@ function _run_cpd_solver(
     vector_transport_method,
     pullback_eps,
     component_trace,
+    observation_norm2_cache,
     kwargs...,
 )
-    trace_recorder = component_trace ? _CPDComponentTraceRecorder(model) : nothing
+    trace_recorder =
+        component_trace ? _CPDComponentTraceRecorder(model, observation_norm2_cache) :
+        nothing
     iteration_callbacks =
         isnothing(trace_recorder) ? () : (_cpd_component_trace_callback(trace_recorder),)
     p_solve = _cpd_initial_solve_point(
@@ -868,11 +910,17 @@ function _run_cpd_solver(
         warm_normalization,
         verbose,
         pullback_eps,
+        observation_norm2_cache,
         kwargs...,
     )
     p_start = _cpd_solver_start_point(model, p_solve, init_eff, solver; verbose)
     if !isnothing(trace_recorder)
-        trace_recorder.start_rel_error = _cpd_point_rel_error(model, p_start)
+        trace_recorder.start_rel_error = _cpd_point_rel_error(
+            model,
+            p_start,
+            trace_recorder.normA2,
+            trace_recorder.model_cost,
+        )
     end
 
     result = _solve_model(
@@ -890,6 +938,7 @@ function _run_cpd_solver(
         vector_transport_method,
         grad_tol = _cpd_manifold_grad_tol(model, solver, tol),
         iteration_callbacks,
+        observation_norm2_cache,
         kwargs...,
     )
     return isnothing(trace_recorder) ? result :
@@ -955,6 +1004,9 @@ function _cpd_impl(
         use_pullback_metric = (geometry_eff == :squaring_metric),
         pullback_eps = pullback_eps_eff,
     )
+    normA2_cache =
+        isnothing(observation_norm2_cache) ? observation_norm2(A) :
+        T(observation_norm2_cache)
 
     raw_result = with_phase_progress() do
         _run_cpd_solver(
@@ -973,7 +1025,7 @@ function _cpd_impl(
             pullback_eps = pullback_eps_eff,
             component_trace,
             nonnegative,
-            observation_norm2_cache,
+            observation_norm2_cache = normA2_cache,
             kwargs...,
         )
     end
@@ -982,7 +1034,7 @@ function _cpd_impl(
         nonnegative && geometry_eff in (:squaring_metric, :softplus_metric) ?
         _merge_res_solver_info(raw_result, (nncp_pullback_eps = pullback_eps_eff,)) :
         raw_result
-    return _to_cpd_result(model, result, size(A), r)
+    return _to_cpd_result(model, result, size(A), r; observation_norm2_cache = normA2_cache)
 end
 
 #### MAIN CPD ####
@@ -1041,7 +1093,8 @@ approximation, and `rel_error(A, result)` to measure reconstruction error.
 - `solver=:rgd`: refinement solver. Supported symbols are `:als`, `:rgd`,
   `:rgd_fixed`, `:rcg`, `:lbfgs`, and `:lm`; a compatible solver object may be
   passed instead.
-- `init=:auto`: uses `TuckerInit()` for ALS and an ALS warm start for manifold
+- `init=:auto`: uses `RandomInit()` for a lazy converted input. For a materialized
+  input, it uses `TuckerInit()` for ALS and an ALS warm start for manifold
   solvers. Other useful choices include `:random`, `:tucker`, `:tucker_diag`,
   `:hosvd`, an initializer object, or an explicit `p0`.
 - `warm_steps=500`, `warm_init=TuckerInit()`: configure the ALS warm start used
@@ -1075,8 +1128,10 @@ approximation, and `rel_error(A, result)` to measure reconstruction error.
 If `rank`/`r` is omitted, the smallest tensor dimension is used as a heuristic
 rank and a message is printed when `verbose=true`. Passing the rank explicitly
 is recommended for reproducible model selection. With `materialize=false`, a
-lazy converted input currently supports `solver=:als` together with
-`init=:random`, `RandomInit()`, `PointInit(...)`, or an explicit `p0`.
+lazy converted input supports `solver=:als`, `:rgd`, `:rgd_fixed`, `:rcg`, or
+`:lbfgs` together with `init=:auto`, `init=:random`, `RandomInit()`,
+`PointInit(...)`, a recursively safe `ALSWarmStartInit(...)`, or an explicit
+`p0`. Structured initializers and `solver=:lm` require `materialize=true`.
 
 # Example
 
@@ -1113,14 +1168,16 @@ function cpd(
     component_trace::Bool = false,
     kwargs...,
 ) where {N}
+    _reject_public_observation_norm_cache(kwargs)
     A_prepared =
         prepare_tensor(A; compute_type, materialize, block_length = conversion_block_length)
-    _validate_observation_preserving_cpd_path(A_prepared, solver, init, p0)
+    init_prepared = _resolve_observation_preserving_cpd_init(A_prepared, init)
+    _validate_observation_preserving_cpd_path(A_prepared, solver, init_prepared, p0)
     if nonnegative
         # Align effective defaults with nncpd() on the nonnegative route.
         stepsize_nn = isnothing(stepsize) ? 0.01 : stepsize
         solver_obj = _solver_object(solver, stepsize_nn; kwargs...)
-        init_nn = _cpd_nonnegative_init(init)
+        init_nn = _cpd_nonnegative_init(init_prepared)
         warm_steps_nn = warm_steps
         geometry_nn = _cpd_nonnegative_geometry(solver_obj, geometry)
         return nncpd(
@@ -1148,10 +1205,11 @@ function cpd(
         )
     end
     stepsize_eff = isnothing(stepsize) ? 1.0 : stepsize
+    normA2 = observation_norm2(A_prepared; block_length = conversion_block_length)
     return _cpd_impl(
         A_prepared,
         r;
-        init = init,
+        init = init_prepared,
         p0 = p0,
         warm_steps = warm_steps,
         warm_init = warm_init,
@@ -1167,6 +1225,7 @@ function cpd(
         nonnegative = false,
         pullback_eps = pullback_eps,
         component_trace = component_trace,
+        observation_norm2_cache = normA2,
         verbose = verbose,
         vector_transport_method = vector_transport_method,
         kwargs...,

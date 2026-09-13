@@ -212,10 +212,18 @@ function _solve_ro_solver(
     grad_tol,
     normalized_objective::Bool,
     iteration_callbacks,
+    observation_norm2_cache,
     diagnostics_recorder,
     run_solver::Function,
 )
-    setup = _prepare_solver_problem(model; init, p0, gradient_mode, verbose)
+    setup = _prepare_solver_problem(
+        model;
+        init,
+        p0,
+        gradient_mode,
+        verbose,
+        observation_norm2_cache,
+    )
     normalization_policy = _normalization_policy(normalization)
     supports_normalization_policy(model, normalization_policy) || throw(
         ArgumentError(
@@ -256,6 +264,7 @@ function solve(
     grad_tol = nothing,
     normalized_objective::Bool = true,
     iteration_callbacks = (),
+    observation_norm2_cache = nothing,
 ) where {T<:AbstractFloat}
     return _solve_ro_solver(
         solver,
@@ -272,6 +281,7 @@ function solve(
         grad_tol,
         normalized_objective,
         iteration_callbacks,
+        observation_norm2_cache,
         diagnostics_recorder = first_order_diagnostics_recorder(solver),
         run_solver = run_first_order_solver,
     )
@@ -292,6 +302,7 @@ function solve(
     grad_tol = nothing,
     normalized_objective::Bool = true,
     iteration_callbacks = (),
+    observation_norm2_cache = nothing,
 ) where {T<:AbstractFloat}
     return _solve_ro_solver(
         solver,
@@ -308,6 +319,7 @@ function solve(
         grad_tol,
         normalized_objective,
         iteration_callbacks,
+        observation_norm2_cache,
         diagnostics_recorder = second_order_diagnostics_recorder(solver),
         run_solver = run_second_order_solver,
     )
@@ -410,6 +422,7 @@ function _prepare_solver_problem(
     p0 = nothing,
     gradient_mode = RiemannianGradientMode(),
     verbose::Bool = false,
+    observation_norm2_cache = nothing,
 )
     M = manifold(model)
     isnothing(M) &&
@@ -417,7 +430,12 @@ function _prepare_solver_problem(
 
     p0_local = isnothing(p0) ? initial_point(model, init; verbose) : p0
 
-    model_cost, model_egrad = model_cost_egrad_functions(model)
+    A = tensor(model)
+    T = eltype(A)
+    normA2 =
+        isnothing(observation_norm2_cache) ? observation_norm2(A) :
+        T(observation_norm2_cache)
+    model_cost, model_egrad = model_cost_egrad_functions(model, normA2)
     model_rgrad = supports_rgrad(model) ? model_rgrad_function(model; model_egrad) : nothing
     model_grad = _model_gradient_closure(
         model,
@@ -433,6 +451,6 @@ function _prepare_solver_problem(
         model_cost = model_cost,
         model_egrad = model_egrad,
         model_grad = model_grad,
-        normA2 = sum(abs2, tensor(model)),
+        normA2 = normA2,
     )
 end

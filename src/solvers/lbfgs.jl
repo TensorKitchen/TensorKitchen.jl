@@ -63,14 +63,19 @@ function _lbfgs_supported_linesearches()
     return isdefined(Manopt, :HagerZhangLinesearch) ? (base..., :hagerzhang) : base
 end
 
-@inline function _lbfgs_linesearch(kind::Symbol)
+@inline function _lbfgs_linesearch(kind::Symbol, retraction_method, transport)
     kind === :wolfe && return Manopt.WolfePowellLinesearch(
         sufficient_curvature = 0.9,
         stop_when_stepsize_less = 1e-8,
         stop_decreasing_at_step = 100,
+        retraction_method = retraction_method,
+        vector_transport_method = transport,
     )
     if kind === :hagerzhang && isdefined(Manopt, :HagerZhangLinesearch)
-        return getproperty(Manopt, :HagerZhangLinesearch)()
+        return getproperty(Manopt, :HagerZhangLinesearch)(;
+            retraction_method = retraction_method,
+            vector_transport_method = transport,
+        )
     end
     throw(ArgumentError("Unsupported linesearch kind $kind."))
 end
@@ -150,7 +155,7 @@ function solve_lbfgs(
         preconditioner = preconditioner,
         retraction_method = retraction_method,
         vector_transport_method = transport,
-        stepsize = _lbfgs_linesearch(linesearch),
+        stepsize = _lbfgs_linesearch(linesearch, retraction_method, transport),
         stopping_criterion = stopping,
         debug = callbacks.debug_actions,
         callbacks = callbacks.solver_callbacks,

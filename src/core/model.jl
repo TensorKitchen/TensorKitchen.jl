@@ -38,6 +38,8 @@ end
 model_cost_function(model::AbstractDecompositionModel) = (M, p) -> cost(model, p)
 model_cost_egrad_functions(model::AbstractDecompositionModel) =
     (model_cost_function(model), model_egrad_function(model))
+model_cost_egrad_functions(model::AbstractDecompositionModel, ::Real) =
+    model_cost_egrad_functions(model)
 
 model_egrad_function(model::AbstractDecompositionModel) = (M, p) -> egrad(model, p)
 

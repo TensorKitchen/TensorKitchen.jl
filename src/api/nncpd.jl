@@ -43,7 +43,8 @@ Returns a [`CPDResult`](@ref) with nonnegative weights and factors. Use
 - `solver=:rgd`: supports `:als`, `:rgd`, `:rgd_fixed`, `:rcg`, `:lbfgs`, and
   `:lm`.
 - `init=:auto`, `warm_steps=500`, and `warm_init=TuckerInit()` configure
-  initialization in the same way as [`cpd`](@ref).
+  initialization in the same way as [`cpd`](@ref). For a lazy converted input,
+  `init=:auto` selects `RandomInit()`.
 - `geometry=nothing`: selects `:canonical` for ALS and `:softplus_metric` for
   manifold solvers. Explicit choices are `:canonical`, `:softplus_metric`, and
   `:squaring_metric`.
@@ -59,8 +60,10 @@ Returns a [`CPDResult`](@ref) with nonnegative weights and factors. Use
 
 If `rank`/`r` is omitted, the smallest tensor dimension is used as a heuristic;
 pass it explicitly for reproducible model selection. With `materialize=false`,
-a lazy converted input has the same currently supported path as CPD:
-`solver=:als` with a random or explicit initialization.
+a lazy converted input supports `solver=:als`, `:rgd`, `:rgd_fixed`, `:rcg`, or
+`:lbfgs` with automatic, random, explicit, or recursively safe ALS warm-start
+initialization. Structured initializers and `solver=:lm` require
+`materialize=true`.
 
 # Example
 
@@ -113,9 +116,11 @@ function nncpd(
     pullback_eps = 1e-8,
     kwargs...,
 ) where {N}
+    _reject_public_observation_norm_cache(kwargs)
     A_prepared =
         prepare_tensor(A; compute_type, materialize, block_length = conversion_block_length)
-    _validate_observation_preserving_cpd_path(A_prepared, solver, init, p0)
+    init_prepared = _resolve_observation_preserving_cpd_init(A_prepared, init)
+    _validate_observation_preserving_cpd_path(A_prepared, solver, init_prepared, p0)
     stats = observation_stats(A_prepared; block_length = conversion_block_length)
     stats.has_nonfinite && throw(
         ArgumentError("nncpd requires finite observations; the input contains NaN or Inf"),
@@ -130,7 +135,7 @@ function nncpd(
     return _cpd_impl(
         A_prepared,
         r;
-        init = init,
+        init = init_prepared,
         p0 = p0,
         warm_steps = warm_steps,
         warm_init = warm_init,

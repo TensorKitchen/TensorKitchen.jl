@@ -83,6 +83,7 @@ function _solve_with_solver(
     grad_tol = nothing,
     normalized_objective::Bool = true,
     iteration_callbacks = (),
+    observation_norm2_cache = nothing,
     kwargs...,
 )
     return solve(
@@ -100,6 +101,7 @@ function _solve_with_solver(
         grad_tol,
         normalized_objective,
         iteration_callbacks,
+        observation_norm2_cache,
     )
 end
 

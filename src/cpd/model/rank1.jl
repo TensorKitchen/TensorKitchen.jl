@@ -116,6 +116,13 @@ function model_cost_function(model::Rank1CPDModel{T,N}) where {T,N}
            cost_segre(model.A, model.dims)
 end
 
+function model_cost_egrad_functions(model::Rank1CPDModel{T,N}, normA2::Real) where {T,N}
+    cost_fn =
+        model.nonnegative ? cost_segre_nn(model.A, model.dims, normA2) :
+        cost_segre(model.A, model.dims, normA2)
+    return cost_fn, model_egrad_function(model)
+end
+
 function model_egrad_function(model::Rank1CPDModel{T,N}) where {T,N}
     base =
         model.nonnegative ? egrad_segre_nn(model.A, model.dims) :

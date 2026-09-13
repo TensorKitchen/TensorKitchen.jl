@@ -28,8 +28,8 @@ _to_approx_result(model::JoinModel{T}, result) where {T<:AbstractFloat} =
 _to_btd_result(model::JoinModel{T}, result) where {T<:AbstractFloat} =
     _to_join_result(BTDResult, model, result)
 
-_to_cpd_result(model, result, dims, r) =
+_to_cpd_result(model, result, dims, r; kwargs...) =
     throw(ArgumentError("No CPD result converter for model $(typeof(model))."))
 
-_to_cpd_result(model::JoinModel{<:AbstractFloat,<:CPDBackend}, result, dims, r) =
-    _cpd_result(model, result, dims, r)
+_to_cpd_result(model::JoinModel{<:AbstractFloat,<:CPDBackend}, result, dims, r; kwargs...) =
+    _cpd_result(model, result, dims, r; kwargs...)

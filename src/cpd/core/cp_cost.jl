@@ -2,11 +2,19 @@
 export cost_segre, egrad_segre, cost_secant_rankr, egrad_secant_rankr
 
 function cost_segre(A::AbstractArray{T,N}, dims::NTuple{N,Int}) where {T<:AbstractFloat,N}
-    normA2 = sum(abs2, A)
+    return cost_segre(A, dims, observation_norm2(A))
+end
+
+function cost_segre(
+    A::AbstractArray{T,N},
+    dims::NTuple{N,Int},
+    normA2::Real,
+) where {T<:AbstractFloat,N}
+    normA2_T = T(normA2)
     return function (M, p)
         λ, U = unpack_point_rank1(p, dims)
         inner = rank1_inner(A, U)
-        return 0.5 * (normA2 + λ^2 - 2 * λ * inner)
+        return T(0.5) * (normA2_T + λ^2 - 2 * λ * inner)
     end
 end
 
@@ -83,17 +91,28 @@ function cost_segre_nn(
     A::AbstractArray{T,N},
     dims::NTuple{N,Int},
 ) where {T<:AbstractFloat,N}
+    return cost_segre_nn(A, dims, observation_norm2(A))
+end
+
+function cost_segre_nn(
+    A::AbstractArray{T,N},
+    dims::NTuple{N,Int},
+    normA2::Real,
+) where {T<:AbstractFloat,N}
+    normA2_T = T(normA2)
     return function (M, p)
         _require_vector_for_squaring_metric(M, p)
         λ̃, Ũ = unpack_point_rank1(p, dims)
         if _uses_softplus_pullback(M)
             λ = _softplus_value(λ̃)
             U = [_softplus_value.(Ũ[m]) for m in eachindex(Ũ)]
-            X = reconstruct_cp_rank1(λ, U)
         else
-            X = embed_point_rank1_nn(p, dims)
+            λ = λ̃^2
+            U = [Ũ[m] .^ 2 for m in eachindex(Ũ)]
         end
-        return 0.5 * sum(abs2, A .- X)
+        inner = rank1_inner(A, U)
+        normX2 = λ^2 * prod(sum(abs2, Um) for Um in U)
+        return T(0.5) * (normA2_T + normX2 - 2 * λ * inner)
     end
 end
 
@@ -291,7 +310,7 @@ function cost_secant_rankr(
     dims::NTuple{N,Int},
     r::Int,
 ) where {T<:AbstractFloat,N}
-    normA2 = sum(abs2, A)
+    normA2 = observation_norm2(A)
     return function (M, p)
         λ, U = unpack_rankr_join(p, dims, r)
         M1 = mttkrp(A, U, 1; method = :auto)
@@ -392,7 +411,7 @@ function cost_rankr_canonical(
     dims::NTuple{N,Int},
     r::Int,
 ) where {T<:AbstractFloat,N}
-    normA2 = sum(abs2, A)
+    normA2 = observation_norm2(A)
     Nmodes = length(dims)
     Ubuf = Vector{Matrix{T}}(undef, Nmodes)
     cache = _CPRankrEvalCache(T, dims, r)
@@ -456,7 +475,7 @@ function cost_rankr_native(
     dims::NTuple{N,Int},
     r::Int,
 ) where {T<:AbstractFloat,N}
-    normA2 = sum(abs2, A)
+    normA2 = observation_norm2(A)
     cache = _CPRankrEvalCache(T, dims, r)
     return function (M, p)
         λ, U = unpack_rankr_native(p, dims, r)
@@ -519,7 +538,7 @@ function cost_secant_rankr_nn(
     dims::NTuple{N,Int},
     r::Int,
 ) where {T<:AbstractFloat,N}
-    normA2 = sum(abs2, A)
+    normA2 = observation_norm2(A)
     cache = _CPRankrEvalCache(T, dims, r)
     return function (M, p)
         _require_vector_for_squaring_metric(M, p)
