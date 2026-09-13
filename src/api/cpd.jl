@@ -599,6 +599,12 @@ _validate_cpd_solver_supported(
 
 @inline _is_observation_preserving_cpd_init(init) =
     init === :random || init isa Union{RandomInit,PointInit}
+@inline _is_observation_preserving_cpd_init(init::ALSWarmStartInit) =
+    _is_observation_preserving_cpd_init(init.base_init)
+
+@inline function _resolve_observation_preserving_cpd_init(A, init)
+    return A isa ComputeArray && init === :auto ? RandomInit() : init
+end
 
 function _reject_public_observation_norm_cache(kwargs)
     haskey(kwargs, :observation_norm2_cache) || return nothing
@@ -624,7 +630,8 @@ function _validate_observation_preserving_cpd_path(A, solver, init, p0)
         throw(
             ArgumentError(
                 "A lazy ComputeArray supports observation-preserving initialization with " *
-                "init=:random, RandomInit(), PointInit(...), or an explicit p0. " *
+                "init=:auto, init=:random, RandomInit(), PointInit(...), a recursively " *
+                "safe ALSWarmStartInit(...), or an explicit p0. " *
                 "Structured initializers require a materialized tensor; choose a safe " *
                 "initializer or set materialize=true.",
             ),
@@ -1086,7 +1093,8 @@ approximation, and `rel_error(A, result)` to measure reconstruction error.
 - `solver=:rgd`: refinement solver. Supported symbols are `:als`, `:rgd`,
   `:rgd_fixed`, `:rcg`, `:lbfgs`, and `:lm`; a compatible solver object may be
   passed instead.
-- `init=:auto`: uses `TuckerInit()` for ALS and an ALS warm start for manifold
+- `init=:auto`: uses `RandomInit()` for a lazy converted input. For a materialized
+  input, it uses `TuckerInit()` for ALS and an ALS warm start for manifold
   solvers. Other useful choices include `:random`, `:tucker`, `:tucker_diag`,
   `:hosvd`, an initializer object, or an explicit `p0`.
 - `warm_steps=500`, `warm_init=TuckerInit()`: configure the ALS warm start used
@@ -1121,9 +1129,9 @@ If `rank`/`r` is omitted, the smallest tensor dimension is used as a heuristic
 rank and a message is printed when `verbose=true`. Passing the rank explicitly
 is recommended for reproducible model selection. With `materialize=false`, a
 lazy converted input supports `solver=:als`, `:rgd`, `:rgd_fixed`, `:rcg`, or
-`:lbfgs` together with `init=:random`, `RandomInit()`, `PointInit(...)`, or an
-explicit `p0`. Structured initializers and `solver=:lm` require
-`materialize=true`.
+`:lbfgs` together with `init=:auto`, `init=:random`, `RandomInit()`,
+`PointInit(...)`, a recursively safe `ALSWarmStartInit(...)`, or an explicit
+`p0`. Structured initializers and `solver=:lm` require `materialize=true`.
 
 # Example
 
@@ -1163,12 +1171,13 @@ function cpd(
     _reject_public_observation_norm_cache(kwargs)
     A_prepared =
         prepare_tensor(A; compute_type, materialize, block_length = conversion_block_length)
-    _validate_observation_preserving_cpd_path(A_prepared, solver, init, p0)
+    init_prepared = _resolve_observation_preserving_cpd_init(A_prepared, init)
+    _validate_observation_preserving_cpd_path(A_prepared, solver, init_prepared, p0)
     if nonnegative
         # Align effective defaults with nncpd() on the nonnegative route.
         stepsize_nn = isnothing(stepsize) ? 0.01 : stepsize
         solver_obj = _solver_object(solver, stepsize_nn; kwargs...)
-        init_nn = _cpd_nonnegative_init(init)
+        init_nn = _cpd_nonnegative_init(init_prepared)
         warm_steps_nn = warm_steps
         geometry_nn = _cpd_nonnegative_geometry(solver_obj, geometry)
         return nncpd(
@@ -1200,7 +1209,7 @@ function cpd(
     return _cpd_impl(
         A_prepared,
         r;
-        init = init,
+        init = init_prepared,
         p0 = p0,
         warm_steps = warm_steps,
         warm_init = warm_init,

@@ -144,6 +144,26 @@ end
     @test exact_stats[1] == 0.0f0
     @test exact_stats[2] == 0.0f0
     @test exact_stats[3] == 0.0f0
+    @test_throws ArgumentError copy(exact_lazy)
+
+    fallback_weights = Float32[0.75]
+    fallback_factors = [reshape(Float32[1, 0.5], 2, 1), reshape(Float32[0.25, 2], 2, 1)]
+    lazy_fallback = TensorKitchen.cp_residual_stats_explicit(
+        exact_lazy,
+        exact_norm2,
+        fallback_weights,
+        fallback_factors,
+    )
+    dense_fallback = TensorKitchen.cp_residual_stats_explicit(
+        Float32.(exact_raw),
+        exact_norm2,
+        fallback_weights,
+        fallback_factors,
+    )
+    @test all(
+        isapprox(lazy_fallback[i], dense_fallback[i]; rtol = 2.0f-6, atol = 2.0f-6) for
+        i in eachindex(lazy_fallback)
+    )
 
     mode_matrix = randn(rng, Float32, 2, size(raw, 2))
     implicit_product =
@@ -161,6 +181,56 @@ end
     @test_throws ArgumentError observation_norm2(raw; block_length = 0)
     @test_throws DimensionMismatch implicit_mttkrp(raw, factors[1:2], 1)
     @test_throws ArgumentError mttkrp(raw, factors, 1; method = :khatri_rao)
+end
+
+@testset "CP lazy objective primitives match dense" begin
+    raw = reshape(Int16.(1:24), 4, 3, 2)
+    lazy = prepare_tensor(raw; compute_type = Float32)
+    dense = Float32.(raw)
+    dims = size(raw)
+    rank = 2
+
+    lazy_model = TensorKitchen.JoinModel(lazy, rank; geometry = :canonical)
+    dense_model = TensorKitchen.JoinModel(dense, rank; geometry = :canonical)
+    point = TensorKitchen.initial_point(dense_model, RandomInit(); verbose = false)
+    normA2 = observation_norm2(lazy)
+    lazy_cost, lazy_egrad = TensorKitchen.model_cost_egrad_functions(lazy_model, normA2)
+    dense_cost, dense_egrad = TensorKitchen.model_cost_egrad_functions(dense_model, normA2)
+
+    @test lazy_cost(manifold(lazy_model), point) ≈ dense_cost(manifold(dense_model), point) rtol =
+        2.0f-5 atol = 2.0f-5
+    lazy_gλ, lazy_gU =
+        unpack_point_rankr(lazy_egrad(manifold(lazy_model), point), dims, rank)
+    dense_gλ, dense_gU =
+        unpack_point_rankr(dense_egrad(manifold(dense_model), point), dims, rank)
+    @test lazy_gλ ≈ dense_gλ rtol = 2.0f-5 atol = 2.0f-5
+    @test all(
+        isapprox(lazy_gU[mode], dense_gU[mode]; rtol = 2.0f-5, atol = 2.0f-5) for
+        mode in eachindex(lazy_gU)
+    )
+
+    lazy_nn_model =
+        TensorKitchen.JoinModel(lazy, rank; geometry = :softplus_metric, nonnegative = true)
+    dense_nn_model = TensorKitchen.JoinModel(
+        dense,
+        rank;
+        geometry = :softplus_metric,
+        nonnegative = true,
+    )
+    nn_point = TensorKitchen.initial_point(dense_nn_model, RandomInit(); verbose = false)
+    lazy_nn_cost, lazy_nn_egrad =
+        TensorKitchen.model_cost_egrad_functions(lazy_nn_model, normA2)
+    dense_nn_cost, dense_nn_egrad =
+        TensorKitchen.model_cost_egrad_functions(dense_nn_model, normA2)
+
+    @test lazy_nn_cost(manifold(lazy_nn_model), nn_point) ≈
+          dense_nn_cost(manifold(dense_nn_model), nn_point) rtol = 2.0f-5 atol = 2.0f-5
+    lazy_nn_gradient = lazy_nn_egrad(manifold(lazy_nn_model), nn_point)
+    dense_nn_gradient = dense_nn_egrad(manifold(dense_nn_model), nn_point)
+    @test all(
+        isapprox(lazy_nn_gradient[i], dense_nn_gradient[i]; rtol = 2.0f-5, atol = 2.0f-5)
+        for i in eachindex(lazy_nn_gradient)
+    )
 end
 
 @testset "public preprocessing routes" begin
@@ -259,21 +329,14 @@ end
         maxiter = 0,
         verbose = false,
     )
-    @test_throws ArgumentError cpd(
+    @test_nowarn cpd(
         raw,
         2;
         compute_type = Float32,
-        solver = :als,
-        maxiter = 0,
+        maxiter = 1,
         verbose = false,
     )
-    @test_throws ArgumentError nncpd(
-        raw,
-        2;
-        compute_type = Float32,
-        maxiter = 0,
-        verbose = false,
-    )
+    @test_nowarn nncpd(raw, 2; compute_type = Float32, maxiter = 1, verbose = false)
     @test_throws ArgumentError tucker(raw, (2, 2, 2); compute_type = Float32)
     @test_throws ArgumentError tucker(
         raw,
@@ -394,12 +457,39 @@ end
         verbose = false,
     )
     @test solver(random_result) == :rgd
+    @test_nowarn cpd(
+        raw,
+        2;
+        compute_type = Float32,
+        solver = :rgd,
+        init = ALSWarmStartInit(1; base_init = RandomInit()),
+        maxiter = 1,
+        verbose = false,
+    )
     @test_throws ArgumentError cpd(
         raw,
         2;
         compute_type = Float32,
         solver = :rgd,
-        init = :auto,
+        init = TuckerInit(),
+        maxiter = 0,
+        verbose = false,
+    )
+    @test_throws ArgumentError cpd(
+        raw,
+        2;
+        compute_type = Float32,
+        solver = :rgd,
+        init = TuckerDiagInit(),
+        maxiter = 0,
+        verbose = false,
+    )
+    @test_throws ArgumentError cpd(
+        raw,
+        2;
+        compute_type = Float32,
+        solver = :rgd,
+        init = ALSWarmStartInit(1; base_init = TuckerInit()),
         maxiter = 0,
         verbose = false,
     )
