@@ -601,7 +601,8 @@ function cp_residual_stats_explicit(
         ),
     )
 
-    n2 = zero(T)
+    Tacc = _observation_accumulator_type(T)
+    n2_acc = zero(Tacc)
     cartesian_indices = CartesianIndices(A)
     foreach_compute_block(A; compute_type = T) do values, linear_indices
         @inbounds for (block_index, linear_index) in enumerate(linear_indices)
@@ -614,9 +615,11 @@ function cp_residual_stats_explicit(
                 end
                 approximation += rank_one_value
             end
-            n2 += abs2(approximation - values[block_index])
+            residual = Tacc(approximation) - Tacc(values[block_index])
+            n2_acc += abs2(residual)
         end
     end
+    n2 = T(n2_acc)
     return (n2, T(0.5) * n2, _relative_error_frob_sq(n2, normA2))
 end
 

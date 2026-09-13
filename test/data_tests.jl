@@ -77,6 +77,33 @@ end
     @test !nonfinite_stats.has_negative
     @test observation_stats(Float32[]).minimum === nothing
 
+    # A Float32 scalar accumulator cannot add unit increments after 2^24. The
+    # streaming reductions use a wider accumulator and round only once.
+    reduction_values = vcat(Int16(4096), ones(Int16, 1_000))
+    reduction_lazy = prepare_tensor(reduction_values; compute_type = Float32)
+    reduction_expected = Float32(sum(abs2, Float64.(reduction_values)))
+    stable_norm2 = observation_norm2(reduction_lazy; block_length = 37)
+    stable_stats = observation_stats(reduction_lazy; block_length = 41)
+    @test stable_norm2 isa Float32
+    @test stable_norm2 == reduction_expected
+    @test stable_stats.norm2 isa Float32
+    @test stable_stats.norm2 == reduction_expected
+
+    residual_raw = ones(Int16, length(reduction_values))
+    residual_lazy = prepare_tensor(residual_raw; compute_type = Float32)
+    residual_norm2 = observation_norm2(residual_lazy)
+    residual_weights = Float32[1]
+    residual_factors = [reshape(Float32.(residual_raw) .+ Float32.(reduction_values), :, 1)]
+    residual_stats = TensorKitchen.cp_residual_stats_explicit(
+        residual_lazy,
+        residual_norm2,
+        residual_weights,
+        residual_factors,
+    )
+    @test residual_stats[1] isa Float32
+    @test residual_stats[1] == reduction_expected
+    @test residual_stats[2] == Float32(0.5) * reduction_expected
+
     rng = MersenneTwister(91)
     factors = [randn(rng, Float32, size(raw, mode), 2) for mode = 1:3]
     for mode = 1:3
