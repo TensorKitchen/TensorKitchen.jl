@@ -890,6 +890,69 @@ end
     end
 end
 
+@testset "BTD projected ALS pass matches ambient reference" begin
+    rng = MersenneTwister(715)
+    dims = (7, 6, 5)
+    ranks = (2, 2, 2)
+    A = randn(rng, dims...)
+    manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(dims, ranks, 2))
+    backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
+    model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
+    p0 = TensorKitchen.initial_point(model, :random)
+
+    ambient = fit_btd_als(
+        A,
+        backend;
+        p0,
+        maxiter = 2,
+        tol = 0.0,
+        block_method = :hooi,
+        block_maxiter = 2,
+        block_update = :ambient,
+        verbose = false,
+        return_stats = true,
+    )
+    projected = fit_btd_als(
+        A,
+        backend;
+        p0,
+        maxiter = 2,
+        tol = 0.0,
+        block_method = :hooi,
+        block_maxiter = 2,
+        verbose = false,
+        return_stats = true,
+    )
+
+    @test projected.solver_info.block_update == :projected
+    @test projected.cost ≈ ambient.cost rtol = 1e-10 atol = 1e-10
+    @test projected.rel_error ≈ ambient.rel_error rtol = 1e-10 atol = 1e-10
+    projected_parts = TensorKitchen.point_parts(projected.point)
+    ambient_parts = TensorKitchen.point_parts(ambient.point)
+    for b = 1:length(projected_parts)
+        @test TensorKitchen._btd_block_tensor(projected_parts[b]) ≈
+              TensorKitchen._btd_block_tensor(ambient_parts[b]) rtol = 1e-10 atol = 1e-10
+    end
+
+    @test_throws ArgumentError fit_btd_als(
+        A,
+        backend;
+        p0,
+        maxiter = 0,
+        block_update = :invalid,
+        verbose = false,
+    )
+    @test_throws ArgumentError fit_btd_als(
+        A,
+        backend;
+        p0,
+        maxiter = 0,
+        block_method = :sthosvd,
+        block_update = :projected,
+        verbose = false,
+    )
+end
+
 # =========================================================================
 # cpd/cp_rank.jl (cost/egrad functions)
 # =========================================================================
