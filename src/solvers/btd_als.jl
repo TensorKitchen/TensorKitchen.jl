@@ -64,29 +64,75 @@ function _btd_block_fit_tucker(
     end
 end
 
+function _btd_block_fit_tucker_projected(
+    backend::BTDBackend{T,N},
+    parts,
+    b::Int,
+    ranks::NTuple{N,Int};
+    block_maxiter::Int = 5,
+    tol::Real = 1e-6,
+    warm::Manifolds.TuckerPoint{T},
+) where {T<:AbstractFloat,N}
+    warm_core, warm_factors = _tucker_data(warm)
+    size(warm_core) == ranks || throw(
+        DimensionMismatch(
+            "BTD projected HOOI warm-start core size $(size(warm_core)) != target ranks $ranks",
+        ),
+    )
+
+    factors = [copy(warm_factors[m]) for m = 1:N]
+    singular_values = [T[] for _ = 1:N]
+    residual_norm2 = _btd_residual_except_block_norm2(backend, parts, b)
+    previous_rel_error = T(Inf)
+    core = _btd_projected_residual_except_block_core(backend, parts, b, warm_factors)
+
+    for _ = 1:block_maxiter
+        factors_previous = copy(factors)
+        @inbounds for mode = 1:N
+            projection_factors = ntuple(k -> k < mode ? factors[k] : factors_previous[k], N)
+            projected = _btd_projected_residual_except_block_mode(
+                backend,
+                parts,
+                b,
+                mode,
+                projection_factors,
+            )
+            F = svd(unfold_mode(projected, mode))
+            rank_mode = min(ranks[mode], size(F.U, 2))
+            factors[mode] = Matrix(@view F.U[:, 1:rank_mode])
+        end
+
+        core = _btd_projected_residual_except_block_core(backend, parts, b, factors)
+        residual_error2 = max(residual_norm2 - sum(abs2, core), zero(T))
+        rel_error = _relative_error_frob_sq(residual_error2, residual_norm2)
+        if previous_rel_error < T(Inf) && abs(previous_rel_error - rel_error) < T(tol)
+            break
+        end
+        previous_rel_error = rel_error
+    end
+
+    return TuckerResult{T,N}(core, factors, collect(1:N), singular_values)
+end
+
 """
     fit_btd_als(A, backend; init=:random, p0=nothing, maxiter=50,
-        tol=1e-6, block_method=:hooi, block_maxiter=5, verbose=true,
+        tol=1e-6, block_method=:hooi, block_maxiter=5, block_update=:auto,
+        verbose=true,
         return_stats=false, max_stagnation_restarts=0,
         stagnation_rel_error=1e-4, restart_candidates=24,
         restart_screening_steps=5, restart_block_maxiter=10,
         restart_seed=nothing, progress_phase=:refinement)
 
-Fit a BTD model with alternating block updates. `backend` defines the Tucker
-blocks and target layout.
+Fit a BTD model with alternating block updates. `backend` defines the Tucker blocks and target layout.
 
 `block_method` selects `:hooi` or `:sthosvd` for each block update. These are
 finite approximate block solves, so the measured objective is not guaranteed to
-decrease at every configured update. This version maintains each block and the
-full residual as dense tensors during a pass; memory-sensitive workloads should
-account for those ambient-size arrays.
-`max_stagnation_restarts` controls optional reinitialization when a converged
-pass remains above `stagnation_rel_error`; the `restart_*` keywords configure
-that retry. With `return_stats=true`, return optimization statistics including
-the fitted point and relative error; otherwise return the fitted manifold point.
+decrease at every configured update. `block_update=:auto` uses projected,
+residual-free updates for HOOI and the ambient reference path for ST-HOSVD.
+Set `block_update=:ambient` to compare HOOI against the dense reference path.
+`max_stagnation_restarts` controls optional reinitialization when a converged pass remains above `stagnation_rel_error`; the `restart_*` keywords configure that retry. With `return_stats=true`, return optimization statistics including the fitted point and relative error; otherwise return the fitted manifold point.
 
-Most users should call [`btd`](@ref). This lower-level function is intended for
-experiments that already have a `BTDBackend`.
+Most users should call [`btd`](@ref). This lower-level function is intended for experiments that already have a `BTDBackend`.
 """
 function fit_btd_als(
     A::AbstractArray{T,N},
@@ -97,6 +143,7 @@ function fit_btd_als(
     tol::Real = 1e-6,
     block_method::Symbol = :hooi,
     block_maxiter::Int = 5,
+    block_update::Symbol = :auto,
     verbose::Bool = true,
     return_stats::Bool = false,
     max_stagnation_restarts::Int = 0,
@@ -107,6 +154,17 @@ function fit_btd_als(
     restart_seed = nothing,
     progress_phase::Symbol = :refinement,
 ) where {T<:AbstractFloat,N}
+    block_update in (:auto, :projected, :ambient) ||
+        throw(ArgumentError("block_update must be :auto, :projected, or :ambient"))
+    block_update_eff =
+        block_update == :auto ? (block_method == :hooi ? :projected : :ambient) :
+        block_update
+    block_update_eff == :projected &&
+        block_method != :hooi &&
+        throw(
+            ArgumentError("block_update=:projected currently requires block_method=:hooi"),
+        )
+
     model = JoinModel{T,typeof(backend)}(backend)
     p0_eff =
         isnothing(p0) ?
@@ -124,17 +182,27 @@ function fit_btd_als(
         _check_parts_len(parts0, backend.r, "BTD ALS init")
 
         points = [parts0[k] for k = 1:backend.r]
-        block_tensors = [_btd_block_tensor(points[k]) for k = 1:backend.r]
-        residual = copy(A)
-        @inbounds for k = 1:backend.r
-            residual .-= block_tensors[k]
+        use_projected_updates = block_update_eff == :projected
+        block_tensors =
+            use_projected_updates ? nothing :
+            [_btd_block_tensor(points[k]) for k = 1:backend.r]
+        residual = use_projected_updates ? nothing : copy(A)
+        if !use_projected_updates
+            @inbounds for k = 1:backend.r
+                residual .-= block_tensors[k]
+            end
         end
+
+        residual_norm2() =
+            use_projected_updates ?
+            max(T(2) * T(_btd_cost(backend, ArrayPartition(points...))), zero(T)) :
+            T(sum(abs2, residual))
 
         prev_rel_error = T(Inf)
         converged = false
         stagnated = false
         iter_final = maxiter
-        rel_error = _relative_error_frob_sq(T(sum(abs2, residual)), T(normA2))
+        rel_error = _relative_error_frob_sq(residual_norm2(), T(normA2))
         progress =
             maxiter > 0 ?
             make_als_progress(
@@ -146,29 +214,41 @@ function fit_btd_als(
 
         for iter = 1:maxiter
             @inbounds for b = 1:backend.r
-                residual .+= block_tensors[b]
-
                 ranks_b = _btd_block_ranks(backend, b)
-                td = _btd_block_fit_tucker(
-                    residual,
-                    ranks_b;
-                    method = block_method,
-                    block_maxiter = block_maxiter,
-                    tol = tol,
-                    verbose = false,
-                    warm = block_method == :hooi ? points[b] : nothing,
-                )
+                td = if use_projected_updates
+                    _btd_block_fit_tucker_projected(
+                        backend,
+                        points,
+                        b,
+                        ranks_b;
+                        block_maxiter,
+                        tol,
+                        warm = points[b],
+                    )
+                else
+                    residual .+= block_tensors[b]
+                    _btd_block_fit_tucker(
+                        residual,
+                        ranks_b;
+                        method = block_method,
+                        block_maxiter = block_maxiter,
+                        tol = tol,
+                        verbose = false,
+                        warm = block_method == :hooi ? points[b] : nothing,
+                    )
+                end
 
                 new_point = _btd_block_point(td)
-                new_tensor = reconstruct(td)
-
-                residual .-= new_tensor
+                if !use_projected_updates
+                    new_tensor = reconstruct(td)
+                    residual .-= new_tensor
+                    block_tensors[b] = new_tensor
+                end
                 points[b] = new_point
-                block_tensors[b] = new_tensor
             end
 
-            n_res = sum(abs2, residual)
-            rel_error = _relative_error_frob_sq(T(n_res), T(normA2))
+            n_res = residual_norm2()
+            rel_error = _relative_error_frob_sq(n_res, T(normA2))
             cost = T(0.5) * n_res
             fit_change = abs(prev_rel_error - rel_error)
             if verbose
@@ -209,7 +289,7 @@ function fit_btd_als(
             )
         end
 
-        n_fin = sum(abs2, residual)
+        n_fin = residual_norm2()
         point = ArrayPartition(points...)
         return (
             point = point,
@@ -248,6 +328,7 @@ function fit_btd_als(
     final_grad_norm = norm(manifold(model), point, rgrad(model, point))
     solver_info = (
         total_iterations = total_iterations,
+        block_update = block_update_eff,
         stagnation_restarts = restarts_done,
         stagnation_rel_error = Float64(stagnation_rel_error),
         restart_candidates = restart_candidates,

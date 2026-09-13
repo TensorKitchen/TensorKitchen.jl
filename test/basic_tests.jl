@@ -773,6 +773,186 @@ end
     )
 end
 
+@testset "BTD projected block residual matches explicit ambient residual" begin
+    rng = MersenneTwister(713)
+    dims = (6, 5, 4)
+    ranks = (2, 2, 2)
+    A = randn(rng, dims...)
+    manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(dims, ranks, 3))
+    backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
+    model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
+    parts = TensorKitchen.point_parts(TensorKitchen.initial_point(model, :random))
+    target_before = copy(A)
+
+    for b = 1:backend.r
+        residual_without_b = copy(A)
+        for c = 1:backend.r
+            c == b && continue
+            residual_without_b .-= TensorKitchen._btd_block_tensor(parts[c])
+        end
+
+        for mode = 1:length(dims)
+            explicit_projection = TensorKitchen._tucker_project_target_except_mode(
+                parts[b],
+                residual_without_b,
+                mode,
+            )
+            implicit_projection = TensorKitchen._btd_projected_residual_except_block_mode(
+                backend,
+                parts,
+                b,
+                mode,
+            )
+            @test implicit_projection ≈ explicit_projection rtol = 1e-12 atol = 1e-12
+
+            projection_point = parts[mod1(b + 1, backend.r)]
+            explicit_alternate = TensorKitchen._tucker_project_target_except_mode(
+                projection_point,
+                residual_without_b,
+                mode,
+            )
+            implicit_alternate = TensorKitchen._btd_projected_residual_except_block_mode(
+                backend,
+                parts,
+                b,
+                mode,
+                projection_point,
+            )
+            @test implicit_alternate ≈ explicit_alternate rtol = 1e-12 atol = 1e-12
+        end
+
+        explicit_core = TensorKitchen._tucker_project_target(parts[b], residual_without_b)
+        implicit_core =
+            TensorKitchen._btd_projected_residual_except_block_core(backend, parts, b)
+        @test implicit_core ≈ explicit_core rtol = 1e-12 atol = 1e-12
+        @test TensorKitchen._btd_residual_except_block_norm2(backend, parts, b) ≈
+              sum(abs2, residual_without_b) rtol = 1e-12 atol = 1e-12
+    end
+
+    @test A == target_before
+    @test_throws BoundsError TensorKitchen._btd_projected_residual_except_block_mode(
+        backend,
+        parts,
+        backend.r + 1,
+        1,
+    )
+    @test_throws ArgumentError TensorKitchen._btd_projected_residual_except_block_mode(
+        backend,
+        parts,
+        1,
+        length(dims) + 1,
+    )
+end
+
+@testset "BTD projected HOOI block solve matches dense residual solve" begin
+    rng = MersenneTwister(714)
+    dims = (7, 6, 5)
+    ranks = (2, 2, 2)
+    A = randn(rng, dims...)
+    manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(dims, ranks, 3))
+    backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
+    model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
+    parts = TensorKitchen.point_parts(TensorKitchen.initial_point(model, :random))
+
+    for b = 1:backend.r
+        residual_without_b = copy(A)
+        for c = 1:backend.r
+            c == b && continue
+            residual_without_b .-= TensorKitchen._btd_block_tensor(parts[c])
+        end
+
+        dense = TensorKitchen._btd_block_fit_tucker(
+            residual_without_b,
+            ranks;
+            method = :hooi,
+            block_maxiter = 2,
+            tol = 0.0,
+            warm = parts[b],
+        )
+        projected = TensorKitchen._btd_block_fit_tucker_projected(
+            backend,
+            parts,
+            b,
+            ranks;
+            block_maxiter = 2,
+            tol = 0.0,
+            warm = parts[b],
+        )
+
+        @test reconstruct(projected) ≈ reconstruct(dense) rtol = 1e-11 atol = 1e-11
+        @test projected.core ≈ dense.core rtol = 1e-11 atol = 1e-11
+        for mode = 1:length(dims)
+            dense_projector = dense.factors[mode] * transpose(dense.factors[mode])
+            projected_projector =
+                projected.factors[mode] * transpose(projected.factors[mode])
+            @test projected_projector ≈ dense_projector rtol = 1e-11 atol = 1e-11
+        end
+    end
+end
+
+@testset "BTD projected ALS pass matches ambient reference" begin
+    rng = MersenneTwister(715)
+    dims = (7, 6, 5)
+    ranks = (2, 2, 2)
+    A = randn(rng, dims...)
+    manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(dims, ranks, 2))
+    backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
+    model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
+    p0 = TensorKitchen.initial_point(model, :random)
+
+    ambient = fit_btd_als(
+        A,
+        backend;
+        p0,
+        maxiter = 2,
+        tol = 0.0,
+        block_method = :hooi,
+        block_maxiter = 2,
+        block_update = :ambient,
+        verbose = false,
+        return_stats = true,
+    )
+    projected = fit_btd_als(
+        A,
+        backend;
+        p0,
+        maxiter = 2,
+        tol = 0.0,
+        block_method = :hooi,
+        block_maxiter = 2,
+        verbose = false,
+        return_stats = true,
+    )
+
+    @test projected.solver_info.block_update == :projected
+    @test projected.cost ≈ ambient.cost rtol = 1e-10 atol = 1e-10
+    @test projected.rel_error ≈ ambient.rel_error rtol = 1e-10 atol = 1e-10
+    projected_parts = TensorKitchen.point_parts(projected.point)
+    ambient_parts = TensorKitchen.point_parts(ambient.point)
+    for b = 1:length(projected_parts)
+        @test TensorKitchen._btd_block_tensor(projected_parts[b]) ≈
+              TensorKitchen._btd_block_tensor(ambient_parts[b]) rtol = 1e-10 atol = 1e-10
+    end
+
+    @test_throws ArgumentError fit_btd_als(
+        A,
+        backend;
+        p0,
+        maxiter = 0,
+        block_update = :invalid,
+        verbose = false,
+    )
+    @test_throws ArgumentError fit_btd_als(
+        A,
+        backend;
+        p0,
+        maxiter = 0,
+        block_method = :sthosvd,
+        block_update = :projected,
+        verbose = false,
+    )
+end
+
 # =========================================================================
 # cpd/cp_rank.jl (cost/egrad functions)
 # =========================================================================
