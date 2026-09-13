@@ -773,6 +773,55 @@ end
     )
 end
 
+@testset "BTD projected block residual matches explicit ambient residual" begin
+    rng = MersenneTwister(713)
+    dims = (6, 5, 4)
+    ranks = (2, 2, 2)
+    A = randn(rng, dims...)
+    manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(dims, ranks, 3))
+    backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
+    model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
+    parts = TensorKitchen.point_parts(TensorKitchen.initial_point(model, :random))
+    target_before = copy(A)
+
+    for b = 1:backend.r
+        residual_without_b = copy(A)
+        for c = 1:backend.r
+            c == b && continue
+            residual_without_b .-= TensorKitchen._btd_block_tensor(parts[c])
+        end
+
+        for mode = 1:length(dims)
+            explicit_projection = TensorKitchen._tucker_project_target_except_mode(
+                parts[b],
+                residual_without_b,
+                mode,
+            )
+            implicit_projection = TensorKitchen._btd_projected_residual_except_block_mode(
+                backend,
+                parts,
+                b,
+                mode,
+            )
+            @test implicit_projection ≈ explicit_projection rtol = 1e-12 atol = 1e-12
+        end
+    end
+
+    @test A == target_before
+    @test_throws BoundsError TensorKitchen._btd_projected_residual_except_block_mode(
+        backend,
+        parts,
+        backend.r + 1,
+        1,
+    )
+    @test_throws ArgumentError TensorKitchen._btd_projected_residual_except_block_mode(
+        backend,
+        parts,
+        1,
+        length(dims) + 1,
+    )
+end
+
 # =========================================================================
 # cpd/cp_rank.jl (cost/egrad functions)
 # =========================================================================

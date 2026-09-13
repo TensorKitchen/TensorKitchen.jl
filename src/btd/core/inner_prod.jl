@@ -352,3 +352,35 @@ function _tucker_cross_except_mode(
         _apply_mode_products(backend, Gq, mode_mats),
     )
 end
+
+"""
+    _btd_projected_residual_except_block_mode(backend, parts, b, m)
+
+Project the residual excluding block `b` through every factor of block `b`
+except mode `m`, without constructing the ambient residual or reconstructing
+the other Tucker blocks.
+"""
+function _btd_projected_residual_except_block_mode(
+    backend::BTDBackend{T,N},
+    parts,
+    b::Int,
+    m::Int,
+) where {T,N}
+    _check_parts_len(parts, backend.r, "BTD projected residual")
+    1 <= b <= backend.r || throw(BoundsError(parts, b))
+    1 <= m <= N || throw(ArgumentError("mode must be in 1:$N, got $m"))
+
+    pb = parts[b]
+    _check_tucker_block(pb, b)
+    projected = copy(_tucker_project_target_except_mode(pb, backend.target, m))
+
+    @inbounds for c = 1:backend.r
+        c == b && continue
+        pc = parts[c]
+        _check_tucker_block(pc, c)
+        _, Uc = _tucker_data(pc)
+        cross_except_m = _tucker_cross_except_mode(pb, pc, m)
+        projected .-= mode_n_product(cross_except_m, Uc[m], m)
+    end
+    return projected
+end
