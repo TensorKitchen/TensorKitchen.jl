@@ -329,13 +329,7 @@ end
         maxiter = 0,
         verbose = false,
     )
-    @test_nowarn cpd(
-        raw,
-        2;
-        compute_type = Float32,
-        maxiter = 1,
-        verbose = false,
-    )
+    @test_nowarn cpd(raw, 2; compute_type = Float32, maxiter = 1, verbose = false)
     @test_nowarn nncpd(raw, 2; compute_type = Float32, maxiter = 1, verbose = false)
     @test_throws ArgumentError tucker(raw, (2, 2, 2); compute_type = Float32)
     @test_throws ArgumentError tucker(
