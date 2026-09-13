@@ -804,7 +804,29 @@ end
                 mode,
             )
             @test implicit_projection ≈ explicit_projection rtol = 1e-12 atol = 1e-12
+
+            projection_point = parts[mod1(b + 1, backend.r)]
+            explicit_alternate = TensorKitchen._tucker_project_target_except_mode(
+                projection_point,
+                residual_without_b,
+                mode,
+            )
+            implicit_alternate = TensorKitchen._btd_projected_residual_except_block_mode(
+                backend,
+                parts,
+                b,
+                mode,
+                projection_point,
+            )
+            @test implicit_alternate ≈ explicit_alternate rtol = 1e-12 atol = 1e-12
         end
+
+        explicit_core = TensorKitchen._tucker_project_target(parts[b], residual_without_b)
+        implicit_core =
+            TensorKitchen._btd_projected_residual_except_block_core(backend, parts, b)
+        @test implicit_core ≈ explicit_core rtol = 1e-12 atol = 1e-12
+        @test TensorKitchen._btd_residual_except_block_norm2(backend, parts, b) ≈
+              sum(abs2, residual_without_b) rtol = 1e-12 atol = 1e-12
     end
 
     @test A == target_before

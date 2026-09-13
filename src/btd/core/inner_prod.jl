@@ -366,21 +366,78 @@ function _btd_projected_residual_except_block_mode(
     b::Int,
     m::Int,
 ) where {T,N}
+    return _btd_projected_residual_except_block_mode(backend, parts, b, m, parts[b])
+end
+
+function _btd_projected_residual_except_block_mode(
+    backend::BTDBackend{T,N},
+    parts,
+    b::Int,
+    m::Int,
+    projection_point::Manifolds.TuckerPoint,
+) where {T,N}
     _check_parts_len(parts, backend.r, "BTD projected residual")
     1 <= b <= backend.r || throw(BoundsError(parts, b))
     1 <= m <= N || throw(ArgumentError("mode must be in 1:$N, got $m"))
 
-    pb = parts[b]
-    _check_tucker_block(pb, b)
-    projected = copy(_tucker_project_target_except_mode(pb, backend.target, m))
+    _check_tucker_block(projection_point, b)
+    projected =
+        copy(_tucker_project_target_except_mode(projection_point, backend.target, m))
 
     @inbounds for c = 1:backend.r
         c == b && continue
         pc = parts[c]
         _check_tucker_block(pc, c)
         _, Uc = _tucker_data(pc)
-        cross_except_m = _tucker_cross_except_mode(pb, pc, m)
+        cross_except_m = _tucker_cross_except_mode(projection_point, pc, m)
         projected .-= mode_n_product(cross_except_m, Uc[m], m)
     end
     return projected
+end
+
+"""
+    _btd_projected_residual_except_block_core(backend, parts, b, projection_point)
+
+Project the residual excluding block `b` through every factor in
+`projection_point`. The result has Tucker-core dimensions and requires no
+ambient residual or block reconstruction.
+"""
+function _btd_projected_residual_except_block_core(
+    backend::BTDBackend,
+    parts,
+    b::Int,
+    projection_point::Manifolds.TuckerPoint = parts[b],
+)
+    _check_parts_len(parts, backend.r, "BTD projected residual core")
+    1 <= b <= backend.r || throw(BoundsError(parts, b))
+    _check_tucker_block(projection_point, b)
+
+    projected = copy(_tucker_project_target(projection_point, backend.target))
+    @inbounds for c = 1:backend.r
+        c == b && continue
+        pc = parts[c]
+        _check_tucker_block(pc, c)
+        projected .-= _tucker_cross_core(projection_point, pc)
+    end
+    return projected
+end
+
+"""Squared norm of the BTD residual with block `b` excluded."""
+function _btd_residual_except_block_norm2(backend::BTDBackend{T}, parts, b::Int) where {T}
+    _check_parts_len(parts, backend.r, "BTD residual norm")
+    1 <= b <= backend.r || throw(BoundsError(parts, b))
+
+    norm2 = backend.target_normsq
+    @inbounds for c = 1:backend.r
+        c == b && continue
+        pc = parts[c]
+        _check_tucker_block(pc, c)
+        norm2 -= 2 * _target_tucker_inner(backend.target, pc)
+        norm2 += _tucker_tucker_inner(pc, pc)
+        for d = (c+1):backend.r
+            d == b && continue
+            norm2 += 2 * _tucker_tucker_inner(pc, parts[d])
+        end
+    end
+    return max(T(norm2), zero(T))
 end
