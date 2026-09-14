@@ -164,6 +164,14 @@ function fit_btd_als(
         throw(
             ArgumentError("block_update=:projected currently requires block_method=:hooi"),
         )
+    !is_materialized(backend.target) &&
+        block_update_eff != :projected &&
+        throw(
+            ArgumentError(
+                "A lazy BTD target requires block_method=:hooi with " *
+                "block_update=:projected. Set materialize=true to use ambient block updates.",
+            ),
+        )
 
     model = JoinModel{T,typeof(backend)}(backend)
     p0_eff =
@@ -172,7 +180,7 @@ function fit_btd_als(
             block_method == :hooi ? initial_point(model, init; verbose) :
             initial_point(model, :random; verbose)
         ) : p0
-    normA2 = sum(abs2, A)
+    normA2 = backend.target_normsq
     restarts_done = 0
     total_iterations = 0
     restart_rel_errors = Float64[]
@@ -307,13 +315,22 @@ function fit_btd_als(
         push!(restart_rel_errors, Float64(result_pass.rel_error))
         restarts_done += 1
         seed_eff = isnothing(restart_seed) ? nothing : Int(restart_seed) + restarts_done - 1
-        restart_init = BTDHOSVDMultistartInit(
-            restart_candidates;
-            screening_steps = restart_screening_steps,
-            block_method = block_method,
-            block_maxiter = restart_block_maxiter,
-            seed = seed_eff,
-        )
+        restart_init = if is_materialized(backend.target)
+            BTDHOSVDMultistartInit(
+                restart_candidates;
+                screening_steps = restart_screening_steps,
+                block_method = block_method,
+                block_maxiter = restart_block_maxiter,
+                seed = seed_eff,
+            )
+        else
+            BTDProjectedMultistartInit(
+                restart_candidates;
+                screening_steps = restart_screening_steps,
+                block_maxiter = restart_block_maxiter,
+                seed = seed_eff,
+            )
+        end
         p_restart = initial_point(model, restart_init; verbose)
         restarted = run_pass(p_restart, total_iterations)
         total_iterations += restarted.iterations

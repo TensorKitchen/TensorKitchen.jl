@@ -45,12 +45,55 @@ function _polish_btd_with_als(
     )
 end
 
-_default_btd_init(::ALSSolver) = BTDHOSVDMultistartInit()
-_default_btd_init(::AbstractSolver) = :alswarm
+_default_btd_init(::ALSSolver, A) =
+    is_materialized(A) ? BTDHOSVDMultistartInit() : BTDProjectedMultistartInit()
+_default_btd_init(::AbstractSolver, A) = :alswarm
 
-@inline function _resolve_btd_init(init, solver::AbstractSolver)
+@inline function _resolve_btd_init(A, init, solver::AbstractSolver)
     init == :auto || return init
-    return _default_btd_init(solver)
+    return _default_btd_init(solver, A)
+end
+
+@inline function _resolve_btd_warm_init(A, warm_init)
+    warm_init == :auto || return warm_init
+    return is_materialized(A) ?
+           BTDHOSVDMultistartInit(64; screening_steps = 10, block_maxiter = 12) :
+           BTDProjectedMultistartInit()
+end
+
+@inline _is_observation_preserving_btd_init(init) =
+    init === :random ||
+    init === :projected_multistart ||
+    init isa Union{RandomInit,BTDProjectedMultistartInit,PointInit,FunctionInit}
+@inline _is_observation_preserving_btd_init(init::BTDALSWarmStartInit) =
+    init.block_method == :hooi && _is_observation_preserving_btd_init(init.base_init)
+
+function _validate_observation_preserving_btd_path(
+    A,
+    init,
+    init_point,
+    block_method::Symbol,
+)
+    is_materialized(A) && return nothing
+    block_method == :hooi || throw(
+        ArgumentError(
+            "A lazy BTD input requires block_method=:hooi so all ALS updates remain " *
+            "projected. Set materialize=true to use block_method=:sthosvd.",
+        ),
+    )
+    if isnothing(init_point) && !_is_observation_preserving_btd_init(init)
+        throw(
+            ArgumentError(
+                "A lazy BTD input supports init=:auto, init=:random, " *
+                "init=:projected_multistart, RandomInit(), " *
+                "BTDProjectedMultistartInit(...), a recursively safe " *
+                "BTDALSWarmStartInit(...), PointInit(...), FunctionInit(...), or an " *
+                "explicit init_point. HOSVD-based initialization requires " *
+                "materialize=true.",
+            ),
+        )
+    end
+    return nothing
 end
 
 @inline _btd_solver_symbol(::ALSSolver) = :als
@@ -150,9 +193,9 @@ function _merge_btd_solver_info(result, extra::NamedTuple)
 end
 
 """
-    btd(A, blocks, ranks; init=:auto, warm_steps=200,
-        warm_init=BTDHOSVDMultistartInit(64; screening_steps=10,
-            block_maxiter=12),
+    btd(A, blocks, ranks; compute_type=nothing, materialize=false,
+        conversion_block_length=65_536, init=:auto, warm_steps=200,
+        warm_init=:auto,
         warm_block_method=:hooi, warm_block_maxiter=20,
         warm_rel_error_gate=5e-2, solver=:rgd, maxiter=500,
         stepsize=0.01, tol=1e-6, gradient_mode=:riemannian,
@@ -167,7 +210,8 @@ Approximate `A` as a sum of Tucker blocks.
 
 # Inputs
 
-- `A`: numerical input tensor.
+- `A`: real-valued input tensor. Integer and non-native floating-point storage
+  can be converted lazily at the public API boundary.
 - `blocks`: number of Tucker blocks.
 - `ranks`: multilinear rank tuple used for every block.
 
@@ -182,8 +226,16 @@ Returns a [`BTDResult`](@ref). Use `blocks` to inspect the fitted Tucker terms,
 - `solver=:rgd` selects the refinement method. Supported symbols are `:als`,
   `:rgd`, `:rgd_fixed`, `:rcg`, `:lbfgs`, and `:btd_tsd`; a compatible solver
   object may be passed instead. `:lm` is not supported for BTD.
-- `init=:auto` selects `BTDHOSVDMultistartInit()` for direct ALS and an ALS warm
-  start for manifold solvers. `init_point` supplies an explicit packed BTD point.
+- `compute_type=nothing`: floating-point arithmetic type. Small integer storage
+  defaults to `Float32`; other integer storage defaults to `Float64`; native
+  floating-point inputs keep their element type.
+- `materialize=false`: preserve native storage and convert observations only as
+  projected kernels read them. Set `true` to allocate a full tensor explicitly.
+- `conversion_block_length=65_536`: bounded conversion-buffer length.
+- `init=:auto` selects `BTDHOSVDMultistartInit()` for a materialized direct ALS
+  call and `BTDProjectedMultistartInit()` for a lazy direct ALS call. Manifold
+  solvers use an ALS warm start with the corresponding storage-aware base
+  initializer. `init_point` supplies an explicit packed BTD point.
 - `maxiter=500`, `stepsize=0.01`, and `tol=1e-6` control refinement.
 - `verbose=true` displays progress.
 - `gradient_mode=:riemannian` selects the public gradient route;
@@ -193,8 +245,8 @@ Returns a [`BTDResult`](@ref). Use `blocks` to inspect the fitted Tucker terms,
 # Initialization and ALS budgets
 
 - `warm_steps=200` controls the ALS warm-start length.
-- `warm_init=BTDHOSVDMultistartInit(64; screening_steps=10,
-  block_maxiter=12)` selects its base initializer.
+- `warm_init=:auto` selects an HOSVD multistart initializer for materialized
+  inputs and a projected multistart initializer for lazy inputs.
 - `warm_rel_error_gate=5e-2` is a failure cutoff: if the warm-start relative
   error is larger, manifold refinement is skipped and the warm result is
   returned. Use `nothing` to disable the gate.
@@ -216,8 +268,13 @@ Returns a [`BTDResult`](@ref). Use `blocks` to inspect the fitted Tucker terms,
   `restart_block_maxiter=20`: multistart retry budgets.
 - `restart_seed=nothing`: optional deterministic seed for retry generation.
 
+With `materialize=false`, a lazy converted input uses projected HOOI updates and
+supports observation-preserving random or projected-multistart initialization.
+HOSVD-based initialization, ambient residual/Jacobian operations, and
+`block_method=:sthosvd` require `materialize=true`.
+
 BTD is nonconvex, so these controls improve search effort rather than guarantee
-a globally optimal decomposition. `A` must have floating-point element type.
+a globally optimal decomposition.
 
 # Example
 
@@ -229,12 +286,15 @@ A_approx = reconstruct(result)
 ```
 """
 function btd(
-    A::AbstractArray{T,N},
+    A::AbstractArray{<:Real,N},
     blocks::Int,
     ranks::NTuple{N,Int};
+    compute_type = nothing,
+    materialize::Bool = false,
+    conversion_block_length::Int = 65_536,
     init = :auto,
     warm_steps = 200,
-    warm_init = BTDHOSVDMultistartInit(64; screening_steps = 10, block_maxiter = 12),
+    warm_init = :auto,
     warm_block_method = :hooi,
     warm_block_maxiter = 20,
     warm_rel_error_gate = 5e-2,
@@ -256,22 +316,42 @@ function btd(
     restart_block_maxiter = 20,
     restart_seed = nothing,
     kwargs...,
-) where {T<:AbstractFloat,N}
+) where {N}
+    _reject_public_observation_norm_cache(kwargs)
+    conversion_block_length >= 1 ||
+        throw(ArgumentError("conversion_block_length must be positive"))
+    A_prepared =
+        prepare_tensor(A; compute_type, materialize, block_length = conversion_block_length)
+    T = eltype(A_prepared)
     solver_obj = _solver_object(solver, stepsize; kwargs...)
     _reject_unsupported_btd_solver(solver_obj)
     solver_sym = _btd_solver_symbol(solver_obj)
-    init_resolved = _resolve_btd_init(init, solver_obj)
+    init_resolved = _resolve_btd_init(A_prepared, init, solver_obj)
+    warm_init_resolved = _resolve_btd_warm_init(A_prepared, warm_init)
     init_eff =
         init_resolved == :alswarm ?
         BTDALSWarmStartInit(
             warm_steps;
-            base_init = warm_init,
+            base_init = warm_init_resolved,
             block_method = warm_block_method,
             block_maxiter = warm_block_maxiter,
         ) : init_resolved
+    _validate_observation_preserving_btd_path(
+        A_prepared,
+        init_eff,
+        init_point,
+        block_method,
+    )
     blocks >= 1 || throw(ArgumentError("blocks must be >= 1, got $blocks"))
-    manifolds = _as_join_manifold_tuple(TuckerJoin(size(A), ranks, blocks))
-    b = _sum_backend_instance(BTDBackend, manifolds, A; init_point)
+    manifolds = _as_join_manifold_tuple(TuckerJoin(size(A_prepared), ranks, blocks))
+    normA2 = observation_norm2(A_prepared; block_length = conversion_block_length)
+    b = _sum_backend_instance(
+        BTDBackend,
+        manifolds,
+        A_prepared;
+        init_point,
+        observation_norm2_cache = normA2,
+    )
     model = JoinModel{T,typeof(b)}(b)
     solve_init = init_eff
     solve_p0 = nothing
@@ -315,6 +395,7 @@ function btd(
             restart_screening_steps = restart_screening_steps,
             restart_block_maxiter = restart_block_maxiter,
             restart_seed = restart_seed,
+            observation_norm2_cache = normA2,
             kwargs...,
         )
     end
@@ -344,11 +425,11 @@ function btd(
 end
 
 function btd(
-    A::AbstractArray{T,N},
+    A::AbstractArray{<:Real,N},
     blocks::Int,
     ranks::AbstractVector{<:Integer};
     kwargs...,
-) where {T<:AbstractFloat,N}
+) where {N}
     length(ranks) == N ||
         throw(ArgumentError("ranks length $(length(ranks)) must match ndims(A)=$N."))
     return btd(A, blocks, Tuple(Int.(ranks)); kwargs...)

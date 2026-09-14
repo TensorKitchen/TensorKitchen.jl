@@ -7,6 +7,7 @@ export AbstractInitializer,
     ALSWarmStartInit,
     BTDALSWarmStartInit,
     BTDHOSVDMultistartInit,
+    BTDProjectedMultistartInit,
     PointInit,
     FunctionInit,
     random_unit_matrix
@@ -57,6 +58,22 @@ struct BTDHOSVDMultistartInit <: AbstractInitializer
     screening_steps::Int
     include_sequential::Bool
     block_method::Symbol
+    block_maxiter::Int
+    seed::Union{Nothing,Int}
+end
+
+"""
+    BTDProjectedMultistartInit(candidates=8; screening_steps=2,
+        block_maxiter=3, seed=nothing)
+
+Configure observation-preserving BTD initialization from random structured
+Tucker points. Each candidate can be screened with a short projected HOOI
+solve, and the analytic BTD objective selects the best point. This initializer
+does not construct an ambient residual or materialize a lazy target.
+"""
+struct BTDProjectedMultistartInit <: AbstractInitializer
+    candidates::Int
+    screening_steps::Int
     block_maxiter::Int
     seed::Union{Nothing,Int}
 end
@@ -118,6 +135,31 @@ function BTDHOSVDMultistartInit(
         block_maxiter,
         seed_eff,
     )
+end
+
+function BTDProjectedMultistartInit(
+    candidates::Int = 8;
+    screening_steps::Int = 2,
+    block_maxiter::Int = 3,
+    seed::Union{Nothing,Integer} = nothing,
+)
+    candidates >= 1 || throw(
+        ArgumentError(
+            "BTDProjectedMultistartInit requires candidates >= 1, got $candidates",
+        ),
+    )
+    screening_steps >= 0 || throw(
+        ArgumentError(
+            "BTDProjectedMultistartInit requires screening_steps >= 0, got $screening_steps",
+        ),
+    )
+    block_maxiter >= 0 || throw(
+        ArgumentError(
+            "BTDProjectedMultistartInit requires block_maxiter >= 0, got $block_maxiter",
+        ),
+    )
+    seed_eff = isnothing(seed) ? nothing : Int(seed)
+    return BTDProjectedMultistartInit(candidates, screening_steps, block_maxiter, seed_eff)
 end
 
 struct PointInit{P} <: AbstractInitializer

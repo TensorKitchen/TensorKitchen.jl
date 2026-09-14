@@ -819,12 +819,185 @@ end
     @test_throws ArgumentError TensorKitchen.initial_point(lazy_model, :sthosvd)
     @test_throws ArgumentError TensorKitchen.residual(lazy_model, lazy_point)
 
+    projected_init =
+        BTDProjectedMultistartInit(2; screening_steps = 1, block_maxiter = 1, seed = 812)
+    projected_lazy = TensorKitchen.initial_point(lazy_model, projected_init)
+    dense_backend =
+        TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, data)
+    dense_model = TensorKitchen.JoinModel{Float32,typeof(dense_backend)}(dense_backend)
+    projected_dense = TensorKitchen.initial_point(dense_model, projected_init)
+    @test TensorKitchen.cost(lazy_model, projected_lazy) ≈
+          TensorKitchen.cost(dense_model, projected_dense) rtol = 2e-5 atol = 2e-4
+
+    @test_throws ArgumentError BTDProjectedMultistartInit(0)
+    @test_throws ArgumentError BTDProjectedMultistartInit(1; screening_steps = -1)
+    @test_throws ArgumentError BTDProjectedMultistartInit(1; block_maxiter = -1)
+
+    shared_point = TensorKitchen._btd_random_point(MersenneTwister(913), dense_backend)
+    dense_result = btd(
+        data,
+        2,
+        ranks;
+        solver = :als,
+        init = PointInit(deepcopy(shared_point)),
+        maxiter = 1,
+        tol = 0.0,
+        block_method = :hooi,
+        block_maxiter = 1,
+        max_stagnation_restarts = 0,
+        verbose = false,
+    )
+    lazy_result = btd(
+        Int16.(data),
+        2,
+        ranks;
+        compute_type = Float32,
+        materialize = false,
+        solver = :als,
+        init = PointInit(deepcopy(shared_point)),
+        maxiter = 1,
+        tol = 0.0,
+        block_method = :hooi,
+        block_maxiter = 1,
+        max_stagnation_restarts = 0,
+        verbose = false,
+    )
+    @test lazy_result isa BTDResult
+    @test eltype(core(first(blocks(lazy_result)))) === Float32
+    @test lazy_result.solver_info.block_update == :projected
+    @test lazy_result.cost ≈ dense_result.cost rtol = 2e-5 atol = 2e-4
+    @test lazy_result.rel_error ≈ dense_result.rel_error rtol = 2e-5 atol = 2e-5
+    @test reconstruct(lazy_result) ≈ reconstruct(dense_result) rtol = 2e-5 atol = 2e-4
+
+    auto_result = btd(
+        Int16.(data),
+        2,
+        ranks;
+        compute_type = Float32,
+        materialize = false,
+        solver = :als,
+        maxiter = 0,
+        block_maxiter = 1,
+        max_stagnation_restarts = 0,
+        verbose = false,
+    )
+    @test auto_result isa BTDResult
+    @test isfinite(auto_result.rel_error)
+    @test auto_result.solver_info.block_update == :projected
+
+    lazy_rgd_result = btd(
+        Int16.(data),
+        2,
+        ranks;
+        compute_type = Float32,
+        materialize = false,
+        solver = :rgd,
+        init = BTDALSWarmStartInit(
+            1;
+            base_init = projected_init,
+            block_method = :hooi,
+            block_maxiter = 1,
+        ),
+        maxiter = 1,
+        btd_als_polish_maxiter = 0,
+        warm_rel_error_gate = nothing,
+        max_stagnation_restarts = 0,
+        verbose = false,
+    )
+    @test lazy_rgd_result isa BTDResult
+    @test lazy_rgd_result.solver == :rgd
+    @test isfinite(lazy_rgd_result.rel_error)
+
+    for solver_name in (:rcg, :lbfgs, :rgd_fixed, :btd_tsd)
+        solver_result = btd(
+            Int16.(data),
+            2,
+            ranks;
+            compute_type = Float32,
+            materialize = false,
+            solver = solver_name,
+            init = BTDProjectedMultistartInit(1; screening_steps = 0, seed = 812),
+            maxiter = 1,
+            btd_als_polish_maxiter = 0,
+            max_stagnation_restarts = 0,
+            verbose = false,
+        )
+        @test solver_result isa BTDResult
+        @test solver_result.solver == solver_name
+        @test isfinite(solver_result.rel_error)
+    end
+
+    @test_throws ArgumentError btd(
+        Int16.(data),
+        2,
+        ranks;
+        compute_type = Float32,
+        materialize = false,
+        solver = :als,
+        init = BTDHOSVDMultistartInit(1; screening_steps = 0),
+        maxiter = 0,
+        verbose = false,
+    )
+    @test_throws ArgumentError btd(
+        Int16.(data),
+        2,
+        ranks;
+        compute_type = Float32,
+        materialize = false,
+        solver = :als,
+        init = PointInit(shared_point),
+        block_method = :sthosvd,
+        maxiter = 0,
+        verbose = false,
+    )
+    materialized_result = btd(
+        Int16.(data),
+        2,
+        ranks;
+        compute_type = Float32,
+        materialize = true,
+        solver = :als,
+        init = BTDHOSVDMultistartInit(1; screening_steps = 0),
+        maxiter = 0,
+        max_stagnation_restarts = 0,
+        verbose = false,
+    )
+    @test materialized_result isa BTDResult
+    @test eltype(core(first(blocks(materialized_result)))) === Float32
+
     norm_calls = Ref(0)
     counted = _NormCountingArray(data, norm_calls, Int[])
     counted_backend =
         TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, counted)
     @test counted_backend.target === counted
     @test norm_calls[] == 1
+
+    norm_calls[] = 0
+    empty!(counted.norm_block_lengths)
+    btd(
+        counted,
+        2,
+        ranks;
+        solver = :als,
+        init = PointInit(deepcopy(shared_point)),
+        maxiter = 0,
+        conversion_block_length = 7,
+        max_stagnation_restarts = 0,
+        verbose = false,
+    )
+    @test norm_calls[] == 1
+    @test counted.norm_block_lengths == [7]
+
+    @test_throws ArgumentError btd(
+        data,
+        2,
+        ranks;
+        observation_norm2_cache = sum(abs2, data),
+        solver = :als,
+        init = PointInit(shared_point),
+        maxiter = 0,
+        verbose = false,
+    )
 
     join_backend =
         TensorKitchen._sum_backend_instance(TensorKitchen.JoinBackend, manifolds, data)

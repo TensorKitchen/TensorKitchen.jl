@@ -19,6 +19,9 @@ Is converting the whole input the memory problem?
          ├─ CP or nonnegative CP → exact ALS or manifold optimization
          │                          with implicit contractions
          │
+         ├─ BTD → projected HOOI updates and projected multistart
+         │         initialization
+         │
          └─ Tucker → randomized ST-HOSVD when approximation is acceptable
 ```
 
@@ -120,6 +123,35 @@ result = tucker(
 )
 ```
 
+## Block term decomposition
+
+BTD can also keep integer observations in native storage. Its lazy ALS path
+updates each Tucker block from projected target contractions, without building
+the full residual tensor:
+
+```julia
+result = btd(
+    counts,
+    2,
+    (5, 5, 5);
+    compute_type = Float32,
+    materialize = false,
+    solver = :als,
+    verbose = false,
+)
+```
+
+For a lazy input, `init=:auto` selects
+[`BTDProjectedMultistartInit`](@ref). Its candidates are random compact Tucker
+points, optionally screened by short projected HOOI runs, and selected using
+the analytic BTD objective. This is exact observation-preserving computation,
+not randomized sketching: every projected contraction still uses all input
+observations.
+
+Lazy BTD currently requires `block_method=:hooi`. HOSVD-based initializers and
+`block_method=:sthosvd` need an ambient tensor and are rejected unless you set
+`materialize=true`. Explicit requests are never changed silently.
+
 ## What `materialize=false` guarantees
 
 When preprocessing produces a [`ComputeArray`](@ref), `materialize=false`
@@ -132,20 +164,14 @@ option must change. TensorKitchen does not silently materialize the input or
 silently replace an explicitly requested initializer or exact method. The
 automatic CP/NNCP initialization policy selects `RandomInit()` for lazy inputs;
 explicit structured CP initializers and `solver=:lm` still require a
-materialized input. LM constructs an input-sized ambient residual.
-
-BTD is not connected to the lazy input path yet. To use BTD with integer data,
-make the conversion explicit:
-
-```julia
-A = materialize_tensor(counts, Float32)
-result = btd(A, 2, (5, 5, 5))
-```
+materialized input. LM constructs an input-sized ambient residual. Automatic
+BTD initialization uses projected multistart for lazy inputs, and its ALS
+updates remain on the projected HOOI path.
 
 ## Inspect preprocessing directly
 
-Most users can pass preprocessing keywords directly to `cpd`, `nncpd`, or
-`tucker`. The lower-level functions are useful when inspecting or reusing a
+Most users can pass preprocessing keywords directly to `cpd`, `nncpd`, `btd`,
+or `tucker`. The lower-level functions are useful when inspecting or reusing a
 prepared tensor:
 
 ```julia

@@ -349,8 +349,12 @@ function _sum_backend_instance(
     components,
     target::AbstractArray{T,N};
     init_point = nothing,
+    observation_norm2_cache = nothing,
 ) where {T<:AbstractFloat,N}
     parts = _sum_backend_common_parts(components, target; init_point)
+    target_normsq =
+        isnothing(observation_norm2_cache) ? observation_norm2(parts.target) :
+        T(observation_norm2_cache)
     return BTDBackend(
         parts.components,
         parts.manifolds,
@@ -360,7 +364,7 @@ function _sum_backend_instance(
         parts.product,
         parts.init_point,
         BTDContractionWorkspace{T,N}(),
-        observation_norm2(parts.target),
+        target_normsq,
     )
 end
 

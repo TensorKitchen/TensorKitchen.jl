@@ -125,6 +125,26 @@ function _btd_block_ranks_by_mode(backend::BTDBackend{T,N}) where {T,N}
     return ranks
 end
 
+function _btd_random_point(
+    rng::AbstractRNG,
+    backend::BTDBackend{T,N},
+) where {T<:AbstractFloat,N}
+    parts = ntuple(backend.r) do b
+        M = _backend_manifold(backend, b)
+        M isa Manifolds.Tucker || throw(
+            ArgumentError(
+                "BTD projected multistart expects Tucker manifolds, got $(typeof(M)) at block $b.",
+            ),
+        )
+        dims = factor_dims(M)
+        ranks = multilinear_rank(M)
+        core = randn(rng, T, ranks...)
+        factors = ntuple(m -> _rand_orthonormal_tucker(rng, dims[m], ranks[m], T), N)
+        Manifolds.TuckerPoint(core, factors...)
+    end
+    return ArrayPartition(parts...)
+end
+
 function _btd_hosvd_subspaces(backend::BTDBackend{T,N}, ranks_by_block) where {T,N}
     A = backend.target
     return ntuple(N) do mode
@@ -211,6 +231,8 @@ function initial_point(
     init == :alswarm && return initial_point(model, BTDALSWarmStartInit(); verbose)
     init == :hosvd_multistart &&
         return initial_point(model, BTDHOSVDMultistartInit(); verbose)
+    init == :projected_multistart &&
+        return initial_point(model, BTDProjectedMultistartInit(); verbose)
     backend = model.backend
     M = backend.M_product
     if !isnothing(backend.init_point)
@@ -226,6 +248,48 @@ function initial_point(
     end
 
     return _btd_sequential_tucker_init(model, init)
+end
+
+
+function initial_point(
+    model::JoinModel{<:AbstractFloat,<:BTDBackend},
+    init::BTDProjectedMultistartInit;
+    verbose::Bool = false,
+)
+    backend = model.backend
+    rng = isnothing(init.seed) ? Random.default_rng() : MersenneTwister(init.seed)
+    best_point = nothing
+    best_cost = eltype(backend.target)(Inf)
+
+    for _ = 1:init.candidates
+        p_candidate = _btd_random_point(rng, backend)
+        p_screened, candidate_cost = if init.screening_steps > 0
+            screened = fit_btd_als(
+                backend.target,
+                backend;
+                p0 = p_candidate,
+                maxiter = init.screening_steps,
+                tol = 0.0,
+                block_method = :hooi,
+                block_maxiter = init.block_maxiter,
+                block_update = :projected,
+                verbose,
+                return_stats = true,
+                max_stagnation_restarts = 0,
+                progress_phase = :initialization,
+            )
+            screened.point, screened.cost
+        else
+            p_candidate, cost(model, p_candidate)
+        end
+
+        if candidate_cost < best_cost
+            best_cost = candidate_cost
+            best_point = p_screened
+        end
+    end
+
+    return best_point
 end
 
 function initial_point(
