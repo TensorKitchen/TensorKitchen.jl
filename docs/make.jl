@@ -6,6 +6,7 @@ makedocs(
     warnonly = false,
     pages = [
         "Home" => "index.md",
+        "Start here" => "user_guide/README.md",
         "CPD" => "cpd.md",
         "Tucker" => "tucker.md",
         "BTD" => "btd.md",
