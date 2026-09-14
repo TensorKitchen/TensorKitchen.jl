@@ -96,6 +96,16 @@ function _rand_orthonormal_tucker(n::Int, r::Int, ::Type{T}) where {T<:AbstractF
     return Matrix(Q[:, 1:r])
 end
 
+function _rand_orthonormal_tucker(
+    rng::AbstractRNG,
+    n::Int,
+    r::Int,
+    ::Type{T},
+) where {T<:AbstractFloat}
+    Q, _ = qr(randn(rng, T, n, r))
+    return Matrix(Q[:, 1:r])
+end
+
 function _tucker_all_except_mode_products(
     core::AbstractArray{T,N},
     factors,

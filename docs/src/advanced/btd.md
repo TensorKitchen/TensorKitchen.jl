@@ -16,7 +16,9 @@ BTD is nonconvex, so the initial blocks can materially affect the final fit.
 Two complementary initialization ideas are useful:
 
 - HOSVD multistart generates several structured candidates and keeps the best
-  screened candidate.
+  screened candidate for an explicitly materialized target.
+- Projected multistart generates compact random Tucker candidates, screens
+  them with residual-free projected HOOI, and supports lazy targets.
 - An ALS warm start improves the candidate before a manifold solver refines it.
 
 The alternating path can be used directly, or as a warm start and optional
@@ -54,11 +56,37 @@ init = BTDHOSVDMultistartInit(
 result = btd(A, blocks, ranks; solver = :als, init = init)
 ```
 
+For a lazy target, configure projected multistart instead:
+
+```julia
+init = BTDProjectedMultistartInit(
+    8;
+    screening_steps = 2,
+    block_maxiter = 3,
+    seed = 0,
+)
+
+result = btd(
+    counts,
+    blocks,
+    ranks;
+    compute_type = Float32,
+    materialize = false,
+    solver = :als,
+    init = init,
+)
+```
+
+Candidate screening and selection use projected target contractions and the
+analytic residual norm. No ambient target copy, residual tensor, or block-sized
+reconstruction is required.
+
 `BTDALSWarmStartInit` wraps a base initializer with a fixed number of initial
 ALS steps before manifold refinement.
 
 ```@docs
 BTDHOSVDMultistartInit
+BTDProjectedMultistartInit
 BTDALSWarmStartInit
 ```
 
@@ -102,10 +130,14 @@ BTDTSDSolver
 
 ## Storage considerations
 
-The decomposition result stores compact cores and factors. Calling
-`reconstruct(result)` creates the full approximation and can dominate memory for
-large inputs. Inspect `blocks(result)`, `core(block)`, and `factors(block)` when a
-dense reconstruction is not required.
+The BTD backend stores the target reference, compact manifold metadata, an
+initially empty contraction cache, and the target norm. It does not allocate
+target-sized reconstruction, residual, or per-block buffers at construction.
+Projected HOOI updates and projected multistart preserve that property.
+
+Calling `reconstruct(result)` still creates the full approximation and can
+dominate memory for large inputs. Inspect `blocks(result)`, `core(block)`, and
+`factors(block)` when a dense reconstruction is not required.
 
 See [Optimization methods](optimization.md) for solver comparison and result
 diagnostics.

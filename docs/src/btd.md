@@ -35,6 +35,27 @@ A = randn(20, 15, 10)
 result = btd(A, 3, (5, 4, 3); verbose = false)
 ```
 
+Integer or other non-floating storage can stay in its native representation
+while BTD computes in floating point:
+
+```julia
+counts = rand(Int16(0):Int16(100), 20, 15, 10)
+result = btd(
+    counts,
+    2,
+    (4, 3, 2);
+    compute_type = Float32,
+    materialize = false,
+    solver = :als,
+    verbose = false,
+)
+```
+
+This path uses projected HOOI block updates and observation-preserving
+multistart initialization. It does not allocate a full converted copy or a
+full BTD residual. See [Preparing data](preparing_data.md) for the storage
+contract and unsupported lazy combinations.
+
 ## Output
 
 `result` is a `BTDResult`.

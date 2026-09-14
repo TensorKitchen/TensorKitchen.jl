@@ -158,8 +158,40 @@ end
 # The actual methods depend on the registered defaults, e.g. custom manifolds such
 # as Segre or SoftplusEuclidean may choose ExponentialRetraction, while sphere-like
 # factors may choose their ManifoldsBase default.
+# Manifolds' Tucker polar retraction requires its fused step scalar to match the
+# point precision, while some Manopt line searches report a Float64 step.
+struct _ScalarTypeRetraction{R<:ManifoldsBase.AbstractRetractionMethod} <:
+       ManifoldsBase.AbstractRetractionMethod
+    method::R
+end
+
+function ManifoldsBase.retract!(
+    M::ManifoldsBase.AbstractManifold,
+    q,
+    p,
+    X,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    return ManifoldsBase.retract!(M, q, p, X, method.method; kwargs...)
+end
+
+function ManifoldsBase.retract_fused!(
+    M::ManifoldsBase.AbstractManifold,
+    q,
+    p,
+    X,
+    t::Number,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    T = _scalar_eltype(p)
+    return ManifoldsBase.retract_fused!(M, q, p, X, T(t), method.method; kwargs...)
+end
+
 @inline function _default_component_retraction_method(Mi, pi)
-    return ManifoldsBase.default_retraction_method(Mi, typeof(pi))
+    method = ManifoldsBase.default_retraction_method(Mi, typeof(pi))
+    return Mi isa Manifolds.Tucker ? _ScalarTypeRetraction(method) : method
 end
 
 

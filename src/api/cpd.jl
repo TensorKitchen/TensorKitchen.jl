@@ -611,7 +611,7 @@ function _reject_public_observation_norm_cache(kwargs)
     throw(
         ArgumentError(
             "observation_norm2_cache is an internal TensorKitchen keyword and " *
-            "cannot be supplied through cpd or nncpd",
+            "cannot be supplied through public decomposition APIs",
         ),
     )
 end

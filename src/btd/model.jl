@@ -28,8 +28,9 @@ BTDContractionWorkspace{T,N}() where {T,N} = BTDContractionWorkspace{T,N}(
     BTDBackend
 
 Backend state for block-term decomposition as a sum of Tucker blocks. Stores
-the target tensor, product manifold, reusable work buffers, and per-block
-ambient reconstruction buffers used by cost, gradient, and ALS routines.
+the target tensor, product manifold, contraction workspace, and target norm.
+Ambient reconstruction buffers are allocated only by legacy operations that
+explicitly request an ambient tensor.
 """
 struct BTDBackend{
     T,
@@ -37,25 +38,20 @@ struct BTDBackend{
     CT<:Tuple,
     MT<:Tuple,
     A<:AbstractArray{T,N},
-    V,
     MP<:ProductManifold,
     I,
-    C,
+    S<:Real,
 } <: AbstractJoinBackend
     components::CT
     manifolds::MT
     r::Int
-    # Preserve the target array/backend so BTD shares the generic join storage behavior.
+    # Preserve the target array/backend without conversion or copying.
     target::A
     target_shape::NTuple{N,Int}
-    target_flat::V
     M_product::MP
     init_point::I
-    work_rec::V
-    work_residual::V
     workspace::BTDContractionWorkspace{T,N}
-    target_normsq::T
-    component_bufs::C # Reusable ambient reconstruction buffers, one per block.
+    target_normsq::S
 end
 
 egrad(model::JoinModel{<:AbstractFloat,<:BTDBackend}, p) = _btd_egrad(model.backend, p)
@@ -67,25 +63,50 @@ model_exact_native_function(model::JoinModel{<:AbstractFloat,<:BTDBackend}) = th
     ),
 )
 model_exact_join_basis_function(model::JoinModel{<:AbstractFloat,<:BTDBackend}) =
-    (M, p) -> begin
-        backend = model.backend
-        residual = _join_residual!(backend, p)
-        _join_basis_project(backend.components, p, residual)
-    end
+    (_, p) -> rgrad(model, p)
 
+function _require_materialized_btd_ambient_target(
+    backend::BTDBackend,
+    operation::AbstractString,
+)
+    is_materialized(backend.target) && return nothing
+    throw(
+        ArgumentError(
+            "$operation requires an explicit materialized tensor for BTD. " *
+            "Call materialize_tensor(A) before constructing the model, or use the " *
+            "observation-preserving BTD cost, gradient, and projected ALS paths.",
+        ),
+    )
+end
+
+"""Copy a materialized BTD target for an explicitly ambient operation."""
+function _btd_ambient_target_copy(backend::BTDBackend)
+    _require_materialized_btd_ambient_target(backend, "BTD structured initialization")
+    target_flat = vec(backend.target)
+    residual_flat = _join_vector_workspace_like(backend.target, length(target_flat))
+    copyto!(residual_flat, target_flat)
+    return reshape(residual_flat, backend.target_shape)
+end
+
+"""Allocate one operation-local ambient vector for a legacy BTD operation."""
+function _btd_ambient_work_vector(backend::BTDBackend)
+    _require_materialized_btd_ambient_target(backend, "BTD ambient operation")
+    return _join_vector_workspace_like(backend.target, length(backend.target))
+end
 
 function _btd_sequential_tucker_init(model::JoinModel{<:AbstractFloat,<:BTDBackend}, init)
     backend = model.backend
     # Initialize Tucker blocks on the current residual rather than cloning the
     # same full-tensor fit into every block.
-    residual = copy(backend.target)
+    residual = _btd_ambient_target_copy(backend)
+    component_buf = _btd_ambient_work_vector(backend)
     parts = Vector{Manifolds.TuckerPoint{eltype(backend.target)}}(undef, backend.r)
     for k = 1:backend.r
         component = _backend_component(backend, k)
         Mk = _backend_manifold(backend, k)
         pk = _component_init(component, residual, init)
         parts[k] = pk
-        _subtract_ambient_tensor!(residual, Mk, pk, backend.component_bufs[k])
+        _subtract_ambient_tensor!(residual, Mk, pk, component_buf)
     end
     return ArrayPartition(parts...)
 end
@@ -102,6 +123,26 @@ function _btd_block_ranks_by_mode(backend::BTDBackend{T,N}) where {T,N}
         ranks[b] = multilinear_rank(M)
     end
     return ranks
+end
+
+function _btd_random_point(
+    rng::AbstractRNG,
+    backend::BTDBackend{T,N},
+) where {T<:AbstractFloat,N}
+    parts = ntuple(backend.r) do b
+        M = _backend_manifold(backend, b)
+        M isa Manifolds.Tucker || throw(
+            ArgumentError(
+                "BTD projected multistart expects Tucker manifolds, got $(typeof(M)) at block $b.",
+            ),
+        )
+        dims = factor_dims(M)
+        ranks = multilinear_rank(M)
+        core = randn(rng, T, ranks...)
+        factors = ntuple(m -> _rand_orthonormal_tucker(rng, dims[m], ranks[m], T), N)
+        Manifolds.TuckerPoint(core, factors...)
+    end
+    return ArrayPartition(parts...)
 end
 
 function _btd_hosvd_subspaces(backend::BTDBackend{T,N}, ranks_by_block) where {T,N}
@@ -156,7 +197,8 @@ function _btd_hosvd_split_candidate(
         _btd_split_columns(rng, size(subspaces[mode], 2), ranks_m, candidate)
     end
 
-    residual = copy(backend.target)
+    residual = _btd_ambient_target_copy(backend)
+    component_buf = _btd_ambient_work_vector(backend)
     # Candidate blocks are always Tucker points here
     parts = Vector{Manifolds.TuckerPoint{T}}(undef, backend.r)
     for b = 1:backend.r
@@ -169,7 +211,7 @@ function _btd_hosvd_split_candidate(
             residual,
             _backend_manifold(backend, b),
             pk,
-            backend.component_bufs[b],
+            component_buf,
         )
     end
     return ArrayPartition(parts...)
@@ -189,6 +231,8 @@ function initial_point(
     init == :alswarm && return initial_point(model, BTDALSWarmStartInit(); verbose)
     init == :hosvd_multistart &&
         return initial_point(model, BTDHOSVDMultistartInit(); verbose)
+    init == :projected_multistart &&
+        return initial_point(model, BTDProjectedMultistartInit(); verbose)
     backend = model.backend
     M = backend.M_product
     if !isnothing(backend.init_point)
@@ -204,6 +248,48 @@ function initial_point(
     end
 
     return _btd_sequential_tucker_init(model, init)
+end
+
+
+function initial_point(
+    model::JoinModel{<:AbstractFloat,<:BTDBackend},
+    init::BTDProjectedMultistartInit;
+    verbose::Bool = false,
+)
+    backend = model.backend
+    rng = isnothing(init.seed) ? Random.default_rng() : MersenneTwister(init.seed)
+    best_point = nothing
+    best_cost = eltype(backend.target)(Inf)
+
+    for _ = 1:init.candidates
+        p_candidate = _btd_random_point(rng, backend)
+        p_screened, candidate_cost = if init.screening_steps > 0
+            screened = fit_btd_als(
+                backend.target,
+                backend;
+                p0 = p_candidate,
+                maxiter = init.screening_steps,
+                tol = 0.0,
+                block_method = :hooi,
+                block_maxiter = init.block_maxiter,
+                block_update = :projected,
+                verbose,
+                return_stats = true,
+                max_stagnation_restarts = 0,
+                progress_phase = :initialization,
+            )
+            screened.point, screened.cost
+        else
+            p_candidate, cost(model, p_candidate)
+        end
+
+        if candidate_cost < best_cost
+            best_cost = candidate_cost
+            best_point = p_screened
+        end
+    end
+
+    return best_point
 end
 
 function initial_point(

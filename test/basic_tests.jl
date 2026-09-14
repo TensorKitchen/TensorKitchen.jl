@@ -1,4 +1,13 @@
+struct _NoSimilarArray{T,N,A<:AbstractArray{T,N}} <: AbstractArray{T,N}
+    data::A
+end
 
+Base.size(A::_NoSimilarArray) = size(A.data)
+Base.axes(A::_NoSimilarArray) = axes(A.data)
+Base.IndexStyle(::Type{<:_NoSimilarArray{T,N,A}}) where {T,N,A} = Base.IndexStyle(A)
+Base.getindex(A::_NoSimilarArray, I...) = getindex(A.data, I...)
+Base.similar(::_NoSimilarArray, ::Type, ::Dims) =
+    error("BTDBackend construction must not allocate target-shaped storage")
 
 # =========================================================================
 # tucker/hosvd.jl
@@ -732,6 +741,11 @@ end
     @test size(J0) == (length(A), manifold_dimension(M))
     @test all(isfinite, residual0)
     @test all(isfinite, J0)
+    reconstructed = zeros(size(A))
+    for part in TensorKitchen.point_parts(p0_solver)
+        reconstructed .+= TensorKitchen._btd_block_tensor(part)
+    end
+    @test residual0 ≈ vec(reconstructed .- A)
 
     coeff = zeros(Float64, manifold_dimension(M))
     coeff[1] = 1.0
@@ -746,6 +760,287 @@ end
         TensorKitchen.adjoint_action(model, p0_solver, vec(ambient)),
     )
     @test isapprox(lhs, rhs; atol = 1e-8, rtol = 1e-8)
+
+    exact_basis_gradient =
+        TensorKitchen.model_exact_join_basis_function(model)(M, p0_solver)
+    direct_gradient = TensorKitchen.rgrad(model, p0_solver)
+    @test norm(M, p0_solver, exact_basis_gradient - direct_gradient) ≤ 1e-12
+end
+
+@testset "Tucker retraction preserves point scalar type" begin
+    rng = MersenneTwister(811)
+    dims = (5, 4, 3)
+    ranks = (2, 2, 2)
+    M = Manifolds.Tucker(dims, ranks)
+    make_point = function (::Type{T}) where {T<:AbstractFloat}
+        factors = ntuple(3) do mode
+            Q = qr(randn(rng, T, dims[mode], ranks[mode])).Q
+            Matrix(Q[:, 1:ranks[mode]])
+        end
+        return Manifolds.TuckerPoint(randn(rng, T, ranks...), factors...)
+    end
+
+    @test 0.1 isa Float64
+    for T in (Float32, Float64)
+        p = make_point(T)
+        X = rand(rng, M; vector_at = p)
+        method = TensorKitchen._solver_retraction_method(M, p)
+        q = ManifoldsBase.retract_fused(M, p, X, 0.1, method)
+
+        @test eltype(q.hosvd.core) === T
+        @test all(eltype(U) === T for U in q.hosvd.U)
+    end
+
+    M_product = ProductManifold(M, M)
+    p_product = ArrayPartition(make_point(Float32), make_point(Float32))
+    X_product = rand(rng, M_product; vector_at = p_product)
+    method_product = TensorKitchen._solver_retraction_method(M_product, p_product)
+    q_product =
+        ManifoldsBase.retract_fused(M_product, p_product, X_product, 0.1, method_product)
+
+    for q_part in TensorKitchen.point_parts(q_product)
+        @test eltype(q_part.hosvd.core) === Float32
+        @test all(eltype(U) === Float32 for U in q_part.hosvd.U)
+    end
+end
+
+@testset "BTD backend construction is ambient-workspace-free" begin
+    dims = (5, 4, 3)
+    ranks = (2, 2, 2)
+    data = reshape(Float32.(1:prod(dims)), dims)
+    target = _NoSimilarArray(data)
+    manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(dims, ranks, 2))
+
+    backend =
+        TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, target)
+    @test backend.target === target
+    @test backend.target_normsq == observation_norm2(target)
+    @test !hasfield(typeof(backend), :target_flat)
+    @test !hasfield(typeof(backend), :work_rec)
+    @test !hasfield(typeof(backend), :work_residual)
+    @test !hasfield(typeof(backend), :component_bufs)
+    @test all(
+        isempty(cache.bufs) for cache in (
+            backend.workspace.tensor_slot1,
+            backend.workspace.tensor_slot2,
+            backend.workspace.perm_in,
+            backend.workspace.perm_out,
+            backend.workspace.persist,
+        )
+    )
+
+    lazy = prepare_tensor(Int16.(data); compute_type = Float32)
+    lazy_backend =
+        TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, lazy)
+    @test lazy_backend.target === lazy
+    @test !is_materialized(lazy_backend.target)
+    @test lazy_backend.target_normsq == observation_norm2(lazy)
+    @test all(
+        isempty(cache.bufs) for cache in (
+            lazy_backend.workspace.tensor_slot1,
+            lazy_backend.workspace.tensor_slot2,
+            lazy_backend.workspace.perm_in,
+            lazy_backend.workspace.perm_out,
+            lazy_backend.workspace.persist,
+        )
+    )
+
+    lazy_model = TensorKitchen.JoinModel{Float32,typeof(lazy_backend)}(lazy_backend)
+    lazy_point = TensorKitchen.initial_point(lazy_model, :random)
+    @test TensorKitchen.cost(lazy_model, lazy_point) isa Float32
+    @test TensorKitchen.rgrad(lazy_model, lazy_point) isa ArrayPartition
+    @test TensorKitchen.model_exact_join_basis_function(lazy_model)(
+        TensorKitchen.manifold(lazy_model),
+        lazy_point,
+    ) isa ArrayPartition
+    @test_throws ArgumentError TensorKitchen.initial_point(lazy_model, :sthosvd)
+    @test_throws ArgumentError TensorKitchen.residual(lazy_model, lazy_point)
+
+    projected_init =
+        BTDProjectedMultistartInit(2; screening_steps = 1, block_maxiter = 1, seed = 812)
+    projected_lazy = TensorKitchen.initial_point(lazy_model, projected_init)
+    dense_backend =
+        TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, data)
+    dense_model = TensorKitchen.JoinModel{Float32,typeof(dense_backend)}(dense_backend)
+    projected_dense = TensorKitchen.initial_point(dense_model, projected_init)
+    @test TensorKitchen.cost(lazy_model, projected_lazy) ≈
+          TensorKitchen.cost(dense_model, projected_dense) rtol = 2e-5 atol = 2e-4
+
+    @test_throws ArgumentError BTDProjectedMultistartInit(0)
+    @test_throws ArgumentError BTDProjectedMultistartInit(1; screening_steps = -1)
+    @test_throws ArgumentError BTDProjectedMultistartInit(1; block_maxiter = -1)
+
+    shared_point = TensorKitchen._btd_random_point(MersenneTwister(913), dense_backend)
+    dense_result = btd(
+        data,
+        2,
+        ranks;
+        solver = :als,
+        init = PointInit(deepcopy(shared_point)),
+        maxiter = 1,
+        tol = 0.0,
+        block_method = :hooi,
+        block_maxiter = 1,
+        max_stagnation_restarts = 0,
+        verbose = false,
+    )
+    lazy_result = btd(
+        Int16.(data),
+        2,
+        ranks;
+        compute_type = Float32,
+        materialize = false,
+        solver = :als,
+        init = PointInit(deepcopy(shared_point)),
+        maxiter = 1,
+        tol = 0.0,
+        block_method = :hooi,
+        block_maxiter = 1,
+        max_stagnation_restarts = 0,
+        verbose = false,
+    )
+    @test lazy_result isa BTDResult
+    @test eltype(core(first(blocks(lazy_result)))) === Float32
+    @test lazy_result.solver_info.block_update == :projected
+    @test lazy_result.cost ≈ dense_result.cost rtol = 2e-5 atol = 2e-4
+    @test lazy_result.rel_error ≈ dense_result.rel_error rtol = 2e-5 atol = 2e-5
+    @test reconstruct(lazy_result) ≈ reconstruct(dense_result) rtol = 2e-5 atol = 2e-4
+
+    auto_result = btd(
+        Int16.(data),
+        2,
+        ranks;
+        compute_type = Float32,
+        materialize = false,
+        solver = :als,
+        maxiter = 0,
+        block_maxiter = 1,
+        max_stagnation_restarts = 0,
+        verbose = false,
+    )
+    @test auto_result isa BTDResult
+    @test isfinite(auto_result.rel_error)
+    @test auto_result.solver_info.block_update == :projected
+
+    lazy_rgd_result = btd(
+        Int16.(data),
+        2,
+        ranks;
+        compute_type = Float32,
+        materialize = false,
+        solver = :rgd,
+        init = BTDALSWarmStartInit(
+            1;
+            base_init = projected_init,
+            block_method = :hooi,
+            block_maxiter = 1,
+        ),
+        maxiter = 1,
+        btd_als_polish_maxiter = 0,
+        warm_rel_error_gate = nothing,
+        max_stagnation_restarts = 0,
+        verbose = false,
+    )
+    @test lazy_rgd_result isa BTDResult
+    @test lazy_rgd_result.solver == :rgd
+    @test isfinite(lazy_rgd_result.rel_error)
+
+    for solver_name in (:rcg, :lbfgs, :rgd_fixed, :btd_tsd)
+        solver_result = btd(
+            Int16.(data),
+            2,
+            ranks;
+            compute_type = Float32,
+            materialize = false,
+            solver = solver_name,
+            init = BTDProjectedMultistartInit(1; screening_steps = 0, seed = 812),
+            maxiter = 1,
+            btd_als_polish_maxiter = 0,
+            max_stagnation_restarts = 0,
+            verbose = false,
+        )
+        @test solver_result isa BTDResult
+        @test solver_result.solver == solver_name
+        @test isfinite(solver_result.rel_error)
+    end
+
+    @test_throws ArgumentError btd(
+        Int16.(data),
+        2,
+        ranks;
+        compute_type = Float32,
+        materialize = false,
+        solver = :als,
+        init = BTDHOSVDMultistartInit(1; screening_steps = 0),
+        maxiter = 0,
+        verbose = false,
+    )
+    @test_throws ArgumentError btd(
+        Int16.(data),
+        2,
+        ranks;
+        compute_type = Float32,
+        materialize = false,
+        solver = :als,
+        init = PointInit(shared_point),
+        block_method = :sthosvd,
+        maxiter = 0,
+        verbose = false,
+    )
+    materialized_result = btd(
+        Int16.(data),
+        2,
+        ranks;
+        compute_type = Float32,
+        materialize = true,
+        solver = :als,
+        init = BTDHOSVDMultistartInit(1; screening_steps = 0),
+        maxiter = 0,
+        max_stagnation_restarts = 0,
+        verbose = false,
+    )
+    @test materialized_result isa BTDResult
+    @test eltype(core(first(blocks(materialized_result)))) === Float32
+
+    norm_calls = Ref(0)
+    counted = _NormCountingArray(data, norm_calls, Int[])
+    counted_backend =
+        TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, counted)
+    @test counted_backend.target === counted
+    @test norm_calls[] == 1
+
+    norm_calls[] = 0
+    empty!(counted.norm_block_lengths)
+    btd(
+        counted,
+        2,
+        ranks;
+        solver = :als,
+        init = PointInit(deepcopy(shared_point)),
+        maxiter = 0,
+        conversion_block_length = 7,
+        max_stagnation_restarts = 0,
+        verbose = false,
+    )
+    @test norm_calls[] == 1
+    @test counted.norm_block_lengths == [7]
+
+    @test_throws ArgumentError btd(
+        data,
+        2,
+        ranks;
+        observation_norm2_cache = sum(abs2, data),
+        solver = :als,
+        init = PointInit(shared_point),
+        maxiter = 0,
+        verbose = false,
+    )
+
+    join_backend =
+        TensorKitchen._sum_backend_instance(TensorKitchen.JoinBackend, manifolds, data)
+    @test length(join_backend.work_rec) == length(data)
+    @test length(join_backend.work_residual) == length(data)
+    @test length(join_backend.component_bufs) == length(manifolds)
 end
 
 @testset "BTD rejects LMSolver until nested Tucker LM support lands" begin
