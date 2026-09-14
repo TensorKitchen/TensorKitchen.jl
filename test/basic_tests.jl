@@ -767,6 +767,43 @@ end
     @test norm(M, p0_solver, exact_basis_gradient - direct_gradient) ≤ 1e-12
 end
 
+@testset "Tucker retraction preserves point scalar type" begin
+    rng = MersenneTwister(811)
+    dims = (5, 4, 3)
+    ranks = (2, 2, 2)
+    M = Manifolds.Tucker(dims, ranks)
+    make_point = function (::Type{T}) where {T<:AbstractFloat}
+        factors = ntuple(3) do mode
+            Q = qr(randn(rng, T, dims[mode], ranks[mode])).Q
+            Matrix(Q[:, 1:ranks[mode]])
+        end
+        return Manifolds.TuckerPoint(randn(rng, T, ranks...), factors...)
+    end
+
+    @test 0.1 isa Float64
+    for T in (Float32, Float64)
+        p = make_point(T)
+        X = rand(rng, M; vector_at = p)
+        method = TensorKitchen._solver_retraction_method(M, p)
+        q = ManifoldsBase.retract_fused(M, p, X, 0.1, method)
+
+        @test eltype(q.hosvd.core) === T
+        @test all(eltype(U) === T for U in q.hosvd.U)
+    end
+
+    M_product = ProductManifold(M, M)
+    p_product = ArrayPartition(make_point(Float32), make_point(Float32))
+    X_product = rand(rng, M_product; vector_at = p_product)
+    method_product = TensorKitchen._solver_retraction_method(M_product, p_product)
+    q_product =
+        ManifoldsBase.retract_fused(M_product, p_product, X_product, 0.1, method_product)
+
+    for q_part in TensorKitchen.point_parts(q_product)
+        @test eltype(q_part.hosvd.core) === Float32
+        @test all(eltype(U) === Float32 for U in q_part.hosvd.U)
+    end
+end
+
 @testset "BTD backend construction is ambient-workspace-free" begin
     dims = (5, 4, 3)
     ranks = (2, 2, 2)
