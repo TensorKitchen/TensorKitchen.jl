@@ -1,8 +1,10 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+Manifolds = "1cead3c2-87b3-11e9-0ccd-23c62b72b94e"
 TensorKitchen = "3630a16b-0f2f-4d88-afbf-c7d59eccf553"
 
 [sources]
+Manifolds = {url = "https://github.com/sChoiKr/Manifolds.jl.git", rev = "8ec092b5fa19cd1d501c7cf3e2c8bdc59adca3d8"}
 TensorKitchen = {path = ".."}
 
 [compat]

@@ -6,6 +6,7 @@ import Serialization
 
 include("api/approx.jl")
 include("api/cpd.jl")
+include("api/symcpd.jl")
 include("api/nncpd.jl")
 include("api/btd.jl")
 include("api/tucker.jl")

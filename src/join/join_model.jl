@@ -1,6 +1,7 @@
 # join/join_model.jl — Join-front-end model and backend type definitions
 
 export AbstractJoinBackend,
+    AbstractJoinComponent,
     JoinComponent,
     JoinModel,
     CPDBackend,
@@ -16,7 +17,17 @@ export AbstractJoinBackend,
 
 abstract type AbstractJoinBackend end
 
-struct JoinComponent{M,E}
+"""
+    AbstractJoinComponent
+
+Interface for one structured component in a [`JoinModel`](@ref). Implementations
+provide `component_manifold(component)` and `component_embedding(component)`;
+the join then supplies the rank-``R`` product structure independently of the
+component family.
+"""
+abstract type AbstractJoinComponent end
+
+struct JoinComponent{M,E} <: AbstractJoinComponent
     manifold::M
     embedding::E
 end
@@ -28,32 +39,28 @@ JoinComponent(manifold::M) where {M} =
 
 component_manifold(component::JoinComponent) = component.manifold
 component_embedding(component::JoinComponent) = component.embedding
-component_tangent_dimension(component::JoinComponent) =
+component_tangent_dimension(component::AbstractJoinComponent) =
     manifold_dimension(component_manifold(component))
-component_tangent_dimension(component::JoinComponent, p) =
+component_tangent_dimension(component::AbstractJoinComponent, p) =
     component_tangent_dimension(component)
 component_manifold(M::AbstractManifold) = M
 component_embedding(::AbstractManifold) = DefaultJoinEmbedding()
 component_tangent_dimension(M::AbstractManifold) = manifold_dimension(M)
 component_tangent_dimension(M::AbstractManifold, p) = component_tangent_dimension(M)
 
-manifold(component::JoinComponent) = component_manifold(component)
+manifold(component::AbstractJoinComponent) = component_manifold(component)
 
 struct JoinModel{T<:AbstractFloat,B<:AbstractJoinBackend} <: AbstractDecompositionModel{T}
     backend::B
 end
 
-"""
-    _JoinResidualWORO{T}
-
-Write-once-read-once cache for the join residual between gradient and cost evaluations.
-"""
-mutable struct _JoinResidualWORO{T,V}
-    residual::V # Keep the cached residual on the same backend as the join work buffers.
+"""A residual may be consumed once, and only at the point that produced it."""
+mutable struct _JoinResidualCache{V}
+    residual::V
+    point::Any
     fresh::Bool
 end
-_JoinResidualWORO(residual::V) where {V} =
-    _JoinResidualWORO{eltype(residual),V}(residual, false)
+_JoinResidualCache(residual::V) where {V} = _JoinResidualCache{V}(residual, nothing, false)
 
 struct JoinBackend{
     T,
@@ -63,7 +70,7 @@ struct JoinBackend{
     V,
     MP<:ProductManifold,
     I,
-    W<:_JoinResidualWORO{T},
+    W<:_JoinResidualCache,
     C,
 } <: AbstractJoinBackend
     components::CT
@@ -75,7 +82,7 @@ struct JoinBackend{
     init_point::I
     work_rec::V
     work_residual::V
-    woro::W
+    residual_cache::W
     component_bufs::C
 end
 

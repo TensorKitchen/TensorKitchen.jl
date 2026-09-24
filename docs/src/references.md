@@ -21,6 +21,14 @@
 
 - **Conditioning of join decompositions:** P. Breiding and N. Vannieuwenhoven, "The condition number of join decompositions," *SIAM Journal on Matrix Analysis and Applications*, vol. 39, no. 1, pp. 287–309, 2018. [arXiv:1611.08117 (PDF)](https://arxiv.org/pdf/1611.08117).
 
+## Symmetric CPD and Matrix-Free Gauss--Newton
+
+- **Riemannian symmetric tensor approximation:** R. Khouja, H. Khalil, and B. Mourrain, "Riemannian Newton optimization methods for the symmetric tensor approximation problem," *Linear Algebra and its Applications*, vol. 637, pp. 175–211, 2022. [DOI](https://doi.org/10.1016/j.laa.2021.12.008).
+- **Matrix-free nonlinear least squares for CPD and BTD:** L. Sorber, M. Van Barel, and L. De Lathauwer, "Optimization-Based Algorithms for Tensor Decompositions: Canonical Polyadic Decomposition, Decomposition in Rank-$(L_r,L_r,1)$ Terms, and a New Generalization," *SIAM Journal on Optimization*, vol. 23, no. 2, pp. 695–720, 2013. [DOI](https://doi.org/10.1137/120868323).
+- **Implicit normal products and GN-CG for CPD:** N. Singh, L. Ma, H. Yang, and E. Solomonik, "Comparison of Accuracy and Scalability of Gauss--Newton and Alternating Least Squares for CANDECOMC/PARAFAC Decomposition," *SIAM Journal on Scientific Computing*, vol. 43, no. 4, pp. C290–C311, 2021. [DOI](https://doi.org/10.1137/20M1344561).
+- **Structured symmetric-CP Jacobian products:** M. Ayvaz and L. De Lathauwer, "CPD-Structured Multivariate Polynomial Optimization," *Frontiers in Applied Mathematics and Statistics*, vol. 8, 2022. [DOI](https://doi.org/10.3389/fams.2022.836433).
+- **Intrinsic Segre--Veronese geometry:** S. Jacobsson, L. Swijsen, J. Van der Veken, and N. Vannieuwenhoven, "Warped Geometries of Segre--Veronese Manifolds," *SIAM Journal on Matrix Analysis and Applications*, vol. 47, no. 3, pp. 1551–1577, 2026. [DOI](https://doi.org/10.1137/25M1790099).
+
 ## Riemannian Optimization and Julia Ecosystem
 
 - **Riemannian trust-region / Gauss–Newton for canonical rank (CP) approximation:** P. Breiding and N. Vannieuwenhoven, "A Riemannian Trust Region Method for the Canonical Tensor Rank Approximation Problem," *SIAM Journal on Optimization*, vol. 28, no. 3, pp. 2435–2465, 2018. [arXiv:1709.00033 (PDF)](https://arxiv.org/pdf/1709.00033).

@@ -33,6 +33,11 @@ struct DenseSymmetricTarget{T<:AbstractFloat,N,A<:AbstractArray{T,N}} <:
 end
 
 function DenseSymmetricTarget(A::AbstractArray{T,N}) where {T<:AbstractFloat,N}
+    N >= 1 || throw(ArgumentError("The target order must be positive."))
+    n = size(A, 1)
+    all(==(n), size(A)) || throw(
+        DimensionMismatch("A symmetric target must have equal mode sizes, got $(size(A))."),
+    )
     return DenseSymmetricTarget{T,N,typeof(A)}(A, T(sum(abs2, A)))
 end
 
@@ -84,6 +89,9 @@ symmetric_target_norm2(target::AbstractSymmetricTarget) = target.norm2
 
 _symmetric_target_storage(target::DenseSymmetricTarget) = target.data
 _symmetric_target_storage(target::CompressedSymmetricTarget) = target.coefficients
+_symmetric_target_size(target::DenseSymmetricTarget) =
+    (size(target.data, 1), ndims(target.data))
+_symmetric_target_size(target::CompressedSymmetricTarget) = (target.n, target.order)
 
 function _symmetric_target_inner(target::DenseSymmetricTarget, x::AbstractVector)
     A = target.data

@@ -27,9 +27,8 @@ end
 
 function _compress_symmetric_tensor(M::Manifolds.Veronese, A::AbstractArray{<:Real})
     n, d = Manifolds.get_parameter(M.size)
-    size(A) == ntuple(_ -> n, d) || throw(
-        DimensionMismatch("Expected an order-$d tensor with all dimensions $n."),
-    )
+    size(A) == ntuple(_ -> n, d) ||
+        throw(DimensionMismatch("Expected an order-$d tensor with all dimensions $n."))
     Base.require_one_based_indexing(A)
     T = float(eltype(A))
     out = zeros(T, binomial(n + d - 1, d))
@@ -46,7 +45,8 @@ end
 function _expand_symmetric_tensor(M::Manifolds.Veronese, a::AbstractVector{<:Real})
     n, d = Manifolds.get_parameter(M.size)
     m = binomial(n + d - 1, d)
-    size(a) == (m,) || throw(DimensionMismatch("Expected $m compressed symmetric coordinates."))
+    size(a) == (m,) ||
+        throw(DimensionMismatch("Expected $m compressed symmetric coordinates."))
     Base.require_one_based_indexing(a)
     T = float(eltype(a))
     out = Array{T}(undef, ntuple(_ -> n, d))

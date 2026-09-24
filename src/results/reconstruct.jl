@@ -11,6 +11,21 @@ For a rank-`R` CPD result, this returns
 """
 reconstruct(res::CPDResult) = reconstruct_cpd_rankr(components(res))
 
+function reconstruct(c::SymCPDComponent)
+    return expand_symmetric_tensor(
+        ManifoldsBase.embed(Manifolds.Veronese(length(c.factor), c.order), c.point),
+        length(c.factor),
+        c.order,
+    )
+end
+
+tensor(c::SymCPDComponent) = reconstruct(c)
+
+function reconstruct(res::SymCPDResult)
+    n = size(res.factors, 1)
+    return expand_symmetric_tensor(compressed_coordinates(res), n, res.order)
+end
+
 """
     reconstruct(res::ApproxResult)
 

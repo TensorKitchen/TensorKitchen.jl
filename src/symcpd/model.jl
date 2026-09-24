@@ -1,20 +1,61 @@
-# Intrinsic Veronese join model. Target and model algebra are deliberately
-# separate: target terms are contractions, while component interactions are
-# evaluated through the polynomial kernel.
+# Intrinsic symmetric rank-one component and its kernelized JoinModel backend.
+# Target terms are contractions, while component interactions are evaluated
+# through the homogeneous polynomial kernel.
 
-export SymCPDModel, component_inner, data_inner, compressed_coordinates
+export SymmetricRankOne,
+    SymmetricCPDBackend, SymCPDModel, component_inner, data_inner, compressed_coordinates
 
 @doc raw"""
-    SymCPDModel(target, rank)
+    SymmetricRankOne(n, order)
+    SymmetricRankOne(; dimension, order)
 
-Matrix-free model for the symmetric rank-`rank` approximation
+Describe one nonzero symmetric rank-one tensor
+
+```math
+\phi(\lambda,x)=\lambda x^{\otimes D},
+\qquad \|x\|_2=1.
+```
+
+This is the symmetric analogue of an ordinary CP rank-one component: the
+Segre geometry of independent mode factors is replaced by the Veronese
+geometry of one factor repeated in every mode. A rank-`R` symmetric CP model
+is therefore constructed as `JoinModel(SymmetricRankOne(n, D), R, target)`.
+
+The Veronese formulation follows R. Khouja, H. Khalil, and B. Mourrain,
+"Riemannian Newton optimization methods for the symmetric tensor approximation
+problem," *Linear Algebra and its Applications* 637 (2022), 175--211,
+doi:10.1016/j.laa.2021.12.008.
+"""
+struct SymmetricRankOne{V<:Manifolds.Veronese} <: AbstractJoinComponent
+    manifold::V
+end
+
+SymmetricRankOne(n::Int, order::Int) = SymmetricRankOne(Manifolds.Veronese(n, order))
+SymmetricRankOne(; dimension::Int, order::Int) = SymmetricRankOne(dimension, order)
+
+component_manifold(component::SymmetricRankOne) = component.manifold
+component_embedding(::SymmetricRankOne) = DefaultJoinEmbedding()
+kind(::SymmetricRankOne) = :Veronese
+
+function _symmetric_component_size(component::SymmetricRankOne)
+    return Manifolds.get_parameter(component.manifold.size)
+end
+
+ambient_length(component::SymmetricRankOne) = ambient_length(component.manifold)
+
+@doc raw"""
+    SymmetricCPDBackend
+
+Kernelized backend used when a [`JoinModel`](@ref) repeats a
+[`SymmetricRankOne`](@ref) component. It represents the symmetric rank-`rank`
+approximation
 
 ```math
 \widehat A = \sum_{r=1}^R \lambda_r x_r^{\otimes D},
 \qquad \|x_r\|_2=1.
 ```
 
-Each point component is stored intrinsically as `([lambda], x)` on
+Each component point is stored intrinsically as `([lambda], x)` on
 `Manifolds.Veronese(n, D)`. The objective is evaluated as
 
 ```math
@@ -34,78 +75,142 @@ problem," *Linear Algebra and its Applications* 637 (2022), 175--211,
 doi:10.1016/j.laa.2021.12.008. This implementation differs computationally by
 using the kernel as an operator and not assembling their dense normal matrix.
 """
-struct SymCPDModel{
+struct SymmetricCPDBackend{
     T<:AbstractFloat,
     B<:AbstractSymmetricTarget{T},
-    V<:Manifolds.Veronese,
+    C<:SymmetricRankOne,
+    CS<:Tuple,
     P<:ProductManifold,
-} <: AbstractDecompositionModel{T}
+} <: AbstractJoinBackend
     target::B
+    component::C
+    components::CS
     rank::Int
     n::Int
     order::Int
-    component_manifold::V
     product_manifold::P
 end
 
-function SymCPDModel(
-    target::B,
+function JoinModel(
+    component::SymmetricRankOne,
     rank::Int,
-) where {T<:AbstractFloat,B<:DenseSymmetricTarget{T}}
+    target::B,
+) where {T<:AbstractFloat,B<:AbstractSymmetricTarget{T}}
     rank >= 1 || throw(ArgumentError("rank must be positive, got $rank."))
-    A = target.data
-    d = ndims(A)
-    n = size(A, 1)
-    d >= 1 || throw(ArgumentError("The target order must be positive."))
-    all(==(n), size(A)) || throw(
-        DimensionMismatch("A symmetric target must have equal mode sizes, got $(size(A))."),
+    n, order = _symmetric_component_size(component)
+    target_n, target_order = _symmetric_target_size(target)
+    (n, order) == (target_n, target_order) || throw(
+        DimensionMismatch(
+            "SymmetricRankOne has dimension/order ($n, $order), but target has " *
+            "($target_n, $target_order).",
+        ),
     )
-    V = Manifolds.Veronese(n, d)
-    P = ProductManifold(ntuple(_ -> V, rank)...)
-    return SymCPDModel{T,B,typeof(V),typeof(P)}(target, rank, n, d, V, P)
+    components = ntuple(_ -> component, rank)
+    product = ProductManifold(ntuple(_ -> component.manifold, rank)...)
+    backend = SymmetricCPDBackend{T,B,typeof(component),typeof(components),typeof(product)}(
+        target,
+        component,
+        components,
+        rank,
+        n,
+        order,
+        product,
+    )
+    return JoinModel{T,typeof(backend)}(backend)
 end
 
-function SymCPDModel(
-    target::B,
+function JoinModel(
+    component::SymmetricRankOne,
     rank::Int,
-) where {T<:AbstractFloat,B<:CompressedSymmetricTarget{T}}
-    rank >= 1 || throw(ArgumentError("rank must be positive, got $rank."))
-    V = Manifolds.Veronese(target.n, target.order)
-    P = ProductManifold(ntuple(_ -> V, rank)...)
-    return SymCPDModel{T,B,typeof(V),typeof(P)}(target, rank, target.n, target.order, V, P)
+    target::AbstractArray{T,N},
+) where {T<:AbstractFloat,N}
+    n, order = _symmetric_component_size(component)
+    N == order || throw(
+        DimensionMismatch("Expected an order-$order dense symmetric target, got order $N."),
+    )
+    size(target) == ntuple(_ -> n, order) || throw(
+        DimensionMismatch(
+            "Expected dense symmetric target size $(ntuple(_ -> n, order)), got $(size(target)).",
+        ),
+    )
+    return JoinModel(component, rank, DenseSymmetricTarget(target))
 end
 
-manifold(model::SymCPDModel) = model.product_manifold
-tensor(model::SymCPDModel) = _symmetric_target_storage(model.target)
-supports_rgrad(::SymCPDModel) = true
-supports_egrad_project(::SymCPDModel) = false
+function JoinModel(
+    component::SymmetricRankOne,
+    rank::Int,
+    target::AbstractVector{T},
+) where {T<:AbstractFloat}
+    n, order = _symmetric_component_size(component)
+    return JoinModel(component, rank, CompressedSymmetricTarget(target, n, order))
+end
 
-# Preserve Veronese support in the generic materialized JoinModel as a
-# reference path. SymCPDModel itself does not use this ambient length.
+JoinModel(component::SymmetricRankOne, target::AbstractSymmetricTarget) =
+    JoinModel(component, 1, target)
+JoinModel(
+    component::SymmetricRankOne,
+    target::AbstractArray{T,N},
+) where {T<:AbstractFloat,N} = JoinModel(component, 1, target)
+
+@doc raw"""
+    SymCPDModel(target, rank)
+
+Compatibility constructor for a symmetric rank-`rank` decomposition. It
+creates `SymmetricRankOne(n, D)` from `target` and returns
+`JoinModel(component, rank, target)`; `SymCPDModel` is not a separate model
+type.
+
+The component/join formulation follows the product-of-Veronese approximation
+in Khouja, Khalil, and Mourrain (2022),
+doi:10.1016/j.laa.2021.12.008.
+"""
+function SymCPDModel(target::AbstractSymmetricTarget, rank::Int)
+    n, order = _symmetric_target_size(target)
+    return JoinModel(SymmetricRankOne(n, order), rank, target)
+end
+
+_backend_components(backend::SymmetricCPDBackend) = backend.components
+manifold(model::JoinModel{T,B}) where {T<:AbstractFloat,B<:SymmetricCPDBackend} =
+    model.backend.product_manifold
+tensor(model::JoinModel{T,B}) where {T<:AbstractFloat,B<:SymmetricCPDBackend} =
+    _symmetric_target_storage(model.backend.target)
+supports_rgrad(::JoinModel{T,B}) where {T<:AbstractFloat,B<:SymmetricCPDBackend} = true
+supports_egrad_project(::JoinModel{T,B}) where {T<:AbstractFloat,B<:SymmetricCPDBackend} =
+    false
+
+# Preserve Veronese support in a generic materialized JoinModel reference path.
+# The specialized symmetric backend itself does not use this ambient length.
 ambient_length(M::Manifolds.Veronese) = manifold_dimension(get_embedding(M))
 
-function egrad(model::SymCPDModel, p)
+function egrad(model::JoinModel{T,B}, p) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
     throw(
         ArgumentError(
-            "SymCPDModel provides a direct intrinsic Riemannian gradient. " *
+            "The symmetric JoinModel provides a direct intrinsic Riemannian gradient. " *
             "Use gradient_mode=:riemannian.",
         ),
     )
 end
 
-function initial_point(model::SymCPDModel{T}, init::Symbol; kwargs...) where {T}
+function initial_point(
+    model::JoinModel{T,B},
+    init::Symbol;
+    kwargs...,
+) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
     init == :random || throw(
-        ArgumentError("SymCPDModel supports init=:random or an explicit p0, got $init."),
+        ArgumentError(
+            "The symmetric JoinModel supports init=:random or an explicit p0, got $init.",
+        ),
     )
+    backend = model.backend
     parts = ntuple(_ -> begin
-        p = rand(model.component_manifold)
+        p = rand(backend.component.manifold)
         ([T(p[1][1])], T.(p[2]))
-    end, model.rank)
-    return join_point(model.product_manifold, parts)
+    end, backend.rank)
+    return join_point(backend.product_manifold, parts)
 end
 
 @doc raw"""
-    component_inner(model, p, q)
+    component_inner(component::SymmetricRankOne, p, q)
 
 Return the Frobenius inner product of two symmetric rank-one components,
 
@@ -118,11 +223,19 @@ This is the homogeneous polynomial (Veronese) kernel. Differentiating this
 identity gives the Gauss--Newton blocks in Proposition 4.9 of Khouja, Khalil,
 and Mourrain (2022), doi:10.1016/j.laa.2021.12.008.
 """
-function component_inner(model::SymCPDModel, p, q)
+function component_inner(component::SymmetricRankOne, p, q)
     pp = point_parts(p)
     qp = point_parts(q)
-    return pp[1][1] * qp[1][1] * dot(pp[2], qp[2])^model.order
+    _, order = _symmetric_component_size(component)
+    return pp[1][1] * qp[1][1] * dot(pp[2], qp[2])^order
 end
+
+component_inner(
+    model::JoinModel{T,B},
+    p,
+    q,
+) where {T<:AbstractFloat,B<:SymmetricCPDBackend} =
+    component_inner(model.backend.component, p, q)
 
 @doc raw"""
     data_inner(model, p)
@@ -134,17 +247,21 @@ rank-one kernels. See the gradient/polynomial-evaluation construction in
 Khouja, Khalil, and Mourrain (2022), Proposition 4.9,
 doi:10.1016/j.laa.2021.12.008.
 """
-function data_inner(model::SymCPDModel, p)
+function data_inner(
+    model::JoinModel{T,B},
+    p,
+) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
     pp = point_parts(p)
-    return pp[1][1] * _symmetric_target_inner(model.target, pp[2])
+    return pp[1][1] * _symmetric_target_inner(model.backend.target, pp[2])
 end
 
-function cost(model::SymCPDModel{T}, p) where {T}
-    parts = join_parts(model.product_manifold, p)
-    length(parts) == model.rank ||
-        throw(DimensionMismatch("Expected $(model.rank) components."))
-    value = T(0.5) * symmetric_target_norm2(model.target)
-    @inbounds for r = 1:model.rank
+function cost(model::JoinModel{T,B}, p) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
+    backend = model.backend
+    parts = join_parts(backend.product_manifold, p)
+    length(parts) == backend.rank ||
+        throw(DimensionMismatch("Expected $(backend.rank) components."))
+    value = T(0.5) * symmetric_target_norm2(backend.target)
+    @inbounds for r = 1:backend.rank
         value -= data_inner(model, parts[r])
         value += T(0.5) * component_inner(model, parts[r], parts[r])
         for s = 1:(r-1)
@@ -155,7 +272,7 @@ function cost(model::SymCPDModel{T}, p) where {T}
 end
 
 @doc raw"""
-    rgrad(model::SymCPDModel, p)
+    rgrad(model, p)
 
 Evaluate the intrinsic Riemannian gradient without constructing `Ahat`, a
 residual tensor, or Veronese coordinate vectors. With
@@ -182,21 +299,22 @@ N. Vannieuwenhoven, "Warped Geometries of Segre--Veronese Manifolds,"
 *SIAM Journal on Matrix Analysis and Applications* 47(3) (2026), 1551--1577,
 doi:10.1137/25M1790099.
 """
-function rgrad(model::SymCPDModel{T}, p) where {T}
-    M = model.product_manifold
+function rgrad(model::JoinModel{T,B}, p) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
+    backend = model.backend
+    M = backend.product_manifold
     parts = join_parts(M, p)
-    length(parts) == model.rank ||
-        throw(DimensionMismatch("Expected $(model.rank) components."))
-    d = model.order
+    length(parts) == backend.rank ||
+        throw(DimensionMismatch("Expected $(backend.rank) components."))
+    d = backend.order
     values = ntuple(
         r -> begin
             pr = point_parts(parts[r])
             lambda_r = pr[1][1]
             x_r = pr[2]
-            a_r, b_r = _symmetric_target_inner_and_contraction(model.target, x_r)
+            a_r, b_r = _symmetric_target_inner_and_contraction(backend.target, x_r)
             radial = -a_r
             factor_covector = (-T(d) * lambda_r) .* b_r
-            @inbounds for s = 1:model.rank
+            @inbounds for s = 1:backend.rank
                 ps = point_parts(parts[s])
                 lambda_s = ps[1][1]
                 x_s = ps[2]
@@ -208,7 +326,7 @@ function rgrad(model::SymCPDModel{T}, p) where {T}
             factor_gradient = factor_covector ./ (T(d) * lambda_r^2)
             ([T(radial)], factor_gradient)
         end,
-        model.rank,
+        backend.rank,
     )
     return join_tangent_like(M, p, values)
 end
@@ -235,8 +353,13 @@ function compressed_coordinates(res::SymCPDResult)
     return out
 end
 
-function _symcpd_result(model::SymCPDModel{T}, result, n::Int, d::Int) where {T}
-    parts = join_parts(model.product_manifold, result.point)
+function _symcpd_result(
+    model::JoinModel{T,B},
+    result,
+    n::Int,
+    d::Int,
+) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
+    parts = join_parts(model.backend.product_manifold, result.point)
     r = length(parts)
     weights_out = Vector{T}(undef, r)
     factors_out = Matrix{T}(undef, n, r)
@@ -264,4 +387,22 @@ function _symcpd_result(model::SymCPDModel{T}, result, n::Int, d::Int) where {T}
         _result_solver_symbol(result.solver),
         _result_solver_info(result),
     )
+end
+
+function extract_components(
+    model::JoinModel{T,B},
+    p,
+) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
+    backend = model.backend
+    parts = join_parts(backend.product_manifold, p)
+    length(parts) == backend.rank ||
+        throw(DimensionMismatch("Expected $(backend.rank) components."))
+    components_out = Vector{SymCPDComponent}(undef, backend.rank)
+    for k = 1:backend.rank
+        pk = parts[k]
+        pk_parts = point_parts(pk)
+        components_out[k] =
+            SymCPDComponent(pk, T(pk_parts[1][1]), Vector{T}(pk_parts[2]), backend.order)
+    end
+    return components_out
 end

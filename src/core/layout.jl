@@ -10,8 +10,7 @@
 # RecursiveArrayTools delegates that arithmetic to each component, but a
 # Veronese tangent is a native tuple of arrays. Preserve that tuple while
 # lifting the operations over its leaves at the solver boundary.
-const _TupleComponentPartition =
-    ArrayPartition{T,P} where {T,P<:Tuple{Vararg{<:Tuple}}}
+const _TupleComponentPartition = ArrayPartition{T,P} where {T,P<:Tuple{Vararg{<:Tuple}}}
 @inline _native_neg(x::Tuple) = map(_native_neg, x)
 @inline _native_neg(x) = -x
 @inline _native_add(x::Tuple, y::Tuple) = map(_native_add, x, y)
@@ -24,8 +23,7 @@ const _TupleComponentPartition =
 @inline _native_copy(x) = copy(x)
 @inline _native_similar(x::Tuple) = map(_native_similar, x)
 @inline _native_similar(x) = similar(x)
-@inline _native_similar(x::Tuple, ::Type{T}) where {T} =
-    map(y -> _native_similar(y, T), x)
+@inline _native_similar(x::Tuple, ::Type{T}) where {T} = map(y -> _native_similar(y, T), x)
 @inline _native_similar(x, ::Type{T}) where {T} = similar(x, T)
 @inline _native_zero(x::Tuple) = map(_native_zero, x)
 @inline _native_zero(x) = zero(x)
@@ -45,8 +43,7 @@ Base.similar(x::_TupleComponentPartition, ::Type{T}) where {T} =
 Base.zero(x::_TupleComponentPartition) = _partition_parts(map(_native_zero, x.x))
 ManifoldsBase.allocate(x::_TupleComponentPartition) = similar(x)
 ManifoldsBase.allocate(x::_TupleComponentPartition, ::Type{T}) where {T} = similar(x, T)
-@inline _native_copyto!(dest::Tuple, src::Tuple) =
-    map(_native_copyto!, dest, src)
+@inline _native_copyto!(dest::Tuple, src::Tuple) = map(_native_copyto!, dest, src)
 @inline _native_copyto!(dest, src) = copyto!(dest, src)
 function Base.copyto!(
     dest::_TupleComponentPartition,
@@ -57,8 +54,7 @@ function Base.copyto!(
     end
     return dest
 end
-@inline wrap_like_point(p, vals::Tuple) =
-    hasproperty(p, :x) ? _partition_parts(vals) : vals
+@inline wrap_like_point(p, vals::Tuple) = hasproperty(p, :x) ? _partition_parts(vals) : vals
 @inline _unwrap_part(x) = hasproperty(x, :x) ? x.x : x
 
 @inline join_parts(::ProductManifold, p::Tuple) = p
@@ -72,9 +68,11 @@ end
 join_solver_point(::AbstractManifold, p) = p
 function join_solver_point(M::ProductManifold, p)
     parts = join_parts(M, p)
-    length(parts) == length(M.manifolds) || throw(DimensionMismatch(
-        "ProductManifold expects $(length(M.manifolds)) components, got $(length(parts)).",
-    ))
+    length(parts) == length(M.manifolds) || throw(
+        DimensionMismatch(
+            "ProductManifold expects $(length(M.manifolds)) components, got $(length(parts)).",
+        ),
+    )
     return join_point(
         M,
         ntuple(i -> join_solver_point(M.manifolds[i], parts[i]), length(parts)),
