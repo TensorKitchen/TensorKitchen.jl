@@ -21,3 +21,7 @@ include("join/join_backend.jl")
 include("btd/core/inner_prod.jl")
 include("btd/core/btd_cost.jl")
 include("btd/core/btd_grad.jl")
+
+include("symcpd/coordinates.jl")
+include("symcpd/targets.jl")
+include("symcpd/model.jl")
