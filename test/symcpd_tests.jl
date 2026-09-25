@@ -240,6 +240,34 @@ end
     @test info.cg_failed_count == count(!, info.cg_converged_history)
     @test info.total_cg_iterations == sum(info.cg_iterations_history)
     @test info.cg_failed_count > 0
+    trial_count = length(info.damping_history)
+    @test trial_count == length(info.predicted_reduction_history)
+    @test trial_count == length(info.actual_reduction_history)
+    @test trial_count == length(info.rho_history)
+    @test trial_count == length(info.step_accepted_history)
+    @test info.accepted_steps == count(identity, info.step_accepted_history)
+    @test info.rejected_steps == count(!, info.step_accepted_history)
+    for k = 1:trial_count
+        predicted = info.predicted_reduction_history[k]
+        actual = info.actual_reduction_history[k]
+        rho = info.rho_history[k]
+        if isfinite(predicted) && predicted > 0 && isfinite(actual)
+            @test rho ≈ actual / predicted
+        end
+        if info.step_accepted_history[k]
+            @test rho >= info.acceptance_ratio
+        end
+    end
+
+    @test_throws ArgumentError symcpd(
+        A,
+        2;
+        solver = :gn_cg,
+        maxiter = 0,
+        acceptance_ratio = 0.3,
+        poor_step_ratio = 0.2,
+        verbose = false,
+    )
 
     # A tiny damped step is a stagnation condition, not proof that the outer
     # gradient tolerance has been met.

@@ -70,8 +70,24 @@ step solves
 `linear_solver=:cg` uses the analytic matrix-free normal action and tangent
 conjugate gradients. `linear_solver=:dense` constructs the small intrinsic
 normal matrix in an orthonormal tangent basis and solves it directly; it is a
-reference/benchmark option, not the scalable path. Accepted steps use a
-retraction and monotone backtracking, while failed trials increase `mu`.
+reference/benchmark option, not the scalable path.
+
+For a trial step `eta`, the Levenberg--Marquardt acceptance ratio is
+
+```math
+\operatorname{pred}(\eta)
+=-\langle g,\eta\rangle
+-\tfrac12\langle\eta,J^*J\eta\rangle,
+\qquad
+\rho=\frac{f(p)-f(R_p(\eta))}{\operatorname{pred}(\eta)}.
+```
+
+A trial is accepted only when its predicted reduction is positive and `rho`
+exceeds `acceptance_ratio`. Poor trials increase the damping and good trials
+decrease it. The predicted reduction intentionally uses the undamped
+Gauss--Newton model; damping controls the step rather than redefining the
+reported model agreement.
+
 An inexact CG direction may be used before the inner residual reaches
 `cg_tol`; `solver_info.cg_converged_history` and `cg_failed_count` expose this
 instead of silently discarding the inner convergence flag. A small accepted
@@ -98,7 +114,9 @@ function _solve_symcpd_gn(
     cg_tol::Real = 1.0e-8,
     cg_maxiter::Int = max(20 * manifold_dimension(model.backend.product_manifold), 200),
     max_damping_trials::Int = 8,
-    max_backtracks::Int = 12,
+    acceptance_ratio::Real = 1.0e-4,
+    poor_step_ratio::Real = 0.25,
+    good_step_ratio::Real = 0.75,
     verbose::Bool = true,
 ) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
     linear_solver in (:cg, :dense) ||
@@ -111,6 +129,12 @@ function _solve_symcpd_gn(
         throw(ArgumentError("damping_decrease must lie in (0, 1]."))
     cg_tol > 0 || throw(ArgumentError("cg_tol must be positive."))
     cg_maxiter > 0 || throw(ArgumentError("cg_maxiter must be positive."))
+    max_damping_trials > 0 || throw(ArgumentError("max_damping_trials must be positive."))
+    0 <= acceptance_ratio < poor_step_ratio < good_step_ratio <= 1 || throw(
+        ArgumentError(
+            "Require 0 <= acceptance_ratio < poor_step_ratio < good_step_ratio <= 1.",
+        ),
+    )
 
     M = model.backend.product_manifold
     p_initial = isnothing(p0) ? initial_point(model, init; verbose) : p0
@@ -124,6 +148,12 @@ function _solve_symcpd_gn(
     cg_converged_history = Bool[]
     cg_failed_count = 0
     accepted_steps = 0
+    rejected_steps = 0
+    predicted_reduction_history = T[]
+    actual_reduction_history = T[]
+    rho_history = T[]
+    damping_history = T[]
+    step_accepted_history = Bool[]
     iterations_done = 0
     converged_flag = false
     termination_reason = :maxiter
@@ -152,6 +182,7 @@ function _solve_symcpd_gn(
         accepted = false
         accepted_step_norm = T(Inf)
         for _ = 1:max_damping_trials
+            push!(damping_history, mu)
             step = if linear_solver == :cg
                 rhs = _scale_solver_tangent(gradient, -one(T))
                 candidate_step, cg_iterations, cg_converged =
@@ -171,32 +202,56 @@ function _solve_symcpd_gn(
             end
             step_norm = norm(M, p, step)
             if !isfinite(step_norm)
+                push!(predicted_reduction_history, T(NaN))
+                push!(actual_reduction_history, T(NaN))
+                push!(rho_history, T(-Inf))
+                push!(step_accepted_history, false)
+                rejected_steps += 1
                 mu *= T(damping_increase)
                 continue
             end
-            alpha = one(T)
-            for _ = 0:max_backtracks
-                scaled_step = _scale_solver_tangent(step, alpha)
-                candidate = try
-                    retract(M, p, scaled_step, retraction_method)
-                catch
-                    nothing
-                end
-                if !isnothing(candidate)
-                    candidate_cost = cost(model, candidate)
-                    if isfinite(candidate_cost) && candidate_cost < current_cost
-                        p = candidate
-                        current_cost = candidate_cost
-                        accepted = true
-                        accepted_steps += 1
-                        accepted_step_norm = alpha * step_norm
-                        mu = max(mu * T(damping_decrease), eps(T))
-                        break
-                    end
-                end
-                alpha *= T(0.5)
+            normal_step = normal_operator(model, p, step)
+            predicted_reduction =
+                -inner(M, p, gradient, step) - T(0.5) * inner(M, p, step, normal_step)
+            push!(predicted_reduction_history, predicted_reduction)
+            if !isfinite(predicted_reduction) || predicted_reduction <= zero(T)
+                push!(actual_reduction_history, T(NaN))
+                push!(rho_history, T(-Inf))
+                push!(step_accepted_history, false)
+                rejected_steps += 1
+                mu *= T(damping_increase)
+                continue
             end
-            accepted && break
+
+            candidate = try
+                retract(M, p, step, retraction_method)
+            catch
+                nothing
+            end
+            candidate_cost = isnothing(candidate) ? T(Inf) : cost(model, candidate)
+            actual_reduction = current_cost - candidate_cost
+            rho = actual_reduction / predicted_reduction
+            trial_accepted =
+                isfinite(candidate_cost) && isfinite(rho) && rho >= T(acceptance_ratio)
+            push!(actual_reduction_history, actual_reduction)
+            push!(rho_history, rho)
+            push!(step_accepted_history, trial_accepted)
+
+            if trial_accepted
+                p = candidate
+                current_cost = candidate_cost
+                accepted = true
+                accepted_steps += 1
+                accepted_step_norm = step_norm
+                if rho > T(good_step_ratio)
+                    mu = max(mu * T(damping_decrease), eps(T))
+                elseif rho < T(poor_step_ratio)
+                    mu *= T(damping_increase)
+                end
+                break
+            end
+
+            rejected_steps += 1
             mu *= T(damping_increase)
         end
         iterations_done = iteration
@@ -239,6 +294,15 @@ function _solve_symcpd_gn(
             all_cg_converged = isempty(cg_converged_history) ? nothing :
                                all(cg_converged_history),
             accepted_steps = accepted_steps,
+            rejected_steps = rejected_steps,
+            predicted_reduction_history = predicted_reduction_history,
+            actual_reduction_history = actual_reduction_history,
+            rho_history = rho_history,
+            damping_history = damping_history,
+            step_accepted_history = step_accepted_history,
+            acceptance_ratio = T(acceptance_ratio),
+            poor_step_ratio = T(poor_step_ratio),
+            good_step_ratio = T(good_step_ratio),
             final_damping = mu,
             termination_reason = termination_reason,
         ),

@@ -177,6 +177,27 @@ forms a compressed-coordinate Jacobian and returns ``J^\top J``. This is a
 test oracle: the analytic operator-derived matrix should agree with it to
 machine precision. It is not used by `:gn_cg`.
 
+The damped Gauss--Newton step is globalized by a Riemannian
+Levenberg--Marquardt acceptance ratio. For a trial tangent ``\eta``, define
+
+```math
+\operatorname{pred}(\eta)
+=-\langle \operatorname{grad}f,\eta\rangle
+-\frac12\langle\eta,J^*J\eta\rangle,
+```
+
+```math
+\operatorname{ared}(\eta)=f(p)-f(R_p(\eta)),
+\qquad
+\rho=\frac{\operatorname{ared}(\eta)}{\operatorname{pred}(\eta)}.
+```
+
+The step is accepted when `pred` is positive and ``\rho`` is at least
+`acceptance_ratio`. Ratios below `poor_step_ratio` increase the damping;
+ratios above `good_step_ratio` decrease it. `solver_info` records
+`predicted_reduction_history`, `actual_reduction_history`, `rho_history`,
+`damping_history`, `step_accepted_history`, and the accepted/rejected counts.
+
 GN-CG is an inexact Gauss--Newton method: an inner CG solve may provide a
 useful direction before reaching `cg_tol`. The returned `solver_info` records
 `cg_converged_history`, `cg_iterations_history`, and `cg_failed_count` so this

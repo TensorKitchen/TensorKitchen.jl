@@ -112,7 +112,9 @@ function symcpd(
     cg_tol::Real = 1.0e-8,
     cg_maxiter = nothing,
     max_damping_trials::Int = 8,
-    max_backtracks::Int = 12,
+    acceptance_ratio::Real = 1.0e-4,
+    poor_step_ratio::Real = 0.25,
+    good_step_ratio::Real = 0.75,
     kwargs...,
 )
     r >= 1 || throw(ArgumentError("symcpd requires r >= 1, got $r."))
@@ -150,7 +152,9 @@ function symcpd(
             cg_tol,
             cg_maxiter = cg_iterations,
             max_damping_trials,
-            max_backtracks,
+            acceptance_ratio,
+            poor_step_ratio,
+            good_step_ratio,
             verbose,
         )
     else
