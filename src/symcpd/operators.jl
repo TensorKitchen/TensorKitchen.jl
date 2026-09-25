@@ -37,7 +37,7 @@ function pushforward!(out::AbstractVector, component::SymmetricRankOne, p, X)
     expected = ambient_length(component)
     length(out) == expected ||
         throw(DimensionMismatch("Expected an output vector of length $expected."))
-    ManifoldsBase.embed!(component.manifold, out, p, X)
+    _symcpd_embed_coordinates!(out, component.manifold, p, X)
     return out
 end
 
@@ -103,7 +103,7 @@ function pullback(component::SymmetricRankOne, p, a::AbstractVector)
     expected = ambient_length(component)
     length(a) == expected ||
         throw(DimensionMismatch("Expected an ambient cotangent of length $expected."))
-    return ManifoldsBase.project(component.manifold, p, a)
+    return _symcpd_pullback_coordinates(component.manifold, p, a)
 end
 
 function pullback(

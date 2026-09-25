@@ -84,13 +84,6 @@ _manifold_init(M, target, init) =
 _manifold_init(M::Manifolds.Sphere, target, init::Symbol) = _sphere_init(M, target, init)
 _manifold_init(M::Manifolds.Segre, target, init::Symbol) = _segre_init(M, target, init)
 _manifold_init(M::Manifolds.Tucker, target, init::Symbol) = _tucker_init(M, target, init)
-function _manifold_init(M::Manifolds.Veronese, target, init::Symbol)
-    init == :random ||
-        throw(ArgumentError("Veronese supports init=:random or an explicit p0."))
-    p = rand(M)
-    T = eltype(target)
-    return (T.(p[1]), T.(p[2]))
-end
 
 _component_init(component, target, init) =
     _manifold_init(_component_manifold(component), target, init)

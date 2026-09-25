@@ -13,7 +13,7 @@ reconstruct(res::CPDResult) = reconstruct_cpd_rankr(components(res))
 
 function reconstruct(c::SymCPDComponent)
     return expand_symmetric_tensor(
-        ManifoldsBase.embed(Manifolds.Veronese(length(c.factor), c.order), c.point),
+        _symcpd_embed_coordinates(_symcpd_manifold(length(c.factor), c.order), c.point),
         length(c.factor),
         c.order,
     )

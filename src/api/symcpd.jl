@@ -6,7 +6,7 @@ function _symmetric_tensor_manifold(A::AbstractArray)
     n = size(A, 1)
     all(==(n), size(A)) ||
         throw(DimensionMismatch("symcpd requires equal mode sizes, got $(size(A))."))
-    return Manifolds.Veronese(n, d), n, d
+    return _symcpd_manifold(n, d), n, d
 end
 
 function _check_symmetric_input(A; atol, rtol)
@@ -25,9 +25,9 @@ end
     compress_symmetric_tensor(A)
 
 Convert a dense tensor into the orthonormal symmetric coordinates used by
-`Veronese.embed`. An arbitrary nonsymmetric input is first orthogonally
-projected onto the symmetric tensor subspace. This is an input-boundary
-operation; it does not allocate a second full tensor.
+TensorKitchen's Bombieri--Weyl basis. An arbitrary nonsymmetric input is first
+orthogonally projected onto the symmetric tensor subspace. This is an
+input-boundary operation; it does not allocate a second full tensor.
 
 The Bombieri--Weyl normalization is the polynomial inner product used by
 Khouja, Khalil, and Mourrain (2022), doi:10.1016/j.laa.2021.12.008.
@@ -46,7 +46,7 @@ The coordinate normalization follows Khouja, Khalil, and Mourrain (2022),
 doi:10.1016/j.laa.2021.12.008.
 """
 function expand_symmetric_tensor(a::AbstractVector{<:Real}, n::Int, d::Int)
-    return _expand_symmetric_tensor(Manifolds.Veronese(n, d), a)
+    return _expand_symmetric_tensor(_symcpd_manifold(n, d), a)
 end
 
 @doc raw"""

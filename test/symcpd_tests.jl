@@ -7,21 +7,36 @@ function _symcpd_full_term(λ, x, d)
     return A
 end
 
+_symcpd_coordinates(M, p) = TensorKitchen._symcpd_embed_coordinates(M, p)
+
 @testset "SymCPD compressed representation" begin
+    indices = symmetric_multiindices(3, 4)
+    @test length(indices) == binomial(6, 4)
+    @test first(indices) == [4, 0, 0]
+    @test last(indices) == [0, 0, 4]
+    @test all(alpha -> sum(alpha) == 4, indices)
+    @test length(unique(indices)) == length(indices)
+    @test sum(multinomial_multiplicity, indices) == 3^4
+    @test multinomial_multiplicity([2, 1, 1]) == 12
+    @test_throws ArgumentError symmetric_multiindices(0, 3)
+    @test_throws ArgumentError multinomial_multiplicity([2, -1, 2])
+    @test_throws ArgumentError SymmetricRankOne(Manifolds.Sphere(2))
+
     x = normalize([1.0, -2.0, 0.5])
     y = normalize([0.4, 1.0, -1.0])
     for d in (2, 3, 4)
-        V = Manifolds.Veronese(3, d)
+        V = TensorKitchen._symcpd_manifold(3, d)
         p = ([-1.3], x)
         q = ([0.7], y)
-        a = embed(V, p)
+        a = _symcpd_coordinates(V, p)
         A = _symcpd_full_term(p[1][1], x, d)
         @test length(a) == binomial(3 + d - 1, d)
         @test compress_symmetric_tensor(A) ≈ a atol = 1e-12
         @test expand_symmetric_tensor(a, 3, d) ≈ A atol = 1e-12
-        @test dot(a, embed(V, q)) ≈ sum(A .* _symcpd_full_term(q[1][1], y, d)) atol = 1e-12
+        @test dot(a, _symcpd_coordinates(V, q)) ≈ sum(A .* _symcpd_full_term(q[1][1], y, d)) atol =
+            1e-12
         representative = ([(-1)^d * p[1][1]], -x)
-        @test embed(V, representative) ≈ a atol = 1e-12
+        @test _symcpd_coordinates(V, representative) ≈ a atol = 1e-12
     end
 
     A = _symcpd_full_term(1.4, x, 3) + _symcpd_full_term(-0.6, y, 3)
@@ -35,9 +50,9 @@ end
 
     # A full tensor here would have 2^24 entries. The compressed target has 25
     # entries, while the model side uses only factors and scalar kernels.
-    Vlarge = Manifolds.Veronese(2, 24)
+    Vlarge = TensorKitchen._symcpd_manifold(2, 24)
     plarge = ([1.1], normalize([0.6, 0.8]))
-    target_large = embed(Vlarge, plarge)
+    target_large = _symcpd_coordinates(Vlarge, plarge)
     component_large = SymmetricRankOne(2, 24)
     model_large = JoinModel(component_large, 1, target_large)
     @test component_large isa AbstractJoinComponent
@@ -55,7 +70,7 @@ end
     x = normalize([1.0, -2.0, 0.5])
     y = normalize([0.4, 1.0, -1.0])
     d = 3
-    V = Manifolds.Veronese(3, d)
+    V = TensorKitchen._symcpd_manifold(3, d)
     A = _symcpd_full_term(1.4, x, d) + _symcpd_full_term(-0.6, y, d)
     component = SymmetricRankOne(3, d)
     model = JoinModel(component, 2, DenseSymmetricTarget(A))
@@ -80,9 +95,11 @@ end
             cost(model, retract(M, p, TensorKitchen._scale_solver_tangent(X, -h)))
         ) / (2h)
     @test fd ≈ inner(M, p, g, X) atol = 1e-7 rtol = 1e-6
-    @test inner(M, p, X, X) ≈
-          sum(abs2, embed(V, p.x[1], X.x[1])) + sum(abs2, embed(V, p.x[2], X.x[2])) atol =
-        1e-12
+    tangent_1 = zeros(binomial(3 + d - 1, d))
+    tangent_2 = similar(tangent_1)
+    TensorKitchen._symcpd_embed_coordinates!(tangent_1, V, p.x[1], X.x[1])
+    TensorKitchen._symcpd_embed_coordinates!(tangent_2, V, p.x[2], X.x[2])
+    @test inner(M, p, X, X) ≈ sum(abs2, tangent_1) + sum(abs2, tangent_2) atol = 1e-12
     @test all(c -> c isa SymCPDComponent, TensorKitchen.extract_components(model, p))
 end
 

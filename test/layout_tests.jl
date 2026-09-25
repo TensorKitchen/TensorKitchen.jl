@@ -3,7 +3,8 @@
 
     # Only ProductManifold levels are adapted. Native component points remain
     # opaque even when their representation itself is a tuple.
-    V = Manifolds.Veronese(3, 2)
+    component = SymmetricRankOne(3, 2)
+    V = manifold(component)
     x = normalize([1.0, 2.0, -1.0])
     y = normalize([-1.0, 0.5, 2.0])
     p1, p2 = ([1.2], x), ([-0.7], y)
@@ -23,23 +24,40 @@
     @test is_point(P, p)
     @test zero_vector(P, p).x[1] isa Tuple
 
-    A = ManifoldsBase.embed(V, p1) + ManifoldsBase.embed(V, p2)
-    model = JoinModel(V, 2, A)
+    A =
+        TensorKitchen._symcpd_embed_coordinates(V, p1) +
+        TensorKitchen._symcpd_embed_coordinates(V, p2)
+    model = JoinModel(component, 2, A)
     @test cost(model, p) ≈ 0 atol = 1.0e-14
 
     q1 = ([0.8], normalize([1.0, 1.0, 0.2]))
     q = TensorKitchen._solver_point(P, (q1, p2))
-    @test cost(model, q) ≈ 0.5 * sum(abs2, embed(V, q1) + embed(V, p2) - A)
+    @test cost(model, q) ≈
+          0.5 * sum(
+        abs2,
+        TensorKitchen._symcpd_embed_coordinates(V, q1) +
+        TensorKitchen._symcpd_embed_coordinates(V, p2) - A,
+    )
 
     # Every ordering must evaluate at the requested point, even if an optimizer
     # mutates a previously cached point object before a line-search cost.
     TensorKitchen.rgrad(model, p)
-    @test cost(model, q) ≈ 0.5 * sum(abs2, embed(V, q1) + embed(V, p2) - A)
+    @test cost(model, q) ≈
+          0.5 * sum(
+        abs2,
+        TensorKitchen._symcpd_embed_coordinates(V, q1) +
+        TensorKitchen._symcpd_embed_coordinates(V, p2) - A,
+    )
     TensorKitchen.rgrad(model, q)
     @test cost(model, p) ≈ 0 atol = 1.0e-14
     TensorKitchen.rgrad(model, p)
     p.x[1][1][1] += 0.1
-    @test cost(model, p) ≈ 0.5 * sum(abs2, embed(V, p.x[1]) + embed(V, p.x[2]) - A)
+    @test cost(model, p) ≈
+          0.5 * sum(
+        abs2,
+        TensorKitchen._symcpd_embed_coordinates(V, p.x[1]) +
+        TensorKitchen._symcpd_embed_coordinates(V, p.x[2]) - A,
+    )
 
     # The same outer adaptation also preserves Segre and Tucker native points.
     S = Manifolds.Segre((3, 3))

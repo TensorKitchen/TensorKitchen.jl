@@ -133,10 +133,9 @@ end
 function _symmetric_target_inner(target::CompressedSymmetricTarget, x::AbstractVector)
     length(x) == target.n ||
         throw(DimensionMismatch("Expected a factor of length $(target.n)."))
-    M = Manifolds.Veronese(target.n, target.order)
     T = promote_type(eltype(target.coefficients), eltype(x))
     value = zero(T)
-    Manifolds._veronese_coordinates(M, x) do k, monomial, _
+    _symmetric_coordinates(target.n, target.order, x) do k, monomial, _
         value += target.coefficients[k] * monomial
     end
     return value
@@ -148,12 +147,16 @@ function _symmetric_target_inner_and_contraction(
 )
     length(x) == target.n ||
         throw(DimensionMismatch("Expected a factor of length $(target.n)."))
-    M = Manifolds.Veronese(target.n, target.order)
     T = promote_type(eltype(target.coefficients), eltype(x))
     value = zero(T)
     contraction = zeros(T, target.n)
     inv_order = inv(T(target.order))
-    Manifolds._veronese_coordinates(M, x; differential = true) do k, monomial, gradient
+    _symmetric_coordinates(
+        target.n,
+        target.order,
+        x;
+        differential = true,
+    ) do k, monomial, gradient
         coefficient = target.coefficients[k]
         value += coefficient * monomial
         contraction .+= (coefficient * inv_order) .* gradient

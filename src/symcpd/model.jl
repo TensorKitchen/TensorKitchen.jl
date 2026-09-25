@@ -26,11 +26,18 @@ The Veronese formulation follows R. Khouja, H. Khalil, and B. Mourrain,
 problem," *Linear Algebra and its Applications* 637 (2022), 175--211,
 doi:10.1016/j.laa.2021.12.008.
 """
-struct SymmetricRankOne{V<:Manifolds.Veronese} <: AbstractJoinComponent
+struct SymmetricRankOne{V<:AbstractManifold} <: AbstractJoinComponent
     manifold::V
+
+    function SymmetricRankOne(manifold::V) where {V<:AbstractManifold}
+        _is_symcpd_manifold(manifold) || throw(
+            ArgumentError("SymmetricRankOne requires the configured Veronese manifold."),
+        )
+        return new{V}(manifold)
+    end
 end
 
-SymmetricRankOne(n::Int, order::Int) = SymmetricRankOne(Manifolds.Veronese(n, order))
+SymmetricRankOne(n::Int, order::Int) = SymmetricRankOne(_symcpd_manifold(n, order))
 SymmetricRankOne(; dimension::Int, order::Int) = SymmetricRankOne(dimension, order)
 
 component_manifold(component::SymmetricRankOne) = component.manifold
@@ -38,10 +45,13 @@ component_embedding(::SymmetricRankOne) = DefaultJoinEmbedding()
 kind(::SymmetricRankOne) = :Veronese
 
 function _symmetric_component_size(component::SymmetricRankOne)
-    return Manifolds.get_parameter(component.manifold.size)
+    return _symcpd_manifold_size(component.manifold)
 end
 
-ambient_length(component::SymmetricRankOne) = ambient_length(component.manifold)
+function ambient_length(component::SymmetricRankOne)
+    n, order = _symmetric_component_size(component)
+    return _check_symmetric_coordinate_size(n, order)
+end
 
 @doc raw"""
     SymmetricCPDBackend
@@ -178,10 +188,6 @@ supports_rgrad(::JoinModel{T,B}) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
 supports_egrad_project(::JoinModel{T,B}) where {T<:AbstractFloat,B<:SymmetricCPDBackend} =
     false
 
-# Preserve Veronese support in a generic materialized JoinModel reference path.
-# The specialized symmetric backend itself does not use this ambient length.
-ambient_length(M::Manifolds.Veronese) = manifold_dimension(get_embedding(M))
-
 function egrad(model::JoinModel{T,B}, p) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
     throw(
         ArgumentError(
@@ -203,8 +209,7 @@ function initial_point(
     )
     backend = model.backend
     parts = ntuple(_ -> begin
-        p = rand(backend.component.manifold)
-        ([T(p[1][1])], T.(p[2]))
+        _symcpd_random_point(backend.component.manifold, T)
     end, backend.rank)
     return join_point(backend.product_manifold, parts)
 end
@@ -324,7 +329,7 @@ function rgrad(model::JoinModel{T,B}, p) where {T<:AbstractFloat,B<:SymmetricCPD
             end
             factor_covector .-= dot(x_r, factor_covector) .* x_r
             factor_gradient = factor_covector ./ (T(d) * lambda_r^2)
-            ([T(radial)], factor_gradient)
+            _symcpd_tangent(T(radial), factor_gradient)
         end,
         backend.rank,
     )
@@ -342,12 +347,12 @@ doi:10.1016/j.laa.2021.12.008.
 """
 function compressed_coordinates(res::SymCPDResult)
     n = size(res.factors, 1)
-    M = Manifolds.Veronese(n, res.order)
+    M = _symcpd_manifold(n, res.order)
     T = eltype(res.weights)
     out = zeros(T, binomial(n + res.order - 1, res.order))
     work = similar(out)
     for c in res.components
-        ManifoldsBase.embed!(M, work, c.point)
+        _symcpd_embed_coordinates!(work, M, c.point)
         out .+= work
     end
     return out

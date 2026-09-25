@@ -225,4 +225,6 @@ SymCPDComponent
 compressed_coordinates
 compress_symmetric_tensor
 expand_symmetric_tensor
+symmetric_multiindices
+multinomial_multiplicity
 ```
