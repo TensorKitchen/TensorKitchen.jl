@@ -76,6 +76,15 @@ preparation and permits operator-defined targets such as
   directly.
 - `target_backend=:compressed` converts `A` once to the Bombieri--Weyl
   orthonormal symmetric basis. Model-model terms remain kernelized.
+- Passing a `FunctionalSymmetricTarget` evaluates a user-supplied polynomial
+  and contraction operator without storing the tensor.
+
+# Initialization
+
+- `init=:random` samples product-manifold components.
+- `init=:sshopm` uses multistart shifted power iterations, removes nearly
+  collinear candidates, and solves a small kernel least-squares problem for
+  the initial weights.
 
 # Solvers
 

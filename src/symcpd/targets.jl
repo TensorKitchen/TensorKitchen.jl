@@ -9,6 +9,13 @@ export AbstractSymmetricTarget,
     contract,
     symmetric_target_norm2
 
+"""
+    AbstractSymmetricTarget{T}
+
+Abstract interface for an order-`D`, dimension-`N` symmetric target. Concrete
+backends provide [`target_norm2`](@ref), [`evaluate`](@ref), and
+[`contract`](@ref) without prescribing how the tensor is stored.
+"""
 abstract type AbstractSymmetricTarget{T<:AbstractFloat} end
 
 Base.eltype(::Type{<:AbstractSymmetricTarget{T}}) where {T} = T

@@ -202,9 +202,10 @@ function initial_point(
     init::Symbol;
     kwargs...,
 ) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
+    init == :sshopm && return _sshopm_initial_point(model)
     init == :random || throw(
         ArgumentError(
-            "The symmetric JoinModel supports init=:random or an explicit p0, got $init.",
+            "The symmetric JoinModel supports init=:random, init=:sshopm, or an explicit p0, got $init.",
         ),
     )
     backend = model.backend

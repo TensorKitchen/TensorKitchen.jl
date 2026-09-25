@@ -126,6 +126,58 @@ end
     @test isfinite(cost(first_order))
 end
 
+@testset "SS-HOPM eigenpairs, rank-one approximation, and initialization" begin
+    e1 = [1.0, 0.0, 0.0]
+    e2 = [0.0, 1.0, 0.0]
+    d = 3
+    A = _symcpd_full_term(3.0, e1, d) + _symcpd_full_term(-2.0, e2, d)
+    dense = DenseSymmetricTarget(A)
+    functional = FunctionalSymmetricTarget(
+        3,
+        d,
+        target_norm2(dense);
+        evaluate = x -> evaluate(dense, x),
+        contract = x -> contract(dense, x),
+    )
+
+    largest =
+        tensor_eigenpair(functional; x0 = [0.9, 0.1, 0.1], which = :largest, tol = 1e-10)
+    smallest =
+        tensor_eigenpair(functional; x0 = [0.1, 0.9, 0.1], which = :smallest, tol = 1e-10)
+    @test converged(largest)
+    @test converged(smallest)
+    @test eigenvalue(largest) ≈ 3.0 atol = 1e-12
+    @test eigenvalue(smallest) ≈ -2.0 atol = 1e-12
+    @test abs(dot(eigenvector(largest), e1)) ≈ 1.0 atol = 1e-12
+    @test abs(dot(eigenvector(smallest), e2)) ≈ 1.0 atol = 1e-12
+    @test residual_norm(largest) <= 1e-9
+    @test residual_norm(smallest) <= 1e-9
+    @test solver(largest) == :sshopm
+    @test_throws ArgumentError tensor_eigenpair(dense; which = :magnitude)
+
+    rank_one = best_symmetric_rank1(
+        functional;
+        x0 = [0.9, 0.1, 0.1],
+        starts = 4,
+        tol = 1e-10,
+        rng = MersenneTwister(2026),
+    )
+    @test solver(rank_one) == :sshopm
+    @test abs(weights(rank_one)[1]) ≈ 3.0 atol = 1e-10
+    @test rel_error(rank_one) ≈ 2 / sqrt(13) atol = 1e-10
+
+    joint = symcpd(
+        functional,
+        2;
+        init = :sshopm,
+        solver = :gn_cg,
+        maxiter = 10,
+        tol = 1e-10,
+        verbose = false,
+    )
+    @test rel_error(joint) < 1e-9
+end
+
 @testset "SymCPD matrix-free cost and intrinsic gradient" begin
     x = normalize([1.0, -2.0, 0.5])
     y = normalize([0.4, 1.0, -1.0])

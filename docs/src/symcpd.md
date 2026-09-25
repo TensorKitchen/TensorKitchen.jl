@@ -122,6 +122,64 @@ The functional backend stores the supplied callables and scalar norm, not the
 tensor itself. The caller is responsible for making the two operators and
 `normA2` describe the same symmetric tensor.
 
+## Tensor eigenpairs and rank-one initialization
+
+SS-HOPM computes a unit-norm tensor eigenpair
+
+```math
+A(I,x,\ldots,x)=\lambda x,
+\qquad \|x\|_2=1,
+```
+
+without forming a dense target. Its shifted iteration is
+
+```math
+x_{k+1}
+=\chi\frac{A(I,x_k,\ldots,x_k)+\alpha x_k}
+{\|A(I,x_k,\ldots,x_k)+\alpha x_k\|_2},
+```
+
+where the sign of ``\alpha`` and ``\chi`` selects the positive or negative
+stability direction.
+
+```julia
+target = DenseSymmetricTarget(A)
+
+pair = tensor_eigenpair(
+    target;
+    method=SSHOPM(),
+    which=:largest,
+)
+
+rank_one = best_symmetric_rank1(target; starts=16)
+```
+
+For fixed unit ``x``, the least-squares optimal weight is
+``\lambda=\langle A,x^{\otimes D}\rangle``. Therefore
+`best_symmetric_rank1` runs both stability directions from multiple starts and
+keeps the converged candidate with the largest ``|\lambda|``. This is a local
+multistart search, not a certificate of the globally best rank-one tensor.
+
+For rank greater than one, `init=:sshopm` builds a diverse candidate set,
+rejects nearly collinear factors, solves the small kernel least-squares problem
+
+```math
+\sum_s (x_r^\top x_s)^D\lambda_s
+=\langle A,x_r^{\otimes D}\rangle,
+```
+
+and passes the resulting product-manifold point to the selected joint solver:
+
+```julia
+result = symcpd(target, R; init=:sshopm, solver=:gn_cg)
+```
+
+SS-HOPM follows Kolda and Mayo (2011),
+[doi:10.1137/100801482](https://doi.org/10.1137/100801482). The automatic
+shift uses a value slightly above the conservative magnitude
+``(D-1)\|A\|_F``; supplying a smaller problem-specific shift may converge
+faster but gives up that generic bound.
+
 ## Intrinsic gradient
 
 Let
@@ -248,10 +306,14 @@ equivalent representatives.
 - The intrinsic warped Segre--Veronese metric: Jacobsson, Swijsen, Van der
   Veken, and Vannieuwenhoven (2026),
   [doi:10.1137/25M1790099](https://doi.org/10.1137/25M1790099).
+- Shifted symmetric higher-order power iteration and its relation to tensor
+  eigenpairs and symmetric rank-one approximation: Kolda and Mayo (2011),
+  [doi:10.1137/100801482](https://doi.org/10.1137/100801482).
 
 ```@docs
 symcpd
 AbstractJoinComponent
+AbstractSymmetricTarget
 SymmetricRankOne
 JoinModel
 SymCPDModel
@@ -262,6 +324,13 @@ FunctionalSymmetricTarget
 target_norm2
 evaluate
 contract
+SSHOPM
+TensorEigenpairResult
+tensor_eigenpair
+best_symmetric_rank1
+eigenvalue
+eigenvector
+residual_norm
 component_inner
 data_inner
 pushforward!
