@@ -66,6 +66,66 @@ _symcpd_coordinates(M, p) = TensorKitchen._symcpd_embed_coordinates(M, p)
     @test @allocated(TensorKitchen.rgrad(model_large, outer_large)) < 1_000_000
 end
 
+@testset "SymCPD target operator interface" begin
+    x = normalize([1.0, -2.0, 0.5])
+    y = normalize([0.4, 1.0, -1.0])
+    d = 3
+    A = _symcpd_full_term(1.4, x, d) + _symcpd_full_term(-0.6, y, d)
+    dense = DenseSymmetricTarget(A)
+    compressed = CompressedSymmetricTarget(compress_symmetric_tensor(A), 3, d)
+    functional = FunctionalSymmetricTarget(
+        3,
+        d,
+        target_norm2(dense);
+        evaluate = z -> evaluate(dense, z),
+        contract = z -> contract(dense, z),
+    )
+
+    z = normalize([0.3, -0.7, 0.2])
+    @test target_norm2(dense) ≈ target_norm2(compressed)
+    @test target_norm2(dense) ≈ target_norm2(functional)
+    @test evaluate(dense, z) ≈ evaluate(compressed, z) atol = 2e-15
+    @test evaluate(dense, z) ≈ evaluate(functional, z) atol = 2e-15
+    @test contract(dense, z) ≈ contract(compressed, z) atol = 2e-15
+    @test contract(dense, z) ≈ contract(functional, z) atol = 2e-15
+    @test_throws DimensionMismatch evaluate(functional, ones(2))
+    @test_throws ArgumentError FunctionalSymmetricTarget(
+        3,
+        d,
+        -1.0;
+        evaluate = _ -> 0.0,
+        contract = _ -> zeros(3),
+    )
+
+    p0 = (([1.2], normalize(x + [0.02, -0.01, 0.03])),)
+    for target in (dense, compressed, functional)
+        model = SymCPDModel(target, 1)
+        initial_cost = cost(model, TensorKitchen.join_point(manifold(model), deepcopy(p0)))
+        result = symcpd(
+            target,
+            1;
+            p0 = deepcopy(p0),
+            solver = :gn_cg,
+            maxiter = 20,
+            tol = 1e-10,
+            verbose = false,
+        )
+        @test result isa SymCPDResult
+        @test isfinite(cost(result))
+        @test cost(result) < initial_cost
+    end
+
+    first_order = symcpd(
+        functional,
+        1;
+        p0 = deepcopy(p0),
+        solver = :lbfgs,
+        maxiter = 20,
+        verbose = false,
+    )
+    @test isfinite(cost(first_order))
+end
+
 @testset "SymCPD matrix-free cost and intrinsic gradient" begin
     x = normalize([1.0, -2.0, 0.5])
     y = normalize([0.4, 1.0, -1.0])

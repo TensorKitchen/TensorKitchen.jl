@@ -271,7 +271,7 @@ function _solve_symcpd_gn(
         converged_flag = true
         termination_reason = :gradient_tolerance
     end
-    norm2 = symmetric_target_norm2(model.backend.target)
+    norm2 = target_norm2(model.backend.target)
     residual_norm2 = max(T(2) * current_cost, zero(T))
     relative_error = norm2 > zero(T) ? sqrt(residual_norm2 / norm2) : sqrt(residual_norm2)
     solver_symbol = linear_solver == :cg ? :gn_cg : :gn_dense

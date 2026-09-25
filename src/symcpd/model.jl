@@ -75,8 +75,8 @@ f(p)=\tfrac12\|A\|_F^2
 ```
 
 Consequently, neither the predicted tensor nor a compressed Veronese vector is
-formed by `cost` or `rgrad`. `target` may be a [`DenseSymmetricTarget`](@ref)
-or [`CompressedSymmetricTarget`](@ref).
+formed by `cost` or `rgrad`. `target` may be a [`DenseSymmetricTarget`](@ref),
+[`CompressedSymmetricTarget`](@ref), or [`FunctionalSymmetricTarget`](@ref).
 
 The product-of-Veronese least-squares formulation and its Riemannian
 Gauss--Newton structure are described by R. Khouja, H. Khalil, and B. Mourrain,
@@ -257,7 +257,7 @@ function data_inner(
     p,
 ) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
     pp = point_parts(p)
-    return pp[1][1] * _symmetric_target_inner(model.backend.target, pp[2])
+    return pp[1][1] * evaluate(model.backend.target, pp[2])
 end
 
 function cost(model::JoinModel{T,B}, p) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
@@ -265,7 +265,7 @@ function cost(model::JoinModel{T,B}, p) where {T<:AbstractFloat,B<:SymmetricCPDB
     parts = join_parts(backend.product_manifold, p)
     length(parts) == backend.rank ||
         throw(DimensionMismatch("Expected $(backend.rank) components."))
-    value = T(0.5) * symmetric_target_norm2(backend.target)
+    value = T(0.5) * target_norm2(backend.target)
     @inbounds for r = 1:backend.rank
         value -= data_inner(model, parts[r])
         value += T(0.5) * component_inner(model, parts[r], parts[r])

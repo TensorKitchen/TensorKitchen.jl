@@ -51,6 +51,7 @@ end
 
 @doc raw"""
     symcpd(A, r; solver=:rgd, target_backend=:dense, init=:random, ...)
+    symcpd(target::AbstractSymmetricTarget, r; solver=:rgd, init=:random, ...)
 
 Approximate a dense symmetric order-`D` tensor by
 
@@ -64,6 +65,10 @@ the same join-of-rank-one-components architecture as ordinary CPD, with
 Veronese geometry replacing Segre geometry. `cost`, `rgrad`, and the
 Gauss--Newton normal action never construct `Ahat`, an ambient residual, or
 compressed model-coordinate vectors.
+
+Passing an [`AbstractSymmetricTarget`](@ref) directly skips dense input
+preparation and permits operator-defined targets such as
+[`FunctionalSymmetricTarget`](@ref).
 
 # Backends
 
@@ -133,6 +138,56 @@ function symcpd(
             ),
         )
     end
+    return symcpd(
+        target,
+        r;
+        init,
+        p0,
+        solver,
+        maxiter,
+        stepsize,
+        tol,
+        gradient_mode,
+        verbose,
+        vector_transport_method,
+        damping,
+        damping_increase,
+        damping_decrease,
+        cg_tol,
+        cg_maxiter,
+        max_damping_trials,
+        acceptance_ratio,
+        poor_step_ratio,
+        good_step_ratio,
+        kwargs...,
+    )
+end
+
+function symcpd(
+    target::AbstractSymmetricTarget,
+    r::Int;
+    init = :random,
+    p0 = nothing,
+    solver = :rgd,
+    maxiter::Int = 500,
+    stepsize::Real = 1.0,
+    tol::Real = 1.0e-6,
+    gradient_mode = :riemannian,
+    verbose::Bool = true,
+    vector_transport_method = nothing,
+    damping::Real = 1.0e-6,
+    damping_increase::Real = 10,
+    damping_decrease::Real = 0.3,
+    cg_tol::Real = 1.0e-8,
+    cg_maxiter = nothing,
+    max_damping_trials::Int = 8,
+    acceptance_ratio::Real = 1.0e-4,
+    poor_step_ratio::Real = 0.25,
+    good_step_ratio::Real = 0.75,
+    kwargs...,
+)
+    r >= 1 || throw(ArgumentError("symcpd requires r >= 1, got $r."))
+    n, d = _symmetric_target_size(target)
     component = SymmetricRankOne(n, d)
     model = JoinModel(component, r, target)
     result = if solver in (:gn_cg, :gn_dense)
@@ -170,6 +225,7 @@ function symcpd(
             normalization = NoNormalization(),
             verbose,
             vector_transport_method,
+            observation_norm2_cache = target_norm2(target),
             kwargs...,
         )
     end

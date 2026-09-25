@@ -98,6 +98,30 @@ compressed_result = symcpd(A, 3; target_backend=:compressed)
 Frobenius inner product and should give the same objective and gradient up to
 roundoff.
 
+For a target that is available only through tensor-vector contractions, use a
+functional backend:
+
+```julia
+target = FunctionalSymmetricTarget(
+    N,
+    D,
+    normA2;
+    evaluate = x -> target_polynomial(x),
+    contract = x -> one_mode_contraction(x),
+)
+result = symcpd(target, 3; solver=:gn_cg)
+```
+
+Every target backend implements the same three operations:
+
+- `target_norm2(target)` returns ``\|A\|_F^2``;
+- `evaluate(target, x)` returns ``\langle A,x^{\otimes D}\rangle``;
+- `contract(target, x)` returns ``A(x,\ldots,x,\mathord\cdot)``.
+
+The functional backend stores the supplied callables and scalar norm, not the
+tensor itself. The caller is responsible for making the two operators and
+`normA2` describe the same symmetric tensor.
+
 ## Intrinsic gradient
 
 Let
@@ -234,6 +258,10 @@ SymCPDModel
 SymmetricCPDBackend
 DenseSymmetricTarget
 CompressedSymmetricTarget
+FunctionalSymmetricTarget
+target_norm2
+evaluate
+contract
 component_inner
 data_inner
 pushforward!
