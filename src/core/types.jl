@@ -2,6 +2,8 @@
 export RankOneTensor,
     CPDResult,
     CPDComponent,
+    SymCPDResult,
+    SymCPDComponent,
     ApproxResult,
     BTDResult,
     TuckerResult,
@@ -24,6 +26,44 @@ export RankOneTensor,
     vectors,
     processing_order,
     singular_values
+
+"""
+    SymCPDComponent
+
+One symmetric rank-one term returned by [`symcpd`](@ref), stored as its
+intrinsic Veronese point, scalar weight, unit factor, and tensor order. The
+point representation follows Khouja, Khalil, and Mourrain (2022),
+doi:10.1016/j.laa.2021.12.008.
+"""
+struct SymCPDComponent{T<:AbstractFloat,P}
+    point::P
+    weight::T
+    factor::Vector{T}
+    order::Int
+end
+
+"""
+    SymCPDResult
+
+Result of a symmetric CP decomposition computed with intrinsic Veronese
+geometry. It stores factors and weights, not a dense reconstructed tensor. The
+underlying product-of-Veronese model follows Khouja, Khalil, and Mourrain
+(2022), doi:10.1016/j.laa.2021.12.008.
+"""
+struct SymCPDResult{T<:AbstractFloat,P,C,W,F,S}
+    point::P
+    components::C
+    weights::W
+    factors::F
+    order::Int
+    cost::T
+    rel_error::T
+    grad_norm::T
+    iterations::Int
+    converged::Bool
+    solver::Symbol
+    solver_info::S
+end
 
 """
     RankOneTensor{T}
@@ -224,6 +264,7 @@ Return the factor vectors of a rank-one tensor component.
 """
 vectors(c::RankOneTensor) = c.vectors
 kind(::CPDComponent) = :Segre
+kind(::SymCPDComponent) = :Veronese
 kind(c::DecompositionComponent) = typeof(c.manifold)
 
 """
@@ -235,6 +276,7 @@ Supported inputs include [`CPDResult`](@ref), [`ApproxResult`](@ref),
 [`BTDResult`](@ref), and [`DecompositionComponent`](@ref).
 """
 point(c::CPDComponent) = c.point
+point(c::SymCPDComponent) = c.point
 point(c::DecompositionComponent) = c.point
 
 """
@@ -271,6 +313,7 @@ function Base.getproperty(c::CPDComponent, name::Symbol)
 end
 
 point(r::CPDResult) = cpd_point(r)
+point(r::SymCPDResult) = r.point
 point(r::ApproxResult) = r.point
 point(r::BTDResult) = r.point
 
@@ -279,56 +322,56 @@ point(r::BTDResult) = r.point
 
 Return the final objective function value stored in a decomposition result.
 """
-cost(r::Union{CPDResult,ApproxResult,BTDResult}) = r.cost
+cost(r::Union{CPDResult,SymCPDResult,ApproxResult,BTDResult}) = r.cost
 
 """
     rel_error(r)
 
 Return the final relative reconstruction error stored in a decomposition result.
 """
-rel_error(r::Union{CPDResult,ApproxResult,BTDResult}) = r.rel_error
+rel_error(r::Union{CPDResult,SymCPDResult,ApproxResult,BTDResult}) = r.rel_error
 
 """
     grad_norm(r)
 
 Return the norm of the final optimization gradient reported by the solver; for manifold solvers this is typically the Riemannian gradient norm.
 """
-grad_norm(r::Union{CPDResult,ApproxResult,BTDResult}) = r.grad_norm
+grad_norm(r::Union{CPDResult,SymCPDResult,ApproxResult,BTDResult}) = r.grad_norm
 
 """
     iterations(r)
 
 Return the number of refinement iterations used to produce `r`.
 """
-iterations(r::Union{CPDResult,ApproxResult,BTDResult}) = r.iterations
+iterations(r::Union{CPDResult,SymCPDResult,ApproxResult,BTDResult}) = r.iterations
 
 """
     converged(r)
 
 Return whether the solver reported convergence.
 """
-converged(r::Union{CPDResult,ApproxResult,BTDResult}) = r.converged
+converged(r::Union{CPDResult,SymCPDResult,ApproxResult,BTDResult}) = r.converged
 
 """
     solver(r)
 
 Return the solver symbol recorded in a decomposition result.
 """
-solver(r::Union{CPDResult,ApproxResult,BTDResult}) = r.solver
+solver(r::Union{CPDResult,SymCPDResult,ApproxResult,BTDResult}) = r.solver
 
 """
     solver_info(r)
 
 Return solver-specific diagnostic information stored in a decomposition result.
 """
-solver_info(r::Union{CPDResult,ApproxResult,BTDResult}) = r.solver_info
+solver_info(r::Union{CPDResult,SymCPDResult,ApproxResult,BTDResult}) = r.solver_info
 
 """
     components(r)
 
 Return the decoded components stored in a decomposition result.
 """
-components(r::Union{CPDResult,ApproxResult,BTDResult}) = r.components
+components(r::Union{CPDResult,SymCPDResult,ApproxResult,BTDResult}) = r.components
 components(r::NamedTuple) = getproperty(r, :components)
 
 """
@@ -344,6 +387,8 @@ blocks(r::BTDResult) = r.components
 Return the CP component weights stored in a CPD result.
 """
 weights(r::CPDResult) = [λ(c) for c in components(r)]
+weights(r::SymCPDResult) = r.weights
+weights(c::SymCPDComponent) = [c.weight]
 weights(r::NamedTuple) = getproperty(r, :weights)
 
 """
@@ -364,6 +409,8 @@ Return the CP factor matrices of `res` as a vector `[U₁, U₂, ..., U_N]`,
 where each `U_m` has size `size(A, m) × rank`.
 """
 factors(r::CPDResult) = factors_from_components(components(r))
+factors(r::SymCPDResult) = r.factors
+factors(c::SymCPDComponent) = c.factor
 factors(r::NamedTuple) = getproperty(r, :factors)
 
 function Base.show(io::IO, r::CPDResult{T}) where {T}
