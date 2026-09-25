@@ -50,8 +50,8 @@ function expand_symmetric_tensor(a::AbstractVector{<:Real}, n::Int, d::Int)
 end
 
 @doc raw"""
-    symcpd(A, r; solver=:rgd, target_backend=:dense, init=:random, ...)
-    symcpd(target::AbstractSymmetricTarget, r; solver=:rgd, init=:random, ...)
+    symcpd(A, r; solver=:gn_cg, target_backend=:dense, init=:auto, ...)
+    symcpd(target::AbstractSymmetricTarget, r; solver=:gn_cg, init=:auto, ...)
 
 Approximate a dense symmetric order-`D` tensor by
 
@@ -81,6 +81,8 @@ preparation and permits operator-defined targets such as
 
 # Initialization
 
+- `init=:auto` uses SS-HOPM for rank one and random product-manifold
+  components for rank greater than one. An explicit `p0` takes precedence.
 - `init=:random` samples product-manifold components.
 - `init=:sshopm` uses multistart shifted power iterations, removes nearly
   collinear candidates, and solves a small kernel least-squares problem for
@@ -106,9 +108,9 @@ Lathauwer (2013), doi:10.1137/120868323, and Singh, Ma, Yang, and Solomonik
 function symcpd(
     A::AbstractArray{<:Real},
     r::Int;
-    init = :random,
+    init = :auto,
     p0 = nothing,
-    solver = :rgd,
+    solver = :gn_cg,
     target_backend::Symbol = :dense,
     maxiter::Int = 500,
     stepsize::Real = 1.0,
@@ -183,9 +185,9 @@ end
 function symcpd(
     target::AbstractSymmetricTarget,
     r::Int;
-    init = :random,
+    init = :auto,
     p0 = nothing,
-    solver = :rgd,
+    solver = :gn_cg,
     maxiter::Int = 500,
     stepsize::Real = 1.0,
     tol::Real = 1.0e-6,

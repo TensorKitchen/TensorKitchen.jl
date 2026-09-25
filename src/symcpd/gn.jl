@@ -151,7 +151,7 @@ doi:10.1137/20M1344561.
 """
 function _solve_symcpd_gn(
     model::JoinModel{T,B};
-    init = :random,
+    init = :auto,
     p0 = nothing,
     maxiter::Int = 100,
     tol::Real = 1.0e-8,
@@ -196,7 +196,9 @@ function _solve_symcpd_gn(
     )
 
     M = model.backend.product_manifold
-    p_initial = isnothing(p0) ? initial_point(model, init; verbose) : p0
+    requested_init = isnothing(p0) ? init : :explicit
+    resolved_init = isnothing(p0) ? _resolve_symcpd_init(model, init) : :explicit
+    p_initial = isnothing(p0) ? initial_point(model, resolved_init; verbose) : p0
     p = join_solver_point(M, deepcopy(p_initial))
     retraction_method = _solver_retraction_method(M, p)
     current_cost = cost(model, p)
@@ -368,6 +370,8 @@ function _solve_symcpd_gn(
         converged = converged_flag,
         solver = solver_symbol,
         solver_info = (
+            requested_init = requested_init,
+            resolved_init = resolved_init,
             linear_solver = linear_solver,
             matrix_free_normal = linear_solver == :cg,
             materializes_jacobian = false,

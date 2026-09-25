@@ -197,17 +197,27 @@ function egrad(model::JoinModel{T,B}, p) where {T<:AbstractFloat,B<:SymmetricCPD
     )
 end
 
+function _resolve_symcpd_init(
+    model::JoinModel{T,B},
+    init::Symbol,
+) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
+    init == :auto && return model.backend.rank == 1 ? :sshopm : :random
+    init in (:random, :sshopm) && return init
+    throw(
+        ArgumentError(
+            "The symmetric JoinModel supports init=:auto, init=:random, " *
+            "init=:sshopm, or an explicit p0, got $init.",
+        ),
+    )
+end
+
 function initial_point(
     model::JoinModel{T,B},
     init::Symbol;
     kwargs...,
 ) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
-    init == :sshopm && return _sshopm_initial_point(model)
-    init == :random || throw(
-        ArgumentError(
-            "The symmetric JoinModel supports init=:random, init=:sshopm, or an explicit p0, got $init.",
-        ),
-    )
+    resolved_init = _resolve_symcpd_init(model, init)
+    resolved_init == :sshopm && return _sshopm_initial_point(model)
     backend = model.backend
     parts = ntuple(_ -> begin
         _symcpd_random_point(backend.component.manifold, T)

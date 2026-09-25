@@ -46,7 +46,7 @@ _symcpd_coordinates(M, p) = TensorKitchen._symcpd_embed_coordinates(M, p)
     @test S[1, 2, 3] ≈
           (A[1, 2, 3] + A[1, 3, 2] + A[2, 1, 3] + A[2, 3, 1] + A[3, 1, 2] + A[3, 2, 1]) / 6
     @test compress_symmetric_tensor(S) ≈ a
-    @test_throws ArgumentError symcpd(A, 1; maxiter = 0, verbose = false)
+    @test_throws ArgumentError symcpd(A, 1; solver = :rgd, maxiter = 0, verbose = false)
 
     # A full tensor here would have 2^24 entries. The compressed target has 25
     # entries, while the model side uses only factors and scalar kernels.
@@ -176,6 +176,21 @@ end
         verbose = false,
     )
     @test rel_error(joint) < 1e-9
+
+    default_rank_one = symcpd(functional, 1; maxiter = 1, tol = 1e-10, verbose = false)
+    default_info = solver_info(default_rank_one)
+    @test solver(default_rank_one) == :gn_cg
+    @test default_info.requested_init == :auto
+    @test default_info.resolved_init == :sshopm
+
+    rank_two_model = SymCPDModel(functional, 2)
+    default_rank_two = symcpd(functional, 2; maxiter = 0, verbose = false)
+    @test solver(default_rank_two) == :gn_cg
+    @test solver_info(default_rank_two).requested_init == :auto
+    @test solver_info(default_rank_two).resolved_init == :random
+    @test TensorKitchen._resolve_symcpd_init(rank_two_model, :auto) == :random
+    @test TensorKitchen._resolve_symcpd_init(rank_two_model, :sshopm) == :sshopm
+    @test_throws ArgumentError TensorKitchen._resolve_symcpd_init(rank_two_model, :unknown)
 end
 
 @testset "SymCPD matrix-free cost and intrinsic gradient" begin
