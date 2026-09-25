@@ -296,7 +296,7 @@ end
     damping = 1e-3
     gradient = TensorKitchen.rgrad(dense_model, p)
     rhs = TensorKitchen._scale_solver_tangent(gradient, -1.0)
-    cg_step, _, cg_converged = TensorKitchen._symcpd_cg(
+    cg_step, _, cg_converged, cg_info = TensorKitchen._symcpd_cg(
         dense_model,
         p,
         rhs,
@@ -309,6 +309,8 @@ end
     dense_coordinates = -(H_damped \ get_coordinates(M, p, gradient, basis))
     dense_step = get_vector(M, p, dense_coordinates, basis)
     @test cg_converged
+    @test cg_info.termination_reason == :converged
+    @test cg_info.relative_residual <= cg_info.tolerance
     @test norm(M, p, cg_step - dense_step) < 2e-10
 end
 
@@ -342,6 +344,7 @@ end
         maxiter = 3,
         damping = damping,
         cg_tol = 1e-16,
+        adaptive_cg = false,
         cg_maxiter = 1,
         verbose = false,
     )
@@ -352,6 +355,18 @@ end
     @test info.cg_failed_count == count(!, info.cg_converged_history)
     @test info.total_cg_iterations == sum(info.cg_iterations_history)
     @test info.cg_failed_count > 0
+    @test !info.adaptive_cg
+    @test all(==(1e-16), info.cg_tolerance_history)
+    @test length(info.cg_tolerance_history) == length(info.cg_iterations_history)
+    @test length(info.cg_final_residual_history) == length(info.cg_iterations_history)
+    @test length(info.cg_relative_residual_history) == length(info.cg_iterations_history)
+    @test length(info.cg_termination_history) == length(info.cg_iterations_history)
+    @test all(
+        isapprox(
+            info.cg_final_residual_history[k] / info.cg_initial_residual_history[k],
+            info.cg_relative_residual_history[k],
+        ) for k in eachindex(info.cg_iterations_history)
+    )
     trial_count = length(info.damping_history)
     @test trial_count == length(info.predicted_reduction_history)
     @test trial_count == length(info.actual_reduction_history)
@@ -392,6 +407,7 @@ end
         tol = 1e-3,
         damping = 1e8,
         cg_tol = 1e-12,
+        adaptive_cg = false,
         verbose = false,
     )
     @test solver_info(stalled).termination_reason == :small_step
@@ -445,6 +461,15 @@ end
         @test rel_error(A, result) < 1e-8
         @test solver_info(result).materializes_jacobian == false
         @test solver_info(result).matrix_free_normal == (method == :gn_cg)
+        if method == :gn_cg
+            info = solver_info(result)
+            @test info.adaptive_cg
+            @test all(
+                tolerance -> info.cg_min_tol <= tolerance <= 1e-2,
+                info.cg_tolerance_history,
+            )
+            @test length(info.cg_tolerance_history) == length(info.cg_converged_history)
+        end
     end
 
     y = normalize([0.2, -0.5, 1.0])

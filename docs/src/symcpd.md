@@ -249,7 +249,8 @@ result = symcpd(
     3;
     solver=:gn_cg,
     damping=1e-6,
-    cg_tol=1e-8,
+    cg_tol=1e-2,
+    adaptive_cg=true,
     maxiter=100,
 )
 ```
@@ -280,11 +281,29 @@ ratios above `good_step_ratio` decrease it. `solver_info` records
 `predicted_reduction_history`, `actual_reduction_history`, `rho_history`,
 `damping_history`, `step_accepted_history`, and the accepted/rejected counts.
 
-GN-CG is an inexact Gauss--Newton method: an inner CG solve may provide a
-useful direction before reaching `cg_tol`. The returned `solver_info` records
-`cg_converged_history`, `cg_iterations_history`, and `cg_failed_count` so this
-is visible. `termination_reason=:small_step` denotes stagnation and does not
-set `converged=true`; outer convergence requires the gradient tolerance.
+GN-CG is an inexact Gauss--Newton method. By default, the requested inner
+relative residual is adapted to the current outer gradient:
+
+```math
+\xi_k=\operatorname{clamp}
+\left(c\|\operatorname{grad}f(p_k)\|^\theta,
+\xi_{\min},\xi_{\max}\right).
+```
+
+The keywords `cg_forcing_scale`, `cg_forcing_power`, `cg_min_tol`, and
+`cg_tol` set ``c``, ``\theta``, ``\xi_{\min}``, and ``\xi_{\max}``. Set
+`adaptive_cg=false` to use `cg_tol` as a fixed relative tolerance. This lets
+early iterations avoid oversolving while tightening the linear solve as the
+outer gradient decreases.
+
+An inner CG solve may still provide a useful direction before reaching its
+tolerance. The returned `solver_info` records `cg_converged_history`,
+`cg_iterations_history`, `cg_tolerance_history`,
+`cg_initial_residual_history`, `cg_final_residual_history`,
+`cg_relative_residual_history`, `cg_termination_history`, and
+`cg_failed_count`. `termination_reason=:small_step` denotes stagnation and
+does not set `converged=true`; outer convergence requires the gradient
+tolerance.
 
 ## Sign-equivalent representatives
 
@@ -303,6 +322,9 @@ equivalent representatives.
   [doi:10.1137/120868323](https://doi.org/10.1137/120868323).
 - Implicit normal products in GN-CG for CPD: Singh, Ma, Yang, and Solomonik
   (2021), [doi:10.1137/20M1344561](https://doi.org/10.1137/20M1344561).
+- Relative-residual forcing for inexact Newton solves: Dembo, Eisenstat, and
+  Steihaug (1982),
+  [doi:10.1137/0719025](https://doi.org/10.1137/0719025).
 - The intrinsic warped Segre--Veronese metric: Jacobsson, Swijsen, Van der
   Veken, and Vannieuwenhoven (2026),
   [doi:10.1137/25M1790099](https://doi.org/10.1137/25M1790099).
