@@ -123,6 +123,27 @@ end
     v .-= dot(v, y) .* y
     X = TensorKitchen.join_point(M, (([0.2], u), ([-0.15], v)))
 
+    # The explicit compressed-coordinate JVP is the derivative of the join
+    # embedding along the manifold retraction.
+    h = 1e-6
+    p_plus = retract(M, p, TensorKitchen._scale_solver_tangent(X, h))
+    p_minus = retract(M, p, TensorKitchen._scale_solver_tangent(X, -h))
+    embedded_plus = zeros(TensorKitchen.ambient_length(component))
+    embedded_minus = similar(embedded_plus)
+    for part in TensorKitchen.join_parts(M, p_plus)
+        embedded_plus .+= TensorKitchen._symcpd_embed_coordinates(component.manifold, part)
+    end
+    for part in TensorKitchen.join_parts(M, p_minus)
+        embedded_minus .+= TensorKitchen._symcpd_embed_coordinates(component.manifold, part)
+    end
+    jvp = differential_action(dense_model, p, X)
+    @test jvp ≈ (embedded_plus - embedded_minus) / (2h) atol = 2e-10 rtol = 2e-10
+
+    # JVP and VJP are adjoints in the induced Riemannian metric.
+    ambient_covector = collect(range(-0.4, 0.7; length = length(jvp)))
+    vjp = pullback(dense_model, p, ambient_covector)
+    @test dot(ambient_covector, jvp) ≈ inner(M, p, vjp, X) atol = 2e-13 rtol = 2e-13
+
     # Dense and compressed storage change only target evaluation.
     @test cost(dense_model, p) ≈ cost(compressed_model, p) atol = 2e-15
     @test norm(
@@ -141,6 +162,10 @@ end
     H_reference = dense_normal_matrix(dense_model, p; reference = true)
     @test H_operator ≈ H_reference atol = 3e-14 rtol = 3e-14
     @test H_operator ≈ transpose(H_operator) atol = 3e-14 rtol = 3e-14
+    X_coordinates = get_coordinates(M, p, X, ManifoldsBase.DefaultOrthonormalBasis())
+    NX_coordinates =
+        get_coordinates(M, p, Y_operator, ManifoldsBase.DefaultOrthonormalBasis())
+    @test H_operator * X_coordinates ≈ NX_coordinates atol = 3e-14 rtol = 3e-14
 
     # The intrinsic normal action is self-adjoint in the Riemannian metric.
     rng = MersenneTwister(912)
