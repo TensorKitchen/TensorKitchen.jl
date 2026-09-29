@@ -196,9 +196,10 @@ function _solve_symcpd_gn(
     )
 
     M = model.backend.product_manifold
-    requested_init = isnothing(p0) ? init : :explicit
-    resolved_init = isnothing(p0) ? _resolve_symcpd_init(model, init) : :explicit
-    p_initial = isnothing(p0) ? initial_point(model, resolved_init; verbose) : p0
+    requested_init = isnothing(p0) ? _symcpd_init_label(init) : :explicit
+    resolved_spec = isnothing(p0) ? _resolve_symcpd_init(model, init) : :explicit
+    resolved_init = isnothing(p0) ? _symcpd_init_label(resolved_spec) : :explicit
+    p_initial = isnothing(p0) ? initial_point(model, resolved_spec; verbose) : p0
     p = join_solver_point(M, deepcopy(p_initial))
     retraction_method = _solver_retraction_method(M, p)
     current_cost = cost(model, p)

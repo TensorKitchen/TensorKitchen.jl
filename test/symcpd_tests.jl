@@ -161,6 +161,90 @@ end
     @test duplicate_weights ≈ [1.0, 1.0] atol = 2e-14
 end
 
+@testset "SymCPD normalized CLS" begin
+    x = normalize([1.0, 0.2, -0.1])
+    y = normalize([-0.2, 0.5, 1.0])
+    d = 3
+    A = _symcpd_full_term(1.7, x, d) + _symcpd_full_term(-0.8, y, d)
+    target = DenseSymmetricTarget(A)
+    model = SymCPDModel(target, 2)
+    p0 = (
+        ([1.0], normalize(x + [0.05, -0.02, 0.01])),
+        ([-0.5], normalize(y + [0.01, 0.03, -0.02])),
+    )
+    joined_p0 = TensorKitchen.join_point(manifold(model), deepcopy(p0))
+    X0 = TensorKitchen._symcpd_factor_matrix(model, joined_p0)
+    refitted_p0, _ = TensorKitchen._symcpd_refit_point(model, X0; pinv_rtol = 1e-12)
+    initial_cost = cost(model, refitted_p0)
+
+    cls = symcpd(
+        target,
+        2;
+        p0 = deepcopy(p0),
+        solver = :cls,
+        maxiter = 10,
+        tol = 1e-10,
+        verbose = false,
+    )
+    @test solver(cls) == :cls
+    @test cost(cls) <= initial_cost
+    @test rel_error(cls) < 1e-3
+    @test solver_info(cls).normalized_columns
+    @test solver_info(cls).exact_weight_refit
+    @test length(solver_info(cls).cost_history) == iterations(cls) + 1
+
+    cls_method = SymmetricCLS(
+        damping = 1e-10,
+        pinv_rtol = 1e-12,
+        weight_pinv_rtol = 1e-12,
+        patience = 4,
+    )
+    @test cls_method isa AbstractALSSolver
+    @test TensorKitchen.solver_symbol(cls_method) == :cls
+    direct_cls = solve(
+        cls_method,
+        model;
+        p0 = deepcopy(p0),
+        maxiter = 10,
+        tol = 1e-10,
+        verbose = false,
+        return_stats = true,
+    )
+    @test solver(direct_cls) == :cls
+    @test cost(direct_cls) <= initial_cost
+    object_cls = symcpd(
+        target,
+        2;
+        p0 = deepcopy(p0),
+        solver = cls_method,
+        maxiter = 10,
+        tol = 1e-10,
+        verbose = false,
+    )
+    @test solver(object_cls) == :cls
+    @test cost(object_cls) ≈ cost(direct_cls) atol = 2e-14
+    @test TensorKitchen._solver_object(:cls, 1.0) isa SymmetricCLS
+    @test_throws ArgumentError SymmetricCLS(damping = -1.0)
+
+    configured_init =
+        NormalizedCLSInit(sweeps = 4, base_init = PointInit(joined_p0), tol = 1e-10)
+    initialized = symcpd(
+        target,
+        2;
+        init = configured_init,
+        solver = :gn_cg,
+        maxiter = 0,
+        verbose = false,
+    )
+    @test solver_info(initialized).resolved_init == :normalized_cls
+    @test cost(initialized) <= initial_cost
+
+    alias_initialized =
+        symcpd(target, 2; init = :cls, solver = :gn_cg, maxiter = 0, verbose = false)
+    @test solver_info(alias_initialized).resolved_init == :normalized_cls
+    @test isfinite(cost(alias_initialized))
+end
+
 @testset "SS-HOPM eigenpairs, rank-one approximation, and initialization" begin
     e1 = [1.0, 0.0, 0.0]
     e2 = [0.0, 1.0, 0.0]

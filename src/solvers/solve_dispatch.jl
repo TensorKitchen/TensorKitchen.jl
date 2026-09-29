@@ -3,7 +3,7 @@
 function _solver_object(solver, ::Real; kwargs...)
     throw(
         ArgumentError(
-            "Unsupported solver specification $(typeof(solver)). Use a solver symbol such as :als, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, or :btd_tsd, or pass an AbstractSolver object.",
+            "Unsupported solver specification $(typeof(solver)). Use a solver symbol such as :als, :cls, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, or :btd_tsd, or pass an AbstractSolver object.",
         ),
     )
 end
@@ -15,6 +15,12 @@ end
 _solver_object(solver::AbstractSolver, ::Real; kwargs...) = solver
 
 _solver_object(::Val{:als}, ::Real; kwargs...) = ALSSolver()
+_solver_object(::Val{:cls}, ::Real; kwargs...) = SymmetricCLS(
+    damping = get(kwargs, :cls_damping, 1.0e-10),
+    pinv_rtol = get(kwargs, :cls_pinv_rtol, nothing),
+    weight_pinv_rtol = get(kwargs, :cls_weight_pinv_rtol, nothing),
+    patience = get(kwargs, :cls_patience, 3),
+)
 _solver_object(::Val{:rgd}, stepsize::Real; kwargs...) =
     RGDSolver(stepsize; armijo_alpha_min = get(kwargs, :armijo_alpha_min, 1e-8))
 _solver_object(::Val{:rgd_fixed}, stepsize::Real; kwargs...) = RGDFixedSolver(stepsize)
@@ -64,8 +70,39 @@ end
 function _solver_object(::Val{S}, ::Real; kwargs...) where {S}
     throw(
         ArgumentError(
-            "Unknown solver=$S. Use :als, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, or :btd_tsd.",
+            "Unknown solver=$S. Use :als, :cls, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, or :btd_tsd.",
         ),
+    )
+end
+
+function _solve_with_solver(
+    solver_obj::SymmetricCLS,
+    model;
+    init,
+    p0 = nothing,
+    maxiter::Int,
+    tol::Real,
+    gradient_mode::Symbol = :riemannian,
+    normalization = NoNormalization(),
+    verbose::Bool,
+    kwargs...,
+)
+    gradient_mode == :riemannian || throw(
+        ArgumentError(
+            "SymmetricCLS does not use gradient_mode. Use gradient_mode=:riemannian.",
+        ),
+    )
+    return solve(
+        solver_obj,
+        model;
+        init,
+        p0,
+        maxiter,
+        tol,
+        normalization,
+        verbose,
+        return_stats = true,
+        kwargs...,
     )
 end
 

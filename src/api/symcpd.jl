@@ -87,6 +87,10 @@ preparation and permits operator-defined targets such as
 - `init=:sshopm` uses multistart shifted power iterations, removes nearly
   collinear candidates, and solves a small kernel least-squares problem for
   the initial weights.
+- `init=:cls` (or `:normalized_cls`) runs normalized conditional least
+  squares and then refits all weights by solving the exact linear subproblem
+  ``K\lambda=c``. Use [`NormalizedCLSInit`](@ref) to configure its sweep and
+  regularization parameters.
 
 # Solvers
 
@@ -96,6 +100,10 @@ preparation and permits operator-defined targets such as
 - `:gn_dense` builds the intrinsic `r*N` square normal matrix from operator
   columns and solves it directly. It is intended for validation and small
   problems.
+- `:cls` or [`SymmetricCLS`](@ref) runs normalized conditional least squares
+  as a standalone solver.
+  Every sweep uses tensor contractions instead of an unfolding, normalizes
+  the updated columns, and exactly refits the component weights.
 
 The product-of-Veronese formulation and GN block equations follow R. Khouja,
 H. Khalil, and B. Mourrain, "Riemannian Newton optimization methods for the
@@ -103,7 +111,8 @@ symmetric tensor approximation problem," *Linear Algebra and its Applications*
 637 (2022), 175--211, doi:10.1016/j.laa.2021.12.008. The operator-CG execution
 follows the matrix-free tensor GN pattern of Sorber, Van Barel, and De
 Lathauwer (2013), doi:10.1137/120868323, and Singh, Ma, Yang, and Solomonik
-(2021), doi:10.1137/20M1344561.
+(2021), doi:10.1137/20M1344561. The conditional least-squares update follows
+G. Favier, A. Y. Kibangou, and T. Bouilloc (2012), doi:10.1002/acs.1272.
 """
 function symcpd(
     A::AbstractArray{<:Real},
@@ -135,6 +144,10 @@ function symcpd(
     acceptance_ratio::Real = 1.0e-4,
     poor_step_ratio::Real = 0.25,
     good_step_ratio::Real = 0.75,
+    cls_damping::Real = 1.0e-10,
+    cls_pinv_rtol::Union{Nothing,Real} = nothing,
+    cls_weight_pinv_rtol::Union{Nothing,Real} = nothing,
+    cls_patience::Int = 3,
     kwargs...,
 )
     r >= 1 || throw(ArgumentError("symcpd requires r >= 1, got $r."))
@@ -178,6 +191,10 @@ function symcpd(
         acceptance_ratio,
         poor_step_ratio,
         good_step_ratio,
+        cls_damping,
+        cls_pinv_rtol,
+        cls_weight_pinv_rtol,
+        cls_patience,
         kwargs...,
     )
 end
@@ -207,13 +224,34 @@ function symcpd(
     acceptance_ratio::Real = 1.0e-4,
     poor_step_ratio::Real = 0.25,
     good_step_ratio::Real = 0.75,
+    cls_damping::Real = 1.0e-10,
+    cls_pinv_rtol::Union{Nothing,Real} = nothing,
+    cls_weight_pinv_rtol::Union{Nothing,Real} = nothing,
+    cls_patience::Int = 3,
     kwargs...,
 )
     r >= 1 || throw(ArgumentError("symcpd requires r >= 1, got $r."))
     n, d = _symmetric_target_size(target)
     component = SymmetricRankOne(n, d)
     model = JoinModel(component, r, target)
-    result = if solver in (:gn_cg, :gn_dense)
+    target_type = eltype(target)
+    default_pinv_rtol = sqrt(eps(target_type))
+    cls_pinv_rtol_eff = isnothing(cls_pinv_rtol) ? default_pinv_rtol : cls_pinv_rtol
+    cls_weight_pinv_rtol_eff =
+        isnothing(cls_weight_pinv_rtol) ? cls_pinv_rtol_eff : cls_weight_pinv_rtol
+    result = if solver == :cls || solver isa SymmetricCLS
+        cls_solver = if solver isa SymmetricCLS
+            solver
+        else
+            SymmetricCLS(
+                damping = cls_damping,
+                pinv_rtol = cls_pinv_rtol_eff,
+                weight_pinv_rtol = cls_weight_pinv_rtol_eff,
+                patience = cls_patience,
+            )
+        end
+        solve(cls_solver, model; init, p0, maxiter, tol, verbose, return_stats = true)
+    elseif solver in (:gn_cg, :gn_dense)
         cg_iterations =
             isnothing(cg_maxiter) ? max(20 * manifold_dimension(manifold(model)), 200) :
             Int(cg_maxiter)

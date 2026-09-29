@@ -202,14 +202,17 @@ function _resolve_symcpd_init(
     init::Symbol,
 ) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
     init == :auto && return model.backend.rank == 1 ? :sshopm : :random
+    init in (:cls, :normalized_cls) && return :normalized_cls
     init in (:random, :sshopm) && return init
     throw(
         ArgumentError(
             "The symmetric JoinModel supports init=:auto, init=:random, " *
-            "init=:sshopm, or an explicit p0, got $init.",
+            "init=:sshopm, init=:normalized_cls, or an explicit p0, got $init.",
         ),
     )
 end
+
+_symcpd_init_label(init::Symbol) = init
 
 function initial_point(
     model::JoinModel{T,B},
@@ -218,6 +221,7 @@ function initial_point(
 ) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
     resolved_init = _resolve_symcpd_init(model, init)
     resolved_init == :sshopm && return _sshopm_initial_point(model)
+    resolved_init == :normalized_cls && return _normalized_cls_initial_point(model)
     backend = model.backend
     parts = ntuple(_ -> begin
         _symcpd_random_point(backend.component.manifold, T)

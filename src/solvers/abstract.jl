@@ -124,9 +124,10 @@ abstract type AbstractFirstOrderSolver <: AbstractFirstOrderROSolver end
     AbstractALSSolver <: AbstractSolver
 
 Abstract supertype for alternating-least-squares–style solvers (e.g.
-`ALSSolver` for CP-ALS, `RALSSolver` for Randomized CP-ALS). These solvers
-operate on Euclidean factor matrices and alternate closed-form (or sampled)
-least-squares updates per mode.
+`ALSSolver` for CP-ALS, `RALSSolver` for Randomized CP-ALS, and
+[`SymmetricCLS`](@ref) for normalized symmetric conditional LS). These solvers
+alternate closed-form (or sampled) least-squares updates in their native factor
+representations.
 """
 abstract type AbstractALSSolver <: AbstractSolver end
 
