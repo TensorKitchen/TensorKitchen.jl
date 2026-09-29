@@ -105,14 +105,30 @@ preparation and permits operator-defined targets such as
   Every sweep uses tensor contractions instead of an unfolding, normalizes
   the updated columns, and exactly refits the component weights.
 
+Set `variable_projection=true` with `solver=:rcg` or `:lbfgs` to optimize only
+the factor directions on a product of spheres. At every objective and gradient
+evaluation, the weights are eliminated analytically as
+
+```math
+\lambda^\star(X)=K(X)^\dagger c(X),\qquad
+K_{rs}(X)=(x_r^\top x_s)^D.
+```
+
+This removes the `r` radial variables and their scale conditioning from the
+nonlinear optimization. `weight_pinv_rtol` selects the numerical range of the
+small positive-semidefinite weight system. Reduced Gauss--Newton is not used:
+its projected Jacobian requires a separate Schur-complement implementation.
+
 The product-of-Veronese formulation and GN block equations follow R. Khouja,
 H. Khalil, and B. Mourrain, "Riemannian Newton optimization methods for the
 symmetric tensor approximation problem," *Linear Algebra and its Applications*
 637 (2022), 175--211, doi:10.1016/j.laa.2021.12.008. The operator-CG execution
 follows the matrix-free tensor GN pattern of Sorber, Van Barel, and De
 Lathauwer (2013), doi:10.1137/120868323, and Singh, Ma, Yang, and Solomonik
-(2021), doi:10.1137/20M1344561. The conditional least-squares update follows
-G. Favier, A. Y. Kibangou, and T. Bouilloc (2012), doi:10.1002/acs.1272.
+(2021), doi:10.1137/20M1344561. Weight elimination follows G. H. Golub and
+V. Pereyra (1973), doi:10.1137/0710036. The conditional least-squares update
+follows G. Favier, A. Y. Kibangou, and T. Bouilloc (2012),
+doi:10.1002/acs.1272.
 """
 function symcpd(
     A::AbstractArray{<:Real},
@@ -144,6 +160,8 @@ function symcpd(
     acceptance_ratio::Real = 1.0e-4,
     poor_step_ratio::Real = 0.25,
     good_step_ratio::Real = 0.75,
+    variable_projection::Bool = false,
+    weight_pinv_rtol::Union{Nothing,Real} = nothing,
     cls_damping::Real = 1.0e-10,
     cls_pinv_rtol::Union{Nothing,Real} = nothing,
     cls_weight_pinv_rtol::Union{Nothing,Real} = nothing,
@@ -191,6 +209,8 @@ function symcpd(
         acceptance_ratio,
         poor_step_ratio,
         good_step_ratio,
+        variable_projection,
+        weight_pinv_rtol,
         cls_damping,
         cls_pinv_rtol,
         cls_weight_pinv_rtol,
@@ -224,6 +244,8 @@ function symcpd(
     acceptance_ratio::Real = 1.0e-4,
     poor_step_ratio::Real = 0.25,
     good_step_ratio::Real = 0.75,
+    variable_projection::Bool = false,
+    weight_pinv_rtol::Union{Nothing,Real} = nothing,
     cls_damping::Real = 1.0e-10,
     cls_pinv_rtol::Union{Nothing,Real} = nothing,
     cls_weight_pinv_rtol::Union{Nothing,Real} = nothing,
@@ -236,10 +258,18 @@ function symcpd(
     model = JoinModel(component, r, target)
     target_type = eltype(target)
     default_pinv_rtol = sqrt(eps(target_type))
+    weight_pinv_rtol_eff =
+        isnothing(weight_pinv_rtol) ? default_pinv_rtol : weight_pinv_rtol
     cls_pinv_rtol_eff = isnothing(cls_pinv_rtol) ? default_pinv_rtol : cls_pinv_rtol
     cls_weight_pinv_rtol_eff =
         isnothing(cls_weight_pinv_rtol) ? cls_pinv_rtol_eff : cls_weight_pinv_rtol
     result = if solver == :cls || solver isa SymmetricCLS
+        variable_projection && throw(
+            ArgumentError(
+                "solver=:cls and variable_projection=true are distinct execution paths; " *
+                "use solver=:rcg or :lbfgs for variable projection.",
+            ),
+        )
         cls_solver = if solver isa SymmetricCLS
             solver
         else
@@ -251,6 +281,20 @@ function symcpd(
             )
         end
         solve(cls_solver, model; init, p0, maxiter, tol, verbose, return_stats = true)
+    elseif variable_projection
+        _solve_symcpd_varpro(
+            model;
+            init,
+            p0,
+            solver,
+            maxiter,
+            stepsize,
+            tol,
+            verbose,
+            vector_transport_method,
+            pinv_rtol = weight_pinv_rtol_eff,
+            kwargs...,
+        )
     elseif solver in (:gn_cg, :gn_dense)
         cg_iterations =
             isnothing(cg_maxiter) ? max(20 * manifold_dimension(manifold(model)), 200) :

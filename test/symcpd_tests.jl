@@ -245,6 +245,101 @@ end
     @test isfinite(cost(alias_initialized))
 end
 
+@testset "SymCPD variable projection" begin
+    x = normalize([1.0, 0.2, -0.1])
+    y = normalize([-0.2, 0.5, 1.0])
+    d = 3
+    A = _symcpd_full_term(1.7, x, d) + _symcpd_full_term(-0.8, y, d)
+    target = DenseSymmetricTarget(A)
+    model = SymCPDModel(target, 2)
+    p0 = (
+        ([1.0], normalize(x + [0.05, -0.02, 0.01])),
+        ([-0.5], normalize(y + [0.01, 0.03, -0.02])),
+    )
+    joined_p0 = TensorKitchen.join_point(manifold(model), deepcopy(p0))
+    X0 = TensorKitchen._symcpd_factor_matrix(model, joined_p0)
+    refitted_p0, _ = TensorKitchen._symcpd_refit_point(model, X0; pinv_rtol = 1e-12)
+    initial_cost = cost(model, refitted_p0)
+
+    reduced = SymCPDVariableProjectionModel(model; pinv_rtol = 1e-12)
+    reduced_point = TensorKitchen._symcpd_varpro_point(reduced, joined_p0)
+    reduced_manifold = manifold(reduced)
+    directions = ntuple(2) do r
+        xr = reduced_point.x[r]
+        ur = [0.13 * r, -0.09, 0.07]
+        ur .-= dot(xr, ur) .* xr
+        ur
+    end
+    tangent = TensorKitchen.join_tangent_like(reduced_manifold, reduced_point, directions)
+    reduced_gradient = TensorKitchen.rgrad(reduced, reduced_point)
+    h = 1e-6
+    reduced_plus = retract(
+        reduced_manifold,
+        reduced_point,
+        TensorKitchen._scale_solver_tangent(tangent, h),
+    )
+    reduced_minus = retract(
+        reduced_manifold,
+        reduced_point,
+        TensorKitchen._scale_solver_tangent(tangent, -h),
+    )
+    finite_difference = (cost(reduced, reduced_plus) - cost(reduced, reduced_minus)) / (2h)
+    @test finite_difference ≈
+          inner(reduced_manifold, reduced_point, reduced_gradient, tangent) atol = 2e-8 rtol =
+        2e-7
+
+    for method in (:rcg, :lbfgs)
+        varpro = symcpd(
+            target,
+            2;
+            p0 = deepcopy(p0),
+            solver = method,
+            variable_projection = true,
+            weight_pinv_rtol = 1e-12,
+            maxiter = 40,
+            tol = 1e-10,
+            verbose = false,
+        )
+        @test solver(varpro) == Symbol("varpro_", method)
+        @test cost(varpro) < initial_cost
+        @test solver_info(varpro).variable_projection
+        @test solver_info(varpro).eliminated_weights == 2
+        @test grad_norm(varpro) == solver_info(varpro).reduced_grad_norm
+        K = (transpose(factors(varpro)) * factors(varpro)) .^ d
+        c = [evaluate(target, view(factors(varpro), :, r)) for r = 1:2]
+        @test K * weights(varpro) ≈ c atol = 2e-10 rtol = 2e-10
+    end
+
+    @test_throws ArgumentError symcpd(
+        target,
+        2;
+        solver = :gn_cg,
+        variable_projection = true,
+        maxiter = 0,
+        verbose = false,
+    )
+
+    # Variable projection remains well defined when the optimal fixed-rank
+    # representation contains an exactly zero-weight component. The lifted
+    # Veronese metric is singular there, so the public gradient norm stays on
+    # the reduced product of spheres and the diagnostic records the boundary.
+    rank_one_target = DenseSymmetricTarget(_symcpd_full_term(2.0, x, 3))
+    orthogonal = normalize(cross(x, [0.0, 0.0, 1.0]))
+    boundary = symcpd(
+        rank_one_target,
+        2;
+        p0 = (([1.0], x), ([1.0], orthogonal)),
+        solver = :lbfgs,
+        variable_projection = true,
+        maxiter = 0,
+        verbose = false,
+    )
+    @test minimum(abs, weights(boundary)) < 1e-14
+    @test isfinite(grad_norm(boundary))
+    @test !solver_info(boundary).valid_metric_point
+    @test isinf(solver_info(boundary).full_grad_norm)
+end
+
 @testset "SS-HOPM eigenpairs, rank-one approximation, and initialization" begin
     e1 = [1.0, 0.0, 0.0]
     e2 = [0.0, 1.0, 0.0]
