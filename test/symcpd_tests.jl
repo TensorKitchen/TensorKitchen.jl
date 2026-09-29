@@ -126,6 +126,41 @@ end
     @test isfinite(cost(first_order))
 end
 
+@testset "SymCPD exact weight refit" begin
+    x = normalize([1.0, 0.2, -0.1])
+    y = normalize([-0.2, 0.5, 1.0])
+    X = hcat(x, y)
+
+    for d in (3, 4)
+        expected = [1.7, -0.8]
+        A = _symcpd_full_term(expected[1], x, d) + _symcpd_full_term(expected[2], y, d)
+        dense = DenseSymmetricTarget(A)
+        compressed = CompressedSymmetricTarget(compress_symmetric_tensor(A), 3, d)
+        functional = FunctionalSymmetricTarget(
+            3,
+            d,
+            target_norm2(dense);
+            evaluate = z -> evaluate(dense, z),
+            contract = z -> contract(dense, z),
+        )
+
+        for target in (dense, compressed, functional)
+            fitted = refit_symcpd_weights(target, X)
+            @test fitted ≈ expected atol = 5e-13 rtol = 5e-13
+            K = (transpose(X) * X) .^ d
+            c = [evaluate(target, view(X, :, r)) for r in axes(X, 2)]
+            @test K * fitted ≈ c atol = 5e-13 rtol = 5e-13
+        end
+        @test refit_symcpd_weights(A, X) ≈ expected atol = 5e-13 rtol = 5e-13
+    end
+
+    # Collinear factors make K singular. The truncated solve returns the
+    # minimum-norm split instead of failing or injecting arbitrary signs.
+    rank_one_target = DenseSymmetricTarget(_symcpd_full_term(2.0, x, 3))
+    duplicate_weights = refit_symcpd_weights(rank_one_target, hcat(x, x))
+    @test duplicate_weights ≈ [1.0, 1.0] atol = 2e-14
+end
+
 @testset "SS-HOPM eigenpairs, rank-one approximation, and initialization" begin
     e1 = [1.0, 0.0, 0.0]
     e2 = [0.0, 1.0, 0.0]
