@@ -149,6 +149,40 @@ struct _ScalarTypeRetraction{R<:ManifoldsBase.AbstractRetractionMethod} <:
     method::R
 end
 
+function ManifoldsBase.retract_fused(
+    M::ManifoldsBase.AbstractManifold,
+    p,
+    X,
+    t::Number,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    T = _scalar_eltype(p)
+    return ManifoldsBase.retract_fused(M, p, X, T(t), method.method; kwargs...)
+end
+
+function ManifoldsBase.retract_fused(
+    M::ProductManifold,
+    p,
+    X,
+    t::Number,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    T = _scalar_eltype(p)
+    return ManifoldsBase.retract_fused(M, p, X, T(t), method.method; kwargs...)
+end
+
+function ManifoldsBase.retract(
+    M::ProductManifold,
+    p,
+    X,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    return ManifoldsBase.retract(M, p, X, method.method; kwargs...)
+end
+
 function ManifoldsBase.retract!(
     M::ManifoldsBase.AbstractManifold,
     q,
@@ -160,8 +194,32 @@ function ManifoldsBase.retract!(
     return ManifoldsBase.retract!(M, q, p, X, method.method; kwargs...)
 end
 
+function ManifoldsBase.retract!(
+    M::ProductManifold,
+    q,
+    p,
+    X,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    return ManifoldsBase.retract!(M, q, p, X, method.method; kwargs...)
+end
+
 function ManifoldsBase.retract_fused!(
     M::ManifoldsBase.AbstractManifold,
+    q,
+    p,
+    X,
+    t::Number,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    T = _scalar_eltype(p)
+    return ManifoldsBase.retract_fused!(M, q, p, X, T(t), method.method; kwargs...)
+end
+
+function ManifoldsBase.retract_fused!(
+    M::ProductManifold,
     q,
     p,
     X,
@@ -194,7 +252,9 @@ function _solver_retraction_method_unwrapped(M::ProductManifold, p)
     )
     methods =
         ntuple(i -> _default_component_retraction_method(M.manifolds[i], pparts[i]), n)
-    return ManifoldsBase.ProductRetraction(methods)
+    method = ManifoldsBase.ProductRetraction(methods)
+    return any(m -> m isa _ScalarTypeRetraction, methods) ? _ScalarTypeRetraction(method) :
+           method
 end
 
 _solver_retraction_method_unwrapped(M, p) = _default_component_retraction_method(M, p)
