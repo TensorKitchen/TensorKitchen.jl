@@ -124,30 +124,14 @@ function _tk_get_solver_result(state)
 end
 
 
-# Match gradients/tangents to the point container Manopt is currently using.
-@inline _align_layout_like_point(p, x) =
-    hasproperty(p, :x) ?
-    (hasproperty(x, :x) ? x : (x isa Tuple ? ArrayPartition(x...) : x)) :
-    (hasproperty(x, :x) ? Tuple(getproperty(x, :x)) : x)
-
-
-# Recursively convert tuple-like product points to ArrayPartition layout.
-function _to_array_partition(x)
-    if x isa ArrayPartition
-        return ArrayPartition(map(_to_array_partition, x.x)...)
-    elseif hasproperty(x, :x)
-        return ArrayPartition(map(_to_array_partition, getproperty(x, :x))...)
-    elseif x isa Tuple
-        return ArrayPartition(map(_to_array_partition, x)...)
-    end
-    return x
-end
+# Match only the outer gradient/tangent container to Manopt's point layout.
+@inline _align_layout_like_point(p, x) = outer_container_like(p, x)
 
 
 # Adapt an initial point to the layout expected by the solver manifold.
 function _solver_point(M, p0)
     M2 = _unwrap_solver_manifold(M)
-    return M2 isa ProductManifold ? _to_array_partition(p0) : p0
+    return join_solver_point(M2, p0)
 end
 
 
@@ -165,6 +149,40 @@ struct _ScalarTypeRetraction{R<:ManifoldsBase.AbstractRetractionMethod} <:
     method::R
 end
 
+function ManifoldsBase.retract_fused(
+    M::ManifoldsBase.AbstractManifold,
+    p,
+    X,
+    t::Number,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    T = _scalar_eltype(p)
+    return ManifoldsBase.retract_fused(M, p, X, T(t), method.method; kwargs...)
+end
+
+function ManifoldsBase.retract_fused(
+    M::ProductManifold,
+    p,
+    X,
+    t::Number,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    T = _scalar_eltype(p)
+    return ManifoldsBase.retract_fused(M, p, X, T(t), method.method; kwargs...)
+end
+
+function ManifoldsBase.retract(
+    M::ProductManifold,
+    p,
+    X,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    return ManifoldsBase.retract(M, p, X, method.method; kwargs...)
+end
+
 function ManifoldsBase.retract!(
     M::ManifoldsBase.AbstractManifold,
     q,
@@ -176,8 +194,32 @@ function ManifoldsBase.retract!(
     return ManifoldsBase.retract!(M, q, p, X, method.method; kwargs...)
 end
 
+function ManifoldsBase.retract!(
+    M::ProductManifold,
+    q,
+    p,
+    X,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    return ManifoldsBase.retract!(M, q, p, X, method.method; kwargs...)
+end
+
 function ManifoldsBase.retract_fused!(
     M::ManifoldsBase.AbstractManifold,
+    q,
+    p,
+    X,
+    t::Number,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    T = _scalar_eltype(p)
+    return ManifoldsBase.retract_fused!(M, q, p, X, T(t), method.method; kwargs...)
+end
+
+function ManifoldsBase.retract_fused!(
+    M::ProductManifold,
     q,
     p,
     X,
@@ -201,8 +243,7 @@ function _solver_retraction_method(M, p)
 end
 
 function _solver_retraction_method_unwrapped(M::ProductManifold, p)
-    pparts0 = point_parts(p)
-    pparts = pparts0 isa Tuple ? pparts0 : Tuple(pparts0)
+    pparts = join_parts(M, p)
     n = length(M.manifolds)
     length(pparts) == n || throw(
         ArgumentError(
@@ -211,7 +252,9 @@ function _solver_retraction_method_unwrapped(M::ProductManifold, p)
     )
     methods =
         ntuple(i -> _default_component_retraction_method(M.manifolds[i], pparts[i]), n)
-    return ManifoldsBase.ProductRetraction(methods)
+    method = ManifoldsBase.ProductRetraction(methods)
+    return any(m -> m isa _ScalarTypeRetraction, methods) ? _ScalarTypeRetraction(method) :
+           method
 end
 
 _solver_retraction_method_unwrapped(M, p) = _default_component_retraction_method(M, p)
@@ -389,7 +432,7 @@ end
 @inline _scale_solver_tangent(x::Number, scale::Real) = x * scale
 _scale_solver_tangent(x::AbstractArray, scale::Real) = x .* scale
 _scale_solver_tangent(x::ArrayPartition, scale::Real) =
-    ArrayPartition(map(part -> _scale_solver_tangent(part, scale), x.x)...)
+    _partition_parts(map(part -> _scale_solver_tangent(part, scale), x.x))
 _scale_solver_tangent(x::Tuple, scale::Real) =
     map(part -> _scale_solver_tangent(part, scale), x)
 function _scale_solver_tangent(x, scale::Real)

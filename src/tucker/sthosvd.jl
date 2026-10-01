@@ -154,7 +154,6 @@ td = sthosvd(A, (5, 4, 3))
 rel_err = relative_error(A, td)
 ```
 """
-
 function sthosvd(
     A::AbstractArray{T,N},
     ranks::NTuple{N,Int};

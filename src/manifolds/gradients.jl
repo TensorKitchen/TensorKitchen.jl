@@ -90,20 +90,19 @@ egrad_to_rgrad(
 function _egrad_to_rgrad_product(M::ProductManifold, p, eparts_in)
     factors = M.manifolds
     n = length(factors)
-    eparts = eparts_in isa Tuple ? eparts_in : Tuple(eparts_in)
+    eparts = join_parts(M, eparts_in)
     length(eparts) == n ||
         throw(DimensionMismatch("Product egrad must have $n parts, got $(length(eparts))"))
-    pparts = _grad_parts(p)
-    pparts = pparts isa Tuple ? pparts : (pparts...,)
+    pparts = join_parts(M, p)
     length(pparts) == n ||
         throw(DimensionMismatch("Product point must have $n parts, got $(length(pparts))"))
     result = ntuple(i -> egrad_to_rgrad(factors[i], pparts[i], eparts[i]), n)
-    return hasproperty(p, :x) ? ArrayPartition(result...) : (result...,)
+    return join_tangent_like(M, p, result)
 end
 
 egrad_to_rgrad(M::ProductManifold, p, egrad::Tuple) = _egrad_to_rgrad_product(M, p, egrad)
 egrad_to_rgrad(M::ProductManifold, p, egrad::ArrayPartition) =
-    _egrad_to_rgrad_product(M, p, egrad.x)
+    _egrad_to_rgrad_product(M, p, egrad)
 
 egrad_to_rgrad(M, p, egrad) = _project_or_error(M, p, egrad)
 

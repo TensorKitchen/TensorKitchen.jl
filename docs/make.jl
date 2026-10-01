@@ -7,6 +7,7 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "CPD" => "cpd.md",
+        "Symmetric CPD" => "symcpd.md",
         "Tucker" => "tucker.md",
         "BTD" => "btd.md",
         "Join" => "join.md",

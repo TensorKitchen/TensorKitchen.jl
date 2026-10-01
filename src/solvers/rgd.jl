@@ -65,7 +65,7 @@ function solve_rgd(
     armijo_sufficient_decrease = use_squaring_armijo ? T(1e-4) : T(1e-3)
     armijo_stop_decreasing =
         _armijo_max_decreases(initial_stepsize_eff, armijo_contraction, armijo_alpha_min_T)
-    armijo_max_step = use_strict_sqeuclidean ? initial_stepsize_eff : Inf
+    armijo_max_step = use_strict_sqeuclidean ? initial_stepsize_eff : T(Inf)
     armijo_stop_increasing = use_strict_sqeuclidean ? 0 : 100
     armijo_additional_decrease =
         use_strict_sqeuclidean ? ((M, q) -> _all_finite(q)) : ((M, q) -> true)

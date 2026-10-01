@@ -2,15 +2,15 @@
 
 _is_manifold_like(::AbstractManifold) = true
 _is_manifold_like(_) = false
-_is_join_component_like(::JoinComponent) = true
+_is_join_component_like(::AbstractJoinComponent) = true
 _is_join_component_like(x) = _is_manifold_like(x)
 
-_wrap_join_component(component::JoinComponent) = component
+_wrap_join_component(component::AbstractJoinComponent) = component
 _wrap_join_component(manifold::AbstractManifold) = JoinComponent(manifold)
 
-_component_embedding(component::JoinComponent) = component_embedding(component)
+_component_embedding(component::AbstractJoinComponent) = component_embedding(component)
 _component_embedding(::AbstractManifold) = DefaultJoinEmbedding()
-_component_manifold(component::JoinComponent) = component_manifold(component)
+_component_manifold(component::AbstractJoinComponent) = component_manifold(component)
 _component_manifold(manifold::AbstractManifold) = manifold
 _backend_components(backend::JoinBackend) = backend.components
 _backend_components(backend::BTDBackend) = backend.components
@@ -40,7 +40,7 @@ _as_join_manifold_tuple(M::ProductManifold) = Tuple(M.manifolds)
 function _as_join_component_tuple(components::Tuple)
     all(_is_join_component_like, components) || throw(
         ArgumentError(
-            "All join components must be AbstractManifold or JoinComponent. Got types: $(map(typeof, components)).",
+            "All join components must be AbstractManifold or AbstractJoinComponent. Got types: $(map(typeof, components)).",
         ),
     )
     return ntuple(k -> _wrap_join_component(components[k]), length(components))
@@ -49,7 +49,7 @@ end
 function _as_join_component_tuple(components::AbstractVector)
     all(_is_join_component_like, components) || throw(
         ArgumentError(
-            "All join components must be AbstractManifold or JoinComponent. Got types: $(map(typeof, components)).",
+            "All join components must be AbstractManifold or AbstractJoinComponent. Got types: $(map(typeof, components)).",
         ),
     )
     return Tuple(_wrap_join_component(c) for c in components)
@@ -122,13 +122,20 @@ function _component_egrad(::DefaultJoinEmbedding, M::Manifolds.Segre, p, residua
     return pack_tangent_rank1_segre(grad_λ, grad_U)
 end
 
-_component_egrad(component::JoinComponent, p, residual) = _component_egrad(
+_component_egrad(component::AbstractJoinComponent, p, residual) = _component_egrad(
     _component_embedding(component),
     _component_manifold(component),
     p,
     residual,
 )
 _component_egrad(M, p, residual) = _component_egrad(DefaultJoinEmbedding(), M, p, residual)
+
+# The metric adjoint is distinct from a coordinate Euclidean gradient.
+# Components can specialize it without copying the shared ambient residual.
+_component_rgrad(component, p, a) =
+    _component_rgrad(_component_embedding(component), _component_manifold(component), p, a)
+_component_rgrad(embedding, M, p, a) =
+    egrad_to_rgrad(M, p, _component_egrad(embedding, M, p, a))
 
 _manifold_egrad(M, p, residual) = _component_egrad(M, p, residual)
 
@@ -339,7 +346,7 @@ function _sum_backend_instance(
         parts.init_point,
         parts.work_rec,
         parts.work_residual,
-        _JoinResidualWORO(_join_vector_workspace_like(parts.target, parts.target_len)),
+        _JoinResidualCache(_join_vector_workspace_like(parts.target, parts.target_len)),
         parts.component_bufs,
     )
 end
@@ -417,7 +424,7 @@ function JoinModel(
 end
 
 function JoinModel(
-    base::JoinComponent,
+    base::AbstractJoinComponent,
     r::Int,
     target::AbstractArray{T,N};
     init_point = nothing,
@@ -434,7 +441,7 @@ function JoinModel(
 end
 
 function JoinModel(
-    base::JoinComponent,
+    base::AbstractJoinComponent,
     target::AbstractArray{T,N};
     init_point = nothing,
 ) where {T<:AbstractFloat,N}
@@ -458,7 +465,7 @@ function initial_point(
     end
     parts =
         ntuple(k -> _component_init(backend.components[k], backend.target, init), backend.r)
-    return ArrayPartition(parts...)
+    return join_point(M, parts)
 end
 
 function initial_point(
@@ -484,25 +491,35 @@ function initial_point(
     return canonical_to_joinpoint(p_canonical, backend.target_shape, backend.r)
 end
 
-# Gradient path: always recomputes the ambient reconstruction and marks the
-# WORO cache fresh so that the immediately following cost evaluation can reuse it.
+# Retain the gradient-to-cost reuse, but validate the full point value. Manopt
+# may mutate one point object between evaluations, so identity is insufficient.
 function _join_residual_grad!(backend::JoinBackend, p)
-    _join_reconstruct!(backend.work_rec, backend, p)
-    backend.work_residual .= backend.work_rec .- backend.target_flat
-    copyto!(backend.woro.residual, backend.work_residual)
-    backend.woro.fresh = true
-    return backend.work_residual
+    residual = _join_residual!(backend, p)
+    cache = backend.residual_cache
+    copyto!(cache.residual, residual)
+    cache.point = deepcopy(p)
+    cache.fresh = true
+    return residual
+end
+
+_join_cache_point_equal(a, b) = isequal(a, b)
+function _join_cache_point_equal(a::ArrayPartition, b::ArrayPartition)
+    length(a.x) == length(b.x) || return false
+    return all(_join_cache_point_equal(a.x[k], b.x[k]) for k in eachindex(a.x))
+end
+function _join_cache_point_equal(a::Tuple, b::Tuple)
+    length(a) == length(b) || return false
+    return all(_join_cache_point_equal(a[k], b[k]) for k in eachindex(a))
 end
 
 function _join_residual_cost!(backend::JoinBackend, p)
-    if backend.woro.fresh
-        # Cost often follows gradient at the same iterate, so reuse the fresh residual once.
-        backend.woro.fresh = false
-        return backend.woro.residual
+    cache = backend.residual_cache
+    if cache.fresh && _join_cache_point_equal(cache.point, p)
+        cache.fresh = false
+        return cache.residual
     end
-    _join_reconstruct!(backend.work_rec, backend, p)
-    backend.work_residual .= backend.work_rec .- backend.target_flat
-    return backend.work_residual
+    cache.fresh = false
+    return _join_residual!(backend, p)
 end
 
 function cost(model::JoinModel{<:AbstractFloat,<:JoinBackend}, p)
@@ -513,23 +530,20 @@ end
 function egrad(model::JoinModel{<:AbstractFloat,<:JoinBackend}, p)
     backend = model.backend
     residual = _join_residual_grad!(backend, p)
-    parts = point_parts(p)
+    parts = join_parts(backend.M_product, p)
     vals =
         ntuple(k -> _component_egrad(backend.components[k], parts[k], residual), backend.r)
-    return wrap_like_point(p, vals)
+    return join_tangent_like(backend.M_product, p, vals)
 end
 
-function _join_basis_project(components::Tuple, p, residual)
-    parts = point_parts(p)
+function _join_basis_project(M::ProductManifold, components::Tuple, p, residual)
+    parts = join_parts(M, p)
     _check_parts_len(parts, length(components), "_join_basis_project")
     vals = ntuple(k -> begin
         ck = components[k]
-        Mk = _component_manifold(ck)
-        pk = parts[k]
-        eg = _component_egrad(ck, pk, residual)
-        egrad_to_rgrad(Mk, pk, eg)
+        _component_rgrad(ck, parts[k], residual)
     end, length(components))
-    return wrap_like_point(p, vals)
+    return join_tangent_like(M, p, vals)
 end
 
 supports_rgrad(::JoinModel{<:AbstractFloat,<:Union{JoinBackend,BTDBackend}}) = true
@@ -546,7 +560,7 @@ model_exact_join_basis_function(model::JoinModel{<:AbstractFloat,<:JoinBackend})
     (M, p) -> begin
         backend = model.backend
         residual = _join_residual!(backend, p)
-        _join_basis_project(backend.components, p, residual)
+        _join_basis_project(backend.M_product, backend.components, p, residual)
     end
 
 function extract_components(
@@ -555,7 +569,7 @@ function extract_components(
 )
     backend = model.backend
     components = _backend_components(backend)
-    parts = point_parts(p)
+    parts = join_parts(backend.M_product, p)
     _check_parts_len(parts, backend.r, "extract_components")
     T = eltype(backend.target)
     N = length(backend.target_shape)
@@ -579,17 +593,14 @@ end
 
 function rgrad(model::JoinModel{<:AbstractFloat,<:JoinBackend}, p)
     backend = model.backend
-    parts = point_parts(p)
+    parts = join_parts(backend.M_product, p)
     _check_parts_len(parts, backend.r, "rgrad")
     residual = _join_residual_grad!(backend, p)
     vals = ntuple(k -> begin
         ck = backend.components[k]
-        Mk = _component_manifold(ck)
-        pk = parts[k]
-        eg = _component_egrad(ck, pk, residual)
-        egrad_to_rgrad(Mk, pk, eg)
+        _component_rgrad(ck, parts[k], residual)
     end, backend.r)
-    return wrap_like_point(p, vals)
+    return join_tangent_like(backend.M_product, p, vals)
 end
 
 """
@@ -651,7 +662,11 @@ function _component_ambient_embedding!(
     )
 end
 
-function _component_ambient_embedding!(out::AbstractVector, component::JoinComponent, p)
+function _component_ambient_embedding!(
+    out::AbstractVector,
+    component::AbstractJoinComponent,
+    p,
+)
     return _component_ambient_embedding!(
         out,
         _component_embedding(component),
@@ -709,7 +724,7 @@ end
 
 function _component_ambient_pushforward!(
     out::AbstractVector,
-    component::JoinComponent,
+    component::AbstractJoinComponent,
     p,
     X,
 )
@@ -776,7 +791,7 @@ function _join_reconstruct!(out::AbstractArray, backend::JoinBackend, p)
     r = backend.r
     bufs = backend.component_bufs
 
-    parts = point_parts(p)
+    parts = join_parts(backend.M_product, p)
     _check_parts_len(parts, r, "_join_reconstruct")
 
     fill!(out, zero(eltype(out)))
@@ -794,7 +809,7 @@ end
 
 function _join_reconstruct!(out::AbstractArray, backend::BTDBackend, p)
     components = _backend_components(backend)
-    parts = point_parts(p)
+    parts = join_parts(backend.M_product, p)
     _check_parts_len(parts, backend.r, "_join_reconstruct")
     length(out) == length(backend.target) || throw(
         DimensionMismatch(
@@ -840,8 +855,8 @@ function differential_action!(
     X,
 ) where {T<:AbstractFloat}
     backend = model.backend
-    parts = point_parts(p)
-    xparts = point_parts(X)
+    parts = join_parts(backend.M_product, p)
+    xparts = join_parts(backend.M_product, X)
     _check_parts_len(parts, backend.r, "differential_action!")
     _check_parts_len(xparts, backend.r, "differential_action!")
     length(out) == length(backend.target_flat) || throw(
@@ -870,8 +885,8 @@ function differential_action!(
 ) where {T<:AbstractFloat}
     backend = model.backend
     _require_materialized_btd_ambient_target(backend, "BTD differential action")
-    parts = point_parts(p)
-    xparts = point_parts(X)
+    parts = join_parts(backend.M_product, p)
+    xparts = join_parts(backend.M_product, X)
     _check_parts_len(parts, backend.r, "differential_action!")
     _check_parts_len(xparts, backend.r, "differential_action!")
     length(out) == length(backend.target) || throw(
@@ -910,5 +925,5 @@ function adjoint_action(
             "adjoint_action expected ambient vector of length $(length(backend.target)), got $(length(a)).",
         ),
     )
-    return _join_basis_project(_backend_components(backend), p, a)
+    return _join_basis_project(backend.M_product, _backend_components(backend), p, a)
 end

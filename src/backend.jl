@@ -1,4 +1,5 @@
 include("solvers/abstract.jl")
+include("solvers/symmetric_cls.jl")
 include("solvers/nncp_updates.jl")
 include("solvers/cp_als.jl")
 include("solvers/btd_als.jl")
