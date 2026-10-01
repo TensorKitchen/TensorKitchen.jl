@@ -350,6 +350,10 @@ SSHOPM
 TensorEigenpairResult
 tensor_eigenpair
 best_symmetric_rank1
+NormalizedCLSInit
+SymmetricCLS
+refit_symcpd_weights
+SymCPDVariableProjectionModel
 eigenvalue
 eigenvector
 residual_norm
