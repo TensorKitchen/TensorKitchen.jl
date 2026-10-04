@@ -524,7 +524,7 @@ end
 
 function cost(model::JoinModel{<:AbstractFloat,<:JoinBackend}, p)
     residual = _join_residual_cost!(model.backend, p)
-    return 0.5 * sum(abs2, residual)
+    return sum(abs2, residual) / 2
 end
 
 function egrad(model::JoinModel{<:AbstractFloat,<:JoinBackend}, p)

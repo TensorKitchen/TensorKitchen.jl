@@ -651,14 +651,14 @@ function _solver_stats(
     normalized_objective::Bool = false,
 )
     T = typeof(tol_T)
-    final_cost = model_cost(M, p_opt)
+    final_cost = T(model_cost(M, p_opt))
     rel_error = _solver_rel_error(final_cost, normA2, normalized_objective, T)
     grad_state = use_state_gradient ? _solver_gradient(state) : nothing
     grad_from_state = !isnothing(grad_state)
     grad_final =
         isnothing(grad_state) ? model_grad(M, p_opt) :
         _align_layout_like_point(p_opt, grad_state)
-    grad_norm = norm(M, p_opt, grad_final)
+    grad_norm = T(norm(M, p_opt, grad_final))
     iterations = _solver_iterations(state, maxiter)
     converged_grad =
         grad_norm < tol_T || (!isnothing(tiny_grad_tol) && grad_norm < tiny_grad_tol)

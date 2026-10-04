@@ -806,6 +806,27 @@ end
     end
 end
 
+@testset "Float32 Tucker solver results preserve scalar type" begin
+    rng = MersenneTwister(812)
+    target = randn(rng, Float32, 5, 4, 3)
+    M = Manifolds.Tucker(size(target), (2, 2, 2))
+
+    result = approx(
+        M,
+        target;
+        solver = :rgd_fixed,
+        stepsize = 1.0f-3,
+        maxiter = 2,
+        tol = 1.0f-6,
+        verbose = false,
+    )
+    @test result isa ApproxResult
+    @test result.cost isa Float32
+    @test result.rel_error isa Float32
+    @test result.grad_norm isa Float32
+
+end
+
 @testset "BTD backend construction is ambient-workspace-free" begin
     dims = (5, 4, 3)
     ranks = (2, 2, 2)

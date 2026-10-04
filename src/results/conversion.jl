@@ -11,9 +11,9 @@ function _to_join_result(result_type, model::JoinModel{T}, result) where {T<:Abs
     return result_type(
         result.point,
         comps,
-        result.cost,
-        result.rel_error,
-        result.grad_norm,
+        T(result.cost),
+        T(result.rel_error),
+        T(result.grad_norm),
         result.iterations,
         result.converged,
         solver_sym,
