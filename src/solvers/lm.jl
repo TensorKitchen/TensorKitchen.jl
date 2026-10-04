@@ -97,7 +97,10 @@ function _lm_adjoint_action_function(
     normalized_objective::Bool,
 ) where {T<:AbstractFloat}
     scale = _lm_scaling_factor(T, normA2, normalized_objective)
-    return (M, p, a) -> adjoint_action(model, p, scale .* a)
+    return function (M, p, a)
+        a_T = eltype(a) === T ? a : T.(a)
+        return adjoint_action(model, p, scale .* a_T)
+    end
 end
 
 function _lm_vector_differential_function(
@@ -160,8 +163,11 @@ function solve_lm(
     )
     p0_local = setup.p0
     T = setup.T
+    η_T = T(η)
+    damping_term_min_T = T(damping_term_min)
+    β_T = T(β)
     vdf = _lm_vector_differential_function(model, T, normA2, setup.uses_relative_objective)
-    initial_residual_values = residual(model, p0_local)
+    initial_residual_values = T.(residual(model, p0_local))
     scale = _lm_scaling_factor(T, normA2, setup.uses_relative_objective)
     if scale != one(T)
         initial_residual_values .*= scale
@@ -169,13 +175,14 @@ function solve_lm(
     nlso = Manopt.ManifoldNonlinearLeastSquaresObjective(
         vdf,
         Manopt.ComponentwiseRobustifierFunction(Manopt.IdentityRobustifier()),
+        copy(initial_residual_values),
     )
     initial_jacobian_matrices = fill(nothing, 1)
     sub_objective = Manopt.construct_lm_subobjective(
         false,
         nlso,
-        damping_term_min,
-        1.0e-6,
+        damping_term_min_T,
+        T(1.0e-6),
         :Strict,
         initial_residual_values,
         initial_jacobian_matrices,
@@ -183,6 +190,8 @@ function solve_lm(
     sub_state = Manopt.ConjugateResidualState(
         TangentSpace(M, p0_local),
         sub_objective;
+        α = zero(T),
+        β = zero(T),
         stopping_criterion = StopAfterIteration(max(20 * manifold_dimension(M), 200)) |
                              StopWhenGradientNormLess(T(1e-16)),
     )
@@ -217,13 +226,16 @@ function solve_lm(
         retraction_method = retraction_method,
         stopping_criterion = stopping,
         initial_residual_values = initial_residual_values,
-        candidate_acceptance_threshold = η,
-        damping_increase_factor = β,
-        damping_increase_threshold = η,
-        damping_reduction_threshold = expect_zero_residual ? η : Inf,
-        damping_reduction_factor = inv(T(β)),
-        damping_term_min = damping_term_min,
-        initial_damping_term = damping_term_min,
+        candidate_acceptance_threshold = η_T,
+        damping_increase_factor = β_T,
+        damping_increase_threshold = η_T,
+        damping_reduction_threshold = expect_zero_residual ? η_T : T(Inf),
+        damping_reduction_factor = inv(β_T),
+        damping_term_min = damping_term_min_T,
+        damping_term_max = T(Inf),
+        initial_damping_term = damping_term_min_T,
+        scaling_threshold = T(1.0e-6),
+        minimum_acceptable_model_improvement = eps(T),
         use_unified_basis = false,
         sub_objective = sub_objective,
         sub_state = sub_state,

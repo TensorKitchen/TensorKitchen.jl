@@ -827,6 +827,37 @@ end
 
 end
 
+@testset "Float32 LM residual operators preserve scalar type" begin
+    rng = MersenneTwister(813)
+    target = randn(rng, Float32, 4, 3, 2)
+    M = Manifolds.Tucker(size(target), (2, 2, 1))
+    model = JoinModel(M, target)
+    M_solver = TensorKitchen.manifold(model)
+    p = TensorKitchen._solver_point(
+        M_solver,
+        TensorKitchen.initial_point(model, :random; verbose = false),
+    )
+    adjoint_f =
+        TensorKitchen._lm_adjoint_action_function(model, Float32, sum(abs2, target), true)
+    X = adjoint_f(M_solver, p, randn(rng, Float64, length(target)))
+    @test TensorKitchen._scalar_eltype(X) === Float32
+
+    result = cpd(
+        randn(rng, Float32, 4, 3, 2),
+        2;
+        solver = :lm,
+        maxiter = 1,
+        tol = 1.0f-6,
+        verbose = false,
+    )
+    @test result isa CPDResult
+    @test result.cost isa Float32
+    @test result.rel_error isa Float32
+    @test result.grad_norm isa Float32
+    @test eltype(TensorKitchen.weights(result)) === Float32
+    @test all(eltype(F) === Float32 for F in TensorKitchen.factors(result))
+end
+
 @testset "BTD backend construction is ambient-workspace-free" begin
     dims = (5, 4, 3)
     ranks = (2, 2, 2)
