@@ -63,18 +63,48 @@ function _lbfgs_supported_linesearches()
     return isdefined(Manopt, :HagerZhangLinesearch) ? (base..., :hagerzhang) : base
 end
 
-@inline function _lbfgs_linesearch(kind::Symbol, retraction_method, transport)
+@inline function _lbfgs_linesearch(
+    kind::Symbol,
+    M,
+    p,
+    retraction_method,
+    transport,
+    ::Type{T},
+) where {T<:Real}
     kind === :wolfe && return Manopt.WolfePowellLinesearch(
-        sufficient_curvature = 0.9,
-        stop_when_stepsize_less = 1e-8,
+        sufficient_curvature = T(0.9),
+        stop_when_stepsize_less = T(1e-8),
         stop_decreasing_at_step = 100,
         retraction_method = retraction_method,
         vector_transport_method = transport,
     )
     if kind === :hagerzhang && isdefined(Manopt, :HagerZhangLinesearch)
-        return getproperty(Manopt, :HagerZhangLinesearch)(;
+        return getproperty(Manopt, :HagerZhangLinesearchStepsize)(
+            M;
+            initial_guess = getproperty(Manopt, :HagerZhangInitialGuess){T}(;
+                ψ0 = T(0.01),
+                ψ1 = T(0.01),
+                ψ2 = T(2.0),
+                constant_guess = T(NaN),
+                zero_abstol = eps(T),
+                alphamax = T(Inf),
+            ),
             retraction_method = retraction_method,
             vector_transport_method = transport,
+            initial_last_stepsize = T(NaN),
+            initial_last_cost = T(NaN),
+            stepsize_limit = T(Inf),
+            candidate_point = copy(M, p),
+            candidate_direction = zero_vector(M, p),
+            ϵ = T(1.0e-6),
+            δ = T(0.1),
+            σ = T(0.9),
+            ω = T(1.0e-3),
+            θ = T(0.5),
+            γ = T(0.66),
+            ρ = T(5.0),
+            Δ = T(0.7),
+            secant_acceptance_ratio = T(1.0e-8),
         )
     end
     throw(ArgumentError("Unsupported linesearch kind $kind."))
@@ -118,6 +148,9 @@ function solve_lbfgs(
     p0_local = setup.p0
     T = setup.T
     retraction_method = _solver_retraction_method(M, p0_local)
+    if linesearch === :hagerzhang
+        retraction_method = _hagerzhang_retraction_method(M, retraction_method)
+    end
     transport =
         isnothing(vector_transport_method) ?
         _default_vector_transport_method(M, p0_local, retraction_method) :
@@ -151,11 +184,18 @@ function solve_lbfgs(
         cautious_update = cautious_update,
         direction_update = Manopt.InverseBFGS(),
         memory_size = memory_size,
-        initial_scale = initial_scale,
+        initial_scale = T(initial_scale),
         preconditioner = preconditioner,
         retraction_method = retraction_method,
         vector_transport_method = transport,
-        stepsize = _lbfgs_linesearch(linesearch, retraction_method, transport),
+        stepsize = _lbfgs_linesearch(
+            linesearch,
+            M,
+            p0_local,
+            retraction_method,
+            transport,
+            T,
+        ),
         stopping_criterion = stopping,
         debug = callbacks.debug_actions,
         callbacks = callbacks.solver_callbacks,

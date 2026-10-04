@@ -143,7 +143,9 @@ end
 # as Segre or SoftplusEuclidean may choose ExponentialRetraction, while sphere-like
 # factors may choose their ManifoldsBase default.
 # Manifolds' Tucker polar retraction requires its fused step scalar to match the
-# point precision, while some Manopt line searches report a Float64 step.
+# point precision. This adapter is reserved for solver paths, such as the
+# Hager--Zhang line search, that do not yet derive their scalar type from the
+# current point.
 struct _ScalarTypeRetraction{R<:ManifoldsBase.AbstractRetractionMethod} <:
        ManifoldsBase.AbstractRetractionMethod
     method::R
@@ -232,8 +234,7 @@ function ManifoldsBase.retract_fused!(
 end
 
 @inline function _default_component_retraction_method(Mi, pi)
-    method = ManifoldsBase.default_retraction_method(Mi, typeof(pi))
-    return Mi isa Manifolds.Tucker ? _ScalarTypeRetraction(method) : method
+    return ManifoldsBase.default_retraction_method(Mi, typeof(pi))
 end
 
 
@@ -252,12 +253,22 @@ function _solver_retraction_method_unwrapped(M::ProductManifold, p)
     )
     methods =
         ntuple(i -> _default_component_retraction_method(M.manifolds[i], pparts[i]), n)
-    method = ManifoldsBase.ProductRetraction(methods)
-    return any(m -> m isa _ScalarTypeRetraction, methods) ? _ScalarTypeRetraction(method) :
-           method
+    return ManifoldsBase.ProductRetraction(methods)
 end
 
 _solver_retraction_method_unwrapped(M, p) = _default_component_retraction_method(M, p)
+
+
+# Detect nested Tucker factors before enabling the narrow mixed-scalar fallback.
+function _contains_tucker_manifold(M)
+    M2 = _unwrap_solver_manifold(M)
+    M2 isa Manifolds.Tucker && return true
+    return M2 isa ProductManifold && any(_contains_tucker_manifold, M2.manifolds)
+end
+
+@inline function _hagerzhang_retraction_method(M, method)
+    return _contains_tucker_manifold(M) ? _ScalarTypeRetraction(method) : method
+end
 
 
 # Conservative compatibility probe for vector transports used by Manopt solvers.

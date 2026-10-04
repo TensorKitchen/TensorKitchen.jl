@@ -767,7 +767,7 @@ end
     @test norm(M, p0_solver, exact_basis_gradient - direct_gradient) ≤ 1e-12
 end
 
-@testset "Tucker retraction preserves point scalar type" begin
+@testset "Hager-Zhang preserves Tucker point scalar type" begin
     rng = MersenneTwister(811)
     dims = (5, 4, 3)
     ranks = (2, 2, 2)
@@ -780,27 +780,29 @@ end
         return Manifolds.TuckerPoint(randn(rng, T, ranks...), factors...)
     end
 
-    @test 0.1 isa Float64
-    for T in (Float32, Float64)
-        p = make_point(T)
-        X = rand(rng, M; vector_at = p)
-        method = TensorKitchen._solver_retraction_method(M, p)
-        q = ManifoldsBase.retract_fused(M, p, X, 0.1, method)
+    p = make_point(Float32)
+    method = TensorKitchen._solver_retraction_method(M, p)
+    @test !(method isa TensorKitchen._ScalarTypeRetraction)
 
-        @test eltype(q.hosvd.core) === T
-        @test all(eltype(U) === T for U in q.hosvd.U)
-    end
-
-    M_product = ProductManifold(M, M)
-    p_product = ArrayPartition(make_point(Float32), make_point(Float32))
-    X_product = rand(rng, M_product; vector_at = p_product)
-    method_product = TensorKitchen._solver_retraction_method(M_product, p_product)
-    q_product =
-        ManifoldsBase.retract_fused(M_product, p_product, X_product, 0.1, method_product)
-
-    for q_part in TensorKitchen.point_parts(q_product)
-        @test eltype(q_part.hosvd.core) === Float32
-        @test all(eltype(U) === Float32 for U in q_part.hosvd.U)
+    if :hagerzhang in TensorKitchen._lbfgs_supported_linesearches()
+        target = randn(rng, Float32, dims...)
+        model = JoinModel(M, target)
+        p0 = TensorKitchen._solver_point(TensorKitchen.manifold(model), (p,))
+        M_solver = TensorKitchen.manifold(model)
+        base_method = TensorKitchen._solver_retraction_method(M_solver, p0)
+        hz_method = TensorKitchen._hagerzhang_retraction_method(M_solver, base_method)
+        transport = TensorKitchen._default_vector_transport_method(M_solver, p0, hz_method)
+        linesearch = TensorKitchen._lbfgs_linesearch(
+            :hagerzhang,
+            M_solver,
+            p0,
+            hz_method,
+            transport,
+            Float32,
+        )
+        @test hz_method isa TensorKitchen._ScalarTypeRetraction
+        @test linesearch.last_stepsize isa Float32
+        @test TensorKitchen._scalar_eltype(linesearch.candidate_point) === Float32
     end
 end
 
