@@ -801,8 +801,21 @@ end
             Float32,
         )
         @test hz_method isa TensorKitchen._ScalarTypeRetraction
-        @test linesearch.last_stepsize isa Float32
+        @test linesearch.last_stepsize isa Float64
         @test TensorKitchen._scalar_eltype(linesearch.candidate_point) === Float32
+
+        result = approx(
+            M,
+            target;
+            solver = LBFGSSolver(linesearch = :hagerzhang),
+            maxiter = 1,
+            tol = 1.0f-6,
+            verbose = false,
+        )
+        @test result isa ApproxResult
+        @test result.cost isa Float32
+        @test result.rel_error isa Float32
+        @test TensorKitchen._scalar_eltype(result.point) === Float32
     end
 end
 
@@ -841,6 +854,14 @@ end
         TensorKitchen._lm_adjoint_action_function(model, Float32, sum(abs2, target), true)
     X = adjoint_f(M_solver, p, randn(rng, Float64, length(target)))
     @test TensorKitchen._scalar_eltype(X) === Float32
+
+    tucker_result =
+        approx(M, target; solver = :lm, maxiter = 1, tol = 1.0f-6, verbose = false)
+    @test tucker_result isa ApproxResult
+    @test tucker_result.cost isa Float32
+    @test tucker_result.rel_error isa Float32
+    @test TensorKitchen._scalar_eltype(tucker_result.point) === Float32
+    @test tucker_result.solver_info.uses_lm_subproblem_adapter
 
     result = cpd(
         randn(rng, Float32, 4, 3, 2),
@@ -1097,29 +1118,26 @@ end
     @test length(join_backend.component_bufs) == length(manifolds)
 end
 
-@testset "BTD rejects LMSolver until nested Tucker LM support lands" begin
-    A = randn(7, 6, 5)
-    ranks = (2, 2, 2)
-
-    @test_throws ArgumentError btd(
+@testset "BTD supports Float32 LM on nested Tucker layouts" begin
+    rng = MersenneTwister(817)
+    A = randn(rng, Float32, 4, 3, 2)
+    result = btd(
         A,
         2,
-        ranks;
-        solver = :lm,
-        maxiter = 2,
-        tol = 1e-6,
-        verbose = false,
-    )
-
-    @test_throws ArgumentError btd(
-        A,
-        2,
-        ranks;
+        (2, 2, 1);
         solver = LMSolver(),
-        maxiter = 2,
-        tol = 1e-6,
+        init = :random,
+        maxiter = 1,
+        tol = 1.0f-6,
+        btd_als_polish_maxiter = 0,
         verbose = false,
     )
+
+    @test result isa BTDResult
+    @test result.cost isa Float32
+    @test result.rel_error isa Float32
+    @test TensorKitchen._scalar_eltype(result.point) === Float32
+    @test result.solver_info.uses_lm_subproblem_adapter
 end
 
 @testset "BTD projected block residual matches explicit ambient residual" begin

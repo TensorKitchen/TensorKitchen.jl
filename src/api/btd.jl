@@ -106,15 +106,6 @@ _btd_uses_warm_start(::AbstractSolver, ::BTDALSWarmStartInit) = true
 _btd_should_polish(::ALSSolver, ::Integer) = false
 _btd_should_polish(::AbstractSolver, polish_n::Integer) = polish_n > 0
 
-function _reject_unsupported_btd_solver(solver_obj)
-    solver_obj isa LMSolver || return nothing
-    throw(
-        ArgumentError(
-            "BTD currently does not support LM refinement because the required Manopt operator path is not yet available for nested Tucker layouts. Use :rgd, :rcg, :lbfgs, :als, or :btd_tsd instead.",
-        ),
-    )
-end
-
 function _btd_warm_start_result(
     model::JoinModel{T,<:BTDBackend},
     backend::BTDBackend,
@@ -224,8 +215,8 @@ Returns a [`BTDResult`](@ref). Use `blocks` to inspect the fitted Tucker terms,
 # Common options
 
 - `solver=:rgd` selects the refinement method. Supported symbols are `:als`,
-  `:rgd`, `:rgd_fixed`, `:rcg`, `:lbfgs`, and `:btd_tsd`; a compatible solver
-  object may be passed instead. `:lm` is not supported for BTD.
+  `:rgd`, `:rgd_fixed`, `:rcg`, `:lbfgs`, `:lm`, and `:btd_tsd`; a compatible
+  solver object may be passed instead.
 - `compute_type=nothing`: floating-point arithmetic type. Small integer storage
   defaults to `Float32`; other integer storage defaults to `Float64`; native
   floating-point inputs keep their element type.
@@ -324,7 +315,6 @@ function btd(
         prepare_tensor(A; compute_type, materialize, block_length = conversion_block_length)
     T = eltype(A_prepared)
     solver_obj = _solver_object(solver, stepsize; kwargs...)
-    _reject_unsupported_btd_solver(solver_obj)
     solver_sym = _btd_solver_symbol(solver_obj)
     init_resolved = _resolve_btd_init(A_prepared, init, solver_obj)
     warm_init_resolved = _resolve_btd_warm_init(A_prepared, warm_init)

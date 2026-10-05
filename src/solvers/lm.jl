@@ -187,8 +187,11 @@ function solve_lm(
         initial_residual_values,
         initial_jacobian_matrices,
     )
+    M_subproblem = _lm_subproblem_manifold(M)
+    tangent_subproblem = TangentSpace(M_subproblem, p0_local)
+    sub_problem = Manopt.DefaultManoptProblem(tangent_subproblem, sub_objective)
     sub_state = Manopt.ConjugateResidualState(
-        TangentSpace(M, p0_local),
+        tangent_subproblem,
         sub_objective;
         α = zero(T),
         β = zero(T),
@@ -238,6 +241,7 @@ function solve_lm(
         minimum_acceptable_model_improvement = eps(T),
         use_unified_basis = false,
         sub_objective = sub_objective,
+        sub_problem = sub_problem,
         sub_state = sub_state,
         debug = callbacks.debug_actions,
         callbacks = callbacks.solver_callbacks,
@@ -268,6 +272,7 @@ function solve_lm(
             uses_operator_jacobian = true,
             uses_direct_adjoint_action = true,
             uses_coordinate_linear_solver = false,
+            uses_lm_subproblem_adapter = M_subproblem !== M,
             uses_user_linear_subsolver = linear_subsolver !== Manopt.default_lm_lin_solve!,
             uses_vector_transport = !isnothing(vector_transport_method),
         ),
