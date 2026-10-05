@@ -54,7 +54,6 @@ end
     rels = Float64[]
     for seed = 1:3
         A = _make_cp_tensor(seed; noisy = false)
-        Random.seed!(10_000 + seed)
         res = cpd(
             A,
             3;
@@ -77,7 +76,6 @@ end
     rels = Float64[]
     for seed = 1:3
         A = _make_cp_tensor(seed; noisy = true)
-        Random.seed!(20_000 + seed)
         res = cpd(
             A,
             3;

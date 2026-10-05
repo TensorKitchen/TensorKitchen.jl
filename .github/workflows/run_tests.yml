@@ -12,6 +12,7 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         julia-version: ["lts", "1"]
         os: [ubuntu-latest]
@@ -21,5 +22,14 @@ jobs:
         with:
           version: ${{ matrix.julia-version }}
       - uses: julia-actions/cache@v3
+      - name: Resolve source dependencies on Julia LTS
+        if: matrix.julia-version == 'lts'
+        run: >-
+          julia --project=. -e '
+          using Pkg, TOML;
+          sources = TOML.parsefile("Project.toml")["sources"];
+          specs = [PackageSpec(name=name, url=source["url"], rev=source["rev"])
+          for (name, source) in sources];
+          Pkg.add(specs)'
       - uses: julia-actions/julia-buildpkg@latest
       - uses: julia-actions/julia-runtest@latest

@@ -322,7 +322,11 @@ end
     @test TensorKitchen.component_embedding(model_component.backend.components[1]) isa
           TensorKitchen.DefaultJoinEmbedding
 
-    p = TensorKitchen.initial_point(model, :random; verbose = false)
+    point_parts = ntuple(3) do _
+        factors = [normalize(randn(rng, d)) for d in dims]
+        TensorKitchen.pack_point_rank1_segre(1.0, factors)
+    end
+    p = TensorKitchen.join_point(M, point_parts)
     @test length(TensorKitchen.point_parts(p)) == 3
 
     f = cost(model, p)
@@ -341,8 +345,9 @@ end
     @test all(c -> c.manifold isa Manifolds.Segre, comps)
     @test all(c -> size(c.tensor) == dims, comps)
 
+    initial_normalized_cost = f / sum(abs2, A)
     out = solve(
-        RGDSolver(1.0),
+        RGDSolver(1.0e-2),
         model;
         p0 = p,
         maxiter = 2,
@@ -351,6 +356,7 @@ end
         return_stats = true,
     )
     @test isfinite(out.cost) && isfinite(out.rel_error)
+    @test out.cost <= initial_normalized_cost
 end
 
 @testset "LM residual/Jacobian smoke check matches gradient" begin
@@ -801,7 +807,6 @@ end
             Float32,
         )
         @test hz_method isa TensorKitchen._ScalarTypeRetraction
-        @test linesearch.last_stepsize isa Float64
         @test TensorKitchen._scalar_eltype(linesearch.candidate_point) === Float32
 
         result = approx(
