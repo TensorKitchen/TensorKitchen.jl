@@ -79,32 +79,33 @@ end
         vector_transport_method = transport,
     )
     if kind === :hagerzhang && isdefined(Manopt, :HagerZhangLinesearch)
+        TF = _hagerzhang_workspace_type(T)
         return getproperty(Manopt, :HagerZhangLinesearchStepsize)(
             M;
-            initial_guess = getproperty(Manopt, :HagerZhangInitialGuess){T}(;
-                ψ0 = T(0.01),
-                ψ1 = T(0.01),
-                ψ2 = T(2.0),
-                constant_guess = T(NaN),
-                zero_abstol = eps(T),
-                alphamax = T(Inf),
+            initial_guess = getproperty(Manopt, :HagerZhangInitialGuess){TF}(;
+                ψ0 = TF(0.01),
+                ψ1 = TF(0.01),
+                ψ2 = TF(2.0),
+                constant_guess = TF(NaN),
+                zero_abstol = eps(TF),
+                alphamax = TF(Inf),
             ),
             retraction_method = retraction_method,
             vector_transport_method = transport,
-            initial_last_stepsize = T(NaN),
-            initial_last_cost = T(NaN),
-            stepsize_limit = T(Inf),
+            initial_last_stepsize = TF(NaN),
+            initial_last_cost = TF(NaN),
+            stepsize_limit = TF(Inf),
             candidate_point = copy(M, p),
             candidate_direction = zero_vector(M, p),
-            ϵ = T(1.0e-6),
-            δ = T(0.1),
-            σ = T(0.9),
-            ω = T(1.0e-3),
-            θ = T(0.5),
-            γ = T(0.66),
-            ρ = T(5.0),
-            Δ = T(0.7),
-            secant_acceptance_ratio = T(1.0e-8),
+            ϵ = TF(1.0e-6),
+            δ = TF(0.1),
+            σ = TF(0.9),
+            ω = TF(1.0e-3),
+            θ = TF(0.5),
+            γ = TF(0.66),
+            ρ = TF(5.0),
+            Δ = TF(0.7),
+            secant_acceptance_ratio = TF(1.0e-8),
         )
     end
     throw(ArgumentError("Unsupported linesearch kind $kind."))
@@ -175,6 +176,7 @@ function solve_lbfgs(
         post_step_callback,
         iteration_callbacks,
     )
+    preconditioner_kwargs = isnothing(preconditioner) ? NamedTuple() : (; preconditioner)
 
     state = Manopt.quasi_Newton(
         M,
@@ -185,7 +187,7 @@ function solve_lbfgs(
         direction_update = Manopt.InverseBFGS(),
         memory_size = memory_size,
         initial_scale = T(initial_scale),
-        preconditioner = preconditioner,
+        preconditioner_kwargs...,
         retraction_method = retraction_method,
         vector_transport_method = transport,
         stepsize = _lbfgs_linesearch(

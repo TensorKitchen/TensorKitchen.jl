@@ -86,10 +86,14 @@ function Manopt.get_reason(c::StopWhenCostRelChangeAndGradientLess)
 end
 
 # Summarize the current dual stopping-rule state for Manopt displays.
-function Manopt.status_summary(c::StopWhenCostRelChangeAndGradientLess)
+function Manopt.status_summary(
+    c::StopWhenCostRelChangeAndGradientLess;
+    context::Symbol = :default,
+)
     has_stopped = c.at_iteration >= 0
     status = has_stopped ? "reached" : "not reached"
-    return "cost rel change < $(c.tol_cost) and |grad f| < $(c.tol_grad): $status"
+    summary = "cost rel change < $(c.tol_cost) and |grad f| < $(c.tol_grad): $status"
+    return context === :inline ? "A stopping criterion requiring $summary" : summary
 end
 
 # Mark the dual stopping rule as convergence, not failure or exhaustion.
@@ -861,7 +865,7 @@ function _solver_post_step_callback(
         )
         p_new = _align_layout_like_point(p_old, p_new)
         p_new === p_old && return nothing
-        set_iterate!(state, M, p_new)
+        copyto!(M, p_old, p_new)
         if solver_sym == :rcg && hasproperty(state, :X)
             get_gradient!(problem, state.X, get_iterate(state))
             if hasproperty(state, :δ)
