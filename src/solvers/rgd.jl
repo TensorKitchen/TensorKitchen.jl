@@ -35,7 +35,7 @@ function solve_rgd(
         grad_tol,
         normalized_objective,
     )
-    p0_local = setup.p0
+    p0_local = _independent_solver_point(setup.p0)
     T = setup.T
     retraction_method = _solver_retraction_method(M, p0_local)
     stepsize_eff_base = T(stepsize) * setup.objective_scale
@@ -71,8 +71,10 @@ function solve_rgd(
         use_strict_sqeuclidean ? ((M, q) -> _all_finite(q)) : ((M, q) -> true)
     solver_cost =
         use_strict_sqeuclidean ? _safe_cost_function(setup.solver_cost) : setup.solver_cost
-    armijo = Manopt.ArmijoLinesearch(
+    armijo = Manopt.ArmijoLinesearchStepsize(
         M;
+        candidate_point = _independent_solver_point(p0_local),
+        number_type = T,
         retraction_method = retraction_method,
         initial_stepsize = initial_stepsize_eff,
         contraction_factor = armijo_contraction,
@@ -162,7 +164,7 @@ function solve_rgd_fixed(
         grad_tol,
         normalized_objective,
     )
-    p0_local = setup.p0
+    p0_local = _independent_solver_point(setup.p0)
     T = setup.T
     retraction_method = _solver_retraction_method(M, p0_local)
     tiny_grad_tol = isnothing(grad_tol) ? T(1e-5) : T(grad_tol)

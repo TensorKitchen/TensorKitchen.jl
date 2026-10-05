@@ -139,6 +139,12 @@ function _solver_point(M, p0)
 end
 
 
+# Keep mutable nested component storage independent across Manopt state and
+# line-search workspaces. Some manifold-aware `copy(M, p)` implementations
+# copy only the outer product container for vector-of-vectors representations.
+@inline _independent_solver_point(p) = deepcopy(p)
+
+
 # Unwrap solver manifold wrappers down to the underlying manifold object.
 @inline _unwrap_solver_manifold(M) = hasproperty(M, :M) ? getproperty(M, :M) : M
 

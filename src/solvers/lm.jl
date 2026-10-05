@@ -161,7 +161,7 @@ function solve_lm(
         grad_tol,
         normalized_objective,
     )
-    p0_local = setup.p0
+    p0_local = _independent_solver_point(setup.p0)
     T = setup.T
     η_T = T(η)
     damping_term_min_T = T(damping_term_min)

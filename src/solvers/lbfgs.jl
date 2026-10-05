@@ -71,13 +71,20 @@ end
     transport,
     ::Type{T},
 ) where {T<:Real}
-    kind === :wolfe && return Manopt.WolfePowellLinesearch(
-        sufficient_curvature = T(0.9),
-        stop_when_stepsize_less = T(1e-8),
-        stop_decreasing_at_step = 100,
-        retraction_method = retraction_method,
-        vector_transport_method = transport,
-    )
+    if kind === :wolfe
+        candidate_point = _independent_solver_point(p)
+        return Manopt.WolfePowellLinesearchStepsize(
+            M;
+            p = candidate_point,
+            X = zero_vector(M, candidate_point),
+            number_type = T,
+            sufficient_curvature = T(0.9),
+            stop_when_stepsize_less = T(1e-8),
+            stop_decreasing_at_step = 100,
+            retraction_method = retraction_method,
+            vector_transport_method = transport,
+        )
+    end
     if kind === :hagerzhang && isdefined(Manopt, :HagerZhangLinesearch)
         TF = _hagerzhang_workspace_type(T)
         return getproperty(Manopt, :HagerZhangLinesearchStepsize)(
@@ -95,7 +102,7 @@ end
             initial_last_stepsize = TF(NaN),
             initial_last_cost = TF(NaN),
             stepsize_limit = TF(Inf),
-            candidate_point = copy(M, p),
+            candidate_point = _independent_solver_point(p),
             candidate_direction = zero_vector(M, p),
             ϵ = TF(1.0e-6),
             δ = TF(0.1),
@@ -146,7 +153,7 @@ function solve_lbfgs(
         grad_tol,
         normalized_objective,
     )
-    p0_local = setup.p0
+    p0_local = _independent_solver_point(setup.p0)
     T = setup.T
     retraction_method = _solver_retraction_method(M, p0_local)
     if linesearch === :hagerzhang

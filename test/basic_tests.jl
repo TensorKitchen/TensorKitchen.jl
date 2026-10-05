@@ -346,6 +346,7 @@ end
     @test all(c -> size(c.tensor) == dims, comps)
 
     initial_normalized_cost = f / sum(abs2, A)
+    p_before = deepcopy(p)
     out = solve(
         RGDSolver(1.0e-2),
         model;
@@ -357,6 +358,7 @@ end
     )
     @test isfinite(out.cost) && isfinite(out.rel_error)
     @test out.cost <= initial_normalized_cost
+    @test TensorKitchen._join_cache_point_equal(p, p_before)
 end
 
 @testset "LM residual/Jacobian smoke check matches gradient" begin

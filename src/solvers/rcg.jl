@@ -86,7 +86,7 @@ function solve_rcg(
         grad_tol,
         normalized_objective,
     )
-    p0_local = setup.p0
+    p0_local = _independent_solver_point(setup.p0)
     T = setup.T
 
     retraction_method = _solver_retraction_method(M, p0_local)
@@ -103,6 +103,12 @@ function solve_rcg(
         restart_threshold,
     )
     restart_rule = _rcg_restart_condition(restart; κ = sufficient_descent_kappa)
+    armijo = Manopt.ArmijoLinesearchStepsize(
+        M;
+        candidate_point = _independent_solver_point(p0_local),
+        number_type = T,
+        retraction_method = retraction_method,
+    )
 
     tol_g = setup.dual_grad_tol
     dual_stop = StopWhenCostRelChangeAndGradientLess(T(tol), tol_g)
@@ -129,6 +135,7 @@ function solve_rcg(
         vector_transport_method = transport,
         coefficient = coefficient_rule,
         restart_condition = restart_rule,
+        stepsize = armijo,
         stopping_criterion = stopping,
         debug = callbacks.debug_actions,
         callbacks = callbacks.solver_callbacks,
