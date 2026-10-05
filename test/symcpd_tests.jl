@@ -273,12 +273,12 @@ end
     tangent = TensorKitchen.join_tangent_like(reduced_manifold, reduced_point, directions)
     reduced_gradient = TensorKitchen.rgrad(reduced, reduced_point)
     h = 1e-6
-    reduced_plus = retract(
+    reduced_plus = TensorKitchen._independent_retract(
         reduced_manifold,
         reduced_point,
         TensorKitchen._scale_solver_tangent(tangent, h),
     )
-    reduced_minus = retract(
+    reduced_minus = TensorKitchen._independent_retract(
         reduced_manifold,
         reduced_point,
         TensorKitchen._scale_solver_tangent(tangent, -h),
@@ -432,8 +432,21 @@ end
     h = 1e-6
     fd =
         (
-            cost(model, retract(M, p, TensorKitchen._scale_solver_tangent(X, h))) -
-            cost(model, retract(M, p, TensorKitchen._scale_solver_tangent(X, -h)))
+            cost(
+                model,
+                TensorKitchen._independent_retract(
+                    M,
+                    p,
+                    TensorKitchen._scale_solver_tangent(X, h),
+                ),
+            ) - cost(
+                model,
+                TensorKitchen._independent_retract(
+                    M,
+                    p,
+                    TensorKitchen._scale_solver_tangent(X, -h),
+                ),
+            )
         ) / (2h)
     @test fd ≈ inner(M, p, g, X) atol = 1e-7 rtol = 1e-6
     tangent_1 = zeros(binomial(3 + d - 1, d))
@@ -467,10 +480,14 @@ end
     # The explicit compressed-coordinate JVP is the derivative of the join
     # embedding along the manifold retraction.
     h = 1e-6
-    p_plus = retract(M, p, TensorKitchen._scale_solver_tangent(X, h))
-    p_minus = retract(M, p, TensorKitchen._scale_solver_tangent(X, -h))
+    p_before = deepcopy(p)
+    p_plus =
+        TensorKitchen._independent_retract(M, p, TensorKitchen._scale_solver_tangent(X, h))
+    p_minus =
+        TensorKitchen._independent_retract(M, p, TensorKitchen._scale_solver_tangent(X, -h))
+    @test TensorKitchen._join_cache_point_equal(p, p_before)
     embedded_plus = zeros(TensorKitchen.ambient_length(component))
-    embedded_minus = similar(embedded_plus)
+    embedded_minus = zeros(TensorKitchen.ambient_length(component))
     for part in TensorKitchen.join_parts(M, p_plus)
         embedded_plus .+= TensorKitchen._symcpd_embed_coordinates(component.manifold, part)
     end

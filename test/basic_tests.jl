@@ -497,8 +497,8 @@ end
         coeff = zeros(Float64, d)
         coeff[j] = 1.0
         Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-        p_plus = ManifoldsBase.retract(M, p, ϵ * Xj, retraction_method)
-        p_minus = ManifoldsBase.retract(M, p, -ϵ * Xj, retraction_method)
+        p_plus = TensorKitchen._independent_retract(M, p, ϵ * Xj, retraction_method)
+        p_minus = TensorKitchen._independent_retract(M, p, -ϵ * Xj, retraction_method)
         TensorKitchen._join_reconstruct!(buf_plus, model.backend, p_plus)
         TensorKitchen._join_reconstruct!(buf_minus, model.backend, p_minus)
         fd = (buf_plus .- buf_minus) ./ (2 * ϵ)
@@ -533,8 +533,8 @@ end
             coeff = zeros(Float64, d)
             coeff[j] = 1.0
             Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-            p_plus = ManifoldsBase.retract(M, p, ϵ * Xj, retraction_method)
-            p_minus = ManifoldsBase.retract(M, p, -ϵ * Xj, retraction_method)
+            p_plus = TensorKitchen._independent_retract(M, p, ϵ * Xj, retraction_method)
+            p_minus = TensorKitchen._independent_retract(M, p, -ϵ * Xj, retraction_method)
             r_plus = TensorKitchen._lm_raw_residual_vector(model, p_plus)
             r_minus = TensorKitchen._lm_raw_residual_vector(model, p_minus)
             fd = (r_plus .- r_minus) ./ (2 * ϵ)
@@ -601,7 +601,7 @@ end
                 coeff = zeros(Float64, d)
                 coeff[j] = 1.0
                 Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-                p_plus = ManifoldsBase.retract(M, p, ϵ * Xj, retraction_method)
+                p_plus = TensorKitchen._independent_retract(M, p, ϵ * Xj, retraction_method)
                 r_plus = TensorKitchen._lm_raw_residual_vector(model, p_plus)
                 fd = (r_plus .- r0) ./ ϵ
                 @test maximum(abs.(fd .- J[:, j])) ≤ tol_fd
@@ -2618,13 +2618,13 @@ end
     X_1 = ManifoldsBase.get_vector(M_native, p_native, e_1, basis_native)
     X_1 ./= max(norm(M_native, p_native, X_1), eps(Float64))
     ϵ = 1e-5
-    p_plus = ManifoldsBase.retract(
+    p_plus = TensorKitchen._independent_retract(
         M_native,
         p_native,
         ϵ * X_1,
         ManifoldsBase.ExponentialRetraction(),
     )
-    p_minus = ManifoldsBase.retract(
+    p_minus = TensorKitchen._independent_retract(
         M_native,
         p_native,
         -ϵ * X_1,
@@ -3162,7 +3162,12 @@ end
         coeff = zeros(Float64, manifold_dimension(M_btd))
         coeff[j] = 1.0
         Xj = ManifoldsBase.get_vector(M_btd, p_btd, coeff, basis_btd)
-        p_plus = ManifoldsBase.retract(M_btd, p_btd, ϵ_btd * Xj, retraction_method_btd)
+        p_plus = TensorKitchen._independent_retract(
+            M_btd,
+            p_btd,
+            ϵ_btd * Xj,
+            retraction_method_btd,
+        )
         r_plus = TensorKitchen._lm_raw_residual_vector(model_btd, p_plus)
         fd = (r_plus .- residual0_btd) ./ ϵ_btd
         @test maximum(abs.(fd .- J_btd[:, j])) ≤ 5e-6
@@ -3195,7 +3200,7 @@ end
         q_btd = TensorKitchen._replace_block_part(
             p_btd,
             b,
-            retract(
+            TensorKitchen._independent_retract(
                 TensorKitchen._backend_manifold(backend, b),
                 parts_btd[b],
                 (-h) * block_grad,

@@ -145,6 +145,21 @@ end
 @inline _independent_solver_point(p) = deepcopy(p)
 
 
+# Allocate a retraction result whose nested mutable storage cannot alias the
+# source point. Some ProductManifold allocation paths copy only the outer
+# container for vector-of-vectors representations.
+function _independent_retract(M, p, X, method)
+    q = _independent_solver_point(p)
+    ManifoldsBase.retract!(M, q, p, X, method)
+    return q
+end
+
+function _independent_retract(M, p, X)
+    method = ManifoldsBase.default_retraction_method(M, typeof(p))
+    return _independent_retract(M, p, X, method)
+end
+
+
 # Unwrap solver manifold wrappers down to the underlying manifold object.
 @inline _unwrap_solver_manifold(M) = hasproperty(M, :M) ? getproperty(M, :M) : M
 
@@ -285,7 +300,7 @@ end
 function _supports_vector_transport_to(M, p, vt, retraction_method)
     try
         X = zero_vector(M, p)
-        q = retract(M, p, X, retraction_method)
+        q = _independent_retract(M, p, X, retraction_method)
         vector_transport_to(M, p, X, q, vt)
         return true
     catch
@@ -361,7 +376,7 @@ function _adaptive_initial_stepsize(
     (!isfinite(dnorm) || dnorm <= sqrt(eps(T))) && return base_stepsize
     δ = delta_scale / max(dnorm, one(T))
     q = try
-        retract(M, p0, δ .* d, retraction_method)
+        _independent_retract(M, p0, δ .* d, retraction_method)
     catch
         return base_stepsize
     end

@@ -311,7 +311,7 @@ function _solve_symcpd_gn(
             end
 
             candidate = try
-                retract(M, p, step, retraction_method)
+                _independent_retract(M, p, step, retraction_method)
             catch
                 nothing
             end

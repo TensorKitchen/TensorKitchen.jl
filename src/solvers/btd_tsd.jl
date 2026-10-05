@@ -135,7 +135,7 @@ function _btd_tsd_block_step(
 
     while α >= α_min
         trials += 1
-        qk = retract(Mk, pk, (-α) * direction)
+        qk = _independent_retract(Mk, pk, (-α) * direction)
         q = _replace_block_part(p, b, qk)
         cq = cost(model, q)
         if isfinite(cq) && cq <= c0 - sufficient_decrease * α * expected_decrease
