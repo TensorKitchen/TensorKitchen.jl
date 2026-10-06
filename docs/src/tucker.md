@@ -51,8 +51,7 @@ as `A`, and a smaller relative error means a closer reconstruction.
 
 ## Large tensors
 
-For a large tensor, the randomized backend can reduce memory use and runtime
-when the requested ranks are much smaller than the input dimensions:
+The randomized backend avoids storing complete mode unfoldings:
 
 ```julia
 result = tucker(
@@ -63,9 +62,9 @@ result = tucker(
 )
 ```
 
-The randomized result is approximate and may vary slightly between runs. Use
-`rel_error(A, result)` to evaluate it. `error_bound` is available only when the
-decomposition records the full singular-value information.
+The randomized result is approximate and may vary between runs. Use
+`rel_error(A, result)` to measure its reconstruction error. `error_bound` is
+available only when the decomposition stores the full singular-value data.
 
 See [Advanced Tucker methods](advanced/tucker.md) for ST-HOSVD, randomized
 sketching, and HOOI details.

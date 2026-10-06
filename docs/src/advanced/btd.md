@@ -1,48 +1,39 @@
-# Advanced BTD Methods
+# BTD Methods
 
-A homogeneous block term decomposition with ``B`` Tucker blocks is
+A block term decomposition (BTD) is a sum of Tucker blocks:
 
 ```math
 \hat{\mathcal A}
-= \sum_{b=1}^{B}
-  \mathcal G_b \times_1 U_b^{(1)} \cdots \times_d U_b^{(d)},
+=\sum_{b=1}^{B}
+  \mathcal G_b\times_1U_b^{(1)}\cdots\times_dU_b^{(d)}.
 ```
 
-where every block uses the same multilinear rank tuple in the current API.
-
-## Initialization and refinement
-
-BTD is nonconvex, so the initial blocks can materially affect the final fit.
-Two complementary initialization ideas are useful:
-
-- HOSVD multistart generates several structured candidates and keeps the best
-  screened candidate for an explicitly materialized target.
-- Projected multistart generates compact random Tucker candidates, screens
-  them with residual-free projected HOOI, and supports lazy targets.
-- An ALS warm start improves the candidate before a manifold solver refines it.
-
-The alternating path can be used directly, or as a warm start and optional
-polishing step around a manifold refinement method. See the [`btd`](@ref) API
-for the currently supported choices and defaults.
+In the current API, all blocks use the same multilinear rank tuple.
 
 ## Alternating block updates
 
-For block ``b``, define the conceptual residual excluding that block:
+When updating block ``b``, the other blocks are held fixed. The target for that
+update is the conceptual residual
 
 ```math
 \mathcal R_b
-= \mathcal A - \sum_{c\ne b}\mathcal X_c.
+=\mathcal A-\sum_{c\ne b}\mathcal X_c.
 ```
 
-BTD-ALS updates the core and factors of ``\mathcal X_b`` while the other blocks
-are fixed. An exact least-squares block minimization cannot increase the
-objective. TensorKitchen's finite HOOI/ST-HOSVD block updates are approximate,
-so strict monotonic decrease is not guaranteed for every configured update;
-monitor `rel_error` and compare initializations.
+BTD-ALS fits a Tucker block to ``\mathcal R_b`` and then moves to the next
+block. TensorKitchen can compute the needed projected contractions without
+forming this full residual tensor.
 
-## Initializer objects
+## Initialization
 
-Advanced users can configure the warm-start objects directly:
+TensorKitchen provides three initializer objects:
+
+- `BTDHOSVDMultistartInit` builds several candidates from a materialized
+  target and keeps the candidate with the smallest screened error.
+- `BTDProjectedMultistartInit` builds and screens compact candidates through
+  projected contractions, so it also works with lazy input.
+- `BTDALSWarmStartInit` applies a fixed number of BTD-ALS steps to another
+  initializer before manifold refinement.
 
 ```julia
 init = BTDHOSVDMultistartInit(
@@ -56,7 +47,7 @@ init = BTDHOSVDMultistartInit(
 result = btd(A, blocks, ranks; solver = :als, init = init)
 ```
 
-For a lazy target, configure projected multistart instead:
+For lazy input:
 
 ```julia
 init = BTDProjectedMultistartInit(
@@ -77,67 +68,47 @@ result = btd(
 )
 ```
 
-Candidate screening and selection use projected target contractions and the
-analytic residual norm. No ambient target copy, residual tensor, or block-sized
-reconstruction is required.
-
-`BTDALSWarmStartInit` wraps a base initializer with a fixed number of initial
-ALS steps before manifold refinement.
-
 ```@docs
 BTDHOSVDMultistartInit
 BTDProjectedMultistartInit
 BTDALSWarmStartInit
 ```
 
-## Choosing computational budgets
+## Main controls
 
-Initialization, warm-start, block-update, polishing, and restart budgets trade
-runtime for additional opportunities to improve a nonconvex fit. Increase them
-only after checking whether the extra work gives a meaningful reduction in
-`rel_error(A, result)`. The exact keyword names and current defaults live in the
-[`btd`](@ref) docstring rather than in this guide.
+- `warm_steps`: number of BTD-ALS iterations before manifold refinement.
+- `warm_rel_error_gate`: skip manifold refinement when the warm-start error is
+  above this value; use `nothing` to disable the gate.
+- `block_method`: Tucker method used for a block update. `:hooi` performs
+  repeated factor updates, while `:sthosvd` performs one sequential pass.
+- `btd_als_polish_maxiter`: number of final ALS polishing iterations; use `0`
+  to disable them.
+- `max_stagnation_restarts`: maximum number of retries when ALS changes little
+  but its error remains above `stagnation_rel_error`.
 
-Interpret the main controls as follows:
+The [`btd`](@ref) docstring contains the full option list and current defaults.
 
-- `warm_steps` sets the number of BTD-ALS warm-start iterations.
-- `warm_rel_error_gate` is a failure cutoff: if the warm-start error is above
-  the gate, the expensive manifold refinement is skipped. Use `nothing` to
-  disable this short circuit.
-- `block_method` chooses the Tucker update used inside BTD-ALS; `:hooi` performs
-  iterative block refinement and `:sthosvd` performs one sequential pass.
-- `btd_als_polish_maxiter` controls the optional final ALS polish; use `0` to
-  disable it.
-- `max_stagnation_restarts` limits retries when ALS fit change is small while
-  the final error remains above `stagnation_rel_error`.
+## Storage
 
-## High-level BTD API
+The projected path stores compact cores, factors, and contraction workspaces.
+It does not need a full residual or a separate full reconstruction during block
+updates. `reconstruct(result)` does create a tensor with the target dimensions.
 
-The complete initializer, solver, warm-start, block-update, polishing, restart,
-stopping, and diagnostic option list is inserted from the source docstring:
+Inspect the compact result without reconstruction using:
+
+```julia
+terms = blocks(result)
+first_core = core(terms[1])
+first_factors = factors(terms[1])
+```
+
+## API
 
 ```@docs
 btd
-```
-
-The lower-level ALS and BTD-specific tangent-subspace interfaces are documented
-below for experiments that need direct solver control:
-
-```@docs
 fit_btd_als
 BTDTSDSolver
 ```
 
-## Storage considerations
-
-The BTD backend stores the target reference, compact manifold metadata, an
-initially empty contraction cache, and the target norm. It does not allocate
-target-sized reconstruction, residual, or per-block buffers at construction.
-Projected HOOI updates and projected multistart preserve that property.
-
-Calling `reconstruct(result)` still creates the full approximation and can
-dominate memory for large inputs. Inspect `blocks(result)`, `core(block)`, and
-`factors(block)` when a dense reconstruction is not required.
-
-See [Optimization methods](optimization.md) for solver comparison and result
-diagnostics.
+See [Optimization methods](optimization.md) for the common solver names and
+result accessors.
