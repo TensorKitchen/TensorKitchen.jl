@@ -48,6 +48,7 @@ reconstruction is closer to the input tensor.
 | Goal | Function | Result |
 | --- | --- | --- |
 | Represent a tensor with shared rank-one components | [`cpd`](@ref) | `CPDResult` |
+| Fit a symmetric tensor with shared factors across modes | [`symcpd`](@ref) | `SymCPDResult` |
 | Require nonnegative CP components | [`nncpd`](@ref) | `CPDResult` |
 | Compress every tensor mode into a smaller core | [`tucker`](@ref) | `TuckerResult` |
 | Represent a tensor as a sum of Tucker blocks | [`btd`](@ref) | `BTDResult` |
@@ -59,6 +60,7 @@ See [Choosing a decomposition](PIPELINE.md) for a longer comparison.
 
 - [Preparing large data](preparing_data.md)
 - [CP decomposition](cpd.md)
+- [Symmetric CP decomposition](symcpd.md)
 - [Tucker decomposition](tucker.md)
 - [Block term decomposition](btd.md)
 - [Join decomposition](join.md)

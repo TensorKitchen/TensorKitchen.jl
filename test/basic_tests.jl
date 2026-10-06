@@ -13,7 +13,7 @@ Base.similar(::_NoSimilarArray, ::Type, ::Dims) =
 # tucker/hosvd.jl
 # =========================================================================
 @testset "hosvd.jl: tucker_hosvd, reconstruct_tucker, reconstruction_error" begin
-    A = randn(6, 5, 4)
+    A = _test_randn(16, 6, 5, 4)
     ranks = (3, 3, 2)
     core, factors = tucker_hosvd(A, ranks)
     @test size(core) == ranks
@@ -40,11 +40,11 @@ end
 
     dims = (10, 8, 6)
     r = (4, 3, 3)
-    core = randn(r...)
-    factors = [randn(dims[k], r[k]) for k = 1:3]
+    core = _test_randn(43, r...)
+    factors = [_test_randn(44 + k, dims[k], r[k]) for k = 1:3]
     A = reconstruct_tucker(core, factors)
     A2 = reconstruct_tucker(core, factors)
-    B2 = A2 .+ 1e-4 .* randn(size(A2)...)
+    B2 = A2 .+ 1e-4 .* _test_randn(47, size(A2)...)
     nA = sum(abs2, A2)
     nδ = sum(abs2, A2 .- B2)
     rel_ref = nA > 0 ? sqrt(max(nδ, 0) / nA) : sqrt(max(nδ, 0))
@@ -58,7 +58,7 @@ end
     @test relative_error(A, td) < 1e-10
     @test rel_error(A, td) == relative_error(A, td)
     @test norm(A - reconstruct(td)) / norm(A) < 1e-10
-    A_rand = randn(8, 6, 5)
+    A_rand = _test_randn(61, 8, 6, 5)
     td_rand = sthosvd(A_rand, (3, 3, 2))
     @test relative_error(A_rand, td_rand) >= 0 &&
           relative_error(A_rand, td_rand) <= 1 + 1e-10
@@ -175,8 +175,8 @@ end
 @testset "hooi.jl: hooi (TuckerResult), init :sthosvd" begin
     dims = (8, 6, 5)
     ranks = (3, 3, 2)
-    core = randn(ranks...)
-    factors = [randn(dims[k], ranks[k]) for k = 1:3]
+    core = _test_randn(178, ranks...)
+    factors = [_test_randn(179 + k, dims[k], ranks[k]) for k = 1:3]
     A = reconstruct_tucker(core, factors)
     td = hooi(A, ranks; maxiter = 30, verbose = false)
     @test td isa TuckerResult
@@ -202,12 +202,12 @@ end
 # low-level rank-1 solve + packed-point helpers
 # =========================================================================
 @testset "low-level rank-1 solve: unpack_point_rank1" begin
-    A = randn(6, 5, 4)
+    A = _test_randn(205, 6, 5, 4)
     model = JoinModel(A, 1)
     out = solve(
         RGDSolver(1.0),
         model;
-        init = RandomInit(),
+        init = HOSVDInit(),
         maxiter = 50,
         tol = 1e-6,
         verbose = false,
@@ -223,7 +223,7 @@ end
 # low-level rank-r solve + packed-point helpers
 # =========================================================================
 @testset "low-level rank-r solve: unpack_point_rankr, reconstruct_cp_rankr" begin
-    A = randn(6, 5, 4)
+    A = _test_randn(226, 6, 5, 4)
     r = 2
     model = JoinModel(A, r; geometry = :canonical)
     out = solve(
@@ -252,7 +252,7 @@ end
 end
 
 @testset "Manopt normalized_objective controls objective units" begin
-    A = randn(6, 5, 4)
+    A = _test_randn(255, 6, 5, 4)
     r = 2
     model = JoinModel(A, r; geometry = :canonical)
     p0 = TensorKitchen.initial_point(model, TuckerInit(); verbose = false)
@@ -322,7 +322,11 @@ end
     @test TensorKitchen.component_embedding(model_component.backend.components[1]) isa
           TensorKitchen.DefaultJoinEmbedding
 
-    p = TensorKitchen.initial_point(model, :random; verbose = false)
+    point_parts = ntuple(3) do _
+        factors = [normalize(randn(rng, d)) for d in dims]
+        TensorKitchen.pack_point_rank1_segre(1.0, factors)
+    end
+    p = TensorKitchen.join_point(M, point_parts)
     @test length(TensorKitchen.point_parts(p)) == 3
 
     f = cost(model, p)
@@ -341,8 +345,10 @@ end
     @test all(c -> c.manifold isa Manifolds.Segre, comps)
     @test all(c -> size(c.tensor) == dims, comps)
 
+    initial_normalized_cost = f / sum(abs2, A)
+    p_before = deepcopy(p)
     out = solve(
-        RGDSolver(1.0),
+        RGDSolver(1.0e-2),
         model;
         p0 = p,
         maxiter = 2,
@@ -351,18 +357,25 @@ end
         return_stats = true,
     )
     @test isfinite(out.cost) && isfinite(out.rel_error)
+    @test out.cost <= initial_normalized_cost
+    @test TensorKitchen._join_cache_point_equal(p, p_before)
 end
 
 @testset "LM residual/Jacobian smoke check matches gradient" begin
     cases = (
-        JoinModel(randn(5, 4, 3), 2; geometry = :canonical),
-        JoinModel(abs.(randn(5, 4, 3)), 2; geometry = :softplus_metric, nonnegative = true),
+        JoinModel(_test_randn(366, 5, 4, 3), 2; geometry = :canonical),
+        JoinModel(
+            abs.(_test_randn(367, 5, 4, 3)),
+            2;
+            geometry = :softplus_metric,
+            nonnegative = true,
+        ),
     )
     for model in cases
         M = TensorKitchen.manifold(model)
         p = TensorKitchen._solver_point(
             M,
-            TensorKitchen.initial_point(model, :random; verbose = false),
+            TensorKitchen.initial_point(model, HOSVDInit(); verbose = false),
         )
         basis = ManifoldsBase.DefaultOrthonormalBasis()
         r = TensorKitchen._lm_raw_residual_vector(model, p)
@@ -375,23 +388,25 @@ end
 end
 
 @testset "Operator interface matches Jacobian and gradient" begin
-    A = randn(5, 4, 3)
+    A = _test_randn(386, 5, 4, 3)
     cases = (
         (
             "generic_join",
             JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), A),
+            :deterministic,
         ),
-        ("cp_canonical", JoinModel(A, 2; geometry = :canonical)),
+        ("cp_canonical", JoinModel(A, 2; geometry = :canonical), HOSVDInit()),
         (
             "cp_softplus",
             JoinModel(abs.(A), 2; geometry = :softplus_metric, nonnegative = true),
+            HOSVDInit(),
         ),
     )
-    for (label, model) in cases
+    for (label, model, init) in cases
         M = TensorKitchen.manifold(model)
         p = TensorKitchen._solver_point(
             M,
-            TensorKitchen.initial_point(model, :random; verbose = false),
+            TensorKitchen.initial_point(model, init; verbose = false),
         )
         basis = ManifoldsBase.DefaultOrthonormalBasis()
         r = TensorKitchen.residual(model, p)
@@ -442,12 +457,12 @@ function _reference_join_jacobian_from_product_basis(model, M, p; basis)
     return J
 end
 @testset "LM generic join Jacobian uses component pushforwards" begin
-    A = randn(5, 4, 3)
+    A = _test_randn(453, 5, 4, 3)
     model = JoinModel((Manifolds.Segre((5, 4, 3)), Manifolds.Segre((5, 4, 3))), A)
     M = TensorKitchen.manifold(model)
     p = TensorKitchen._solver_point(
         M,
-        TensorKitchen.initial_point(model, :random; verbose = false),
+        TensorKitchen.initial_point(model, :deterministic; verbose = false),
     )
     basis = ManifoldsBase.DefaultOrthonormalBasis()
     J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
@@ -489,8 +504,8 @@ end
         coeff = zeros(Float64, d)
         coeff[j] = 1.0
         Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-        p_plus = ManifoldsBase.retract(M, p, ϵ * Xj, retraction_method)
-        p_minus = ManifoldsBase.retract(M, p, -ϵ * Xj, retraction_method)
+        p_plus = TensorKitchen._independent_retract(M, p, ϵ * Xj, retraction_method)
+        p_minus = TensorKitchen._independent_retract(M, p, -ϵ * Xj, retraction_method)
         TensorKitchen._join_reconstruct!(buf_plus, model.backend, p_plus)
         TensorKitchen._join_reconstruct!(buf_minus, model.backend, p_minus)
         fd = (buf_plus .- buf_minus) ./ (2 * ϵ)
@@ -499,7 +514,7 @@ end
 end
 
 @testset "LM CPD rank-r Jacobian matches finite differences across geometries" begin
-    A = randn(5, 4, 3)
+    A = _test_randn(510, 5, 4, 3)
     r = 2
     cases = (
         (JoinModel(A, r; geometry = :canonical), 1e-7),
@@ -512,7 +527,7 @@ end
         M = TensorKitchen.manifold(model)
         p = TensorKitchen._solver_point(
             M,
-            TensorKitchen.initial_point(model, :random; verbose = false),
+            TensorKitchen.initial_point(model, HOSVDInit(); verbose = false),
         )
         basis = ManifoldsBase.DefaultOrthonormalBasis()
         J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
@@ -525,8 +540,8 @@ end
             coeff = zeros(Float64, d)
             coeff[j] = 1.0
             Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-            p_plus = ManifoldsBase.retract(M, p, ϵ * Xj, retraction_method)
-            p_minus = ManifoldsBase.retract(M, p, -ϵ * Xj, retraction_method)
+            p_plus = TensorKitchen._independent_retract(M, p, ϵ * Xj, retraction_method)
+            p_minus = TensorKitchen._independent_retract(M, p, -ϵ * Xj, retraction_method)
             r_plus = TensorKitchen._lm_raw_residual_vector(model, p_plus)
             r_minus = TensorKitchen._lm_raw_residual_vector(model, p_minus)
             fd = (r_plus .- r_minus) ./ (2 * ϵ)
@@ -537,7 +552,7 @@ end
 
 @testset "LM CPD Jacobian finite differences across direct parameterizations" begin
     dims = (5, 4, 3)
-    A = randn(dims...)
+    A = _test_randn(548, dims...)
     r = 2
     cases = (
         ("rank1 native", TensorKitchen.Rank1CPDModel(A), 5e-7),
@@ -579,7 +594,7 @@ end
         M = TensorKitchen.manifold(model)
         p = TensorKitchen._solver_point(
             M,
-            TensorKitchen.initial_point(model, :random; verbose = false),
+            TensorKitchen.initial_point(model, HOSVDInit(); verbose = false),
         )
         basis = ManifoldsBase.DefaultOrthonormalBasis()
         J = TensorKitchen._lm_raw_jacobian_matrix(model, M, p; basis)
@@ -593,7 +608,7 @@ end
                 coeff = zeros(Float64, d)
                 coeff[j] = 1.0
                 Xj = ManifoldsBase.get_vector(M, p, coeff, basis)
-                p_plus = ManifoldsBase.retract(M, p, ϵ * Xj, retraction_method)
+                p_plus = TensorKitchen._independent_retract(M, p, ϵ * Xj, retraction_method)
                 r_plus = TensorKitchen._lm_raw_residual_vector(model, p_plus)
                 fd = (r_plus .- r0) ./ ϵ
                 @test maximum(abs.(fd .- J[:, j])) ≤ tol_fd
@@ -602,11 +617,11 @@ end
     end
 end
 @testset "LM normalized and unnormalized objectives take the same step" begin
-    A = randn(6, 5, 4)
+    A = _test_randn(613, 6, 5, 4)
     model = JoinModel(A, 2; geometry = :canonical)
     p0 = TensorKitchen._solver_point(
         TensorKitchen.manifold(model),
-        TensorKitchen.initial_point(model, :random; verbose = false),
+        TensorKitchen.initial_point(model, HOSVDInit(); verbose = false),
     )
     res_rel = solve(
         LMSolver(),
@@ -639,9 +654,9 @@ end
     dims = (3, 2, 2)
     r = 2
     λ̃ = [1.5, -0.4]
-    Ũ = [randn(dims[m], r) for m = 1:length(dims)]
-    λ̇̃ = randn(r)
-    U̇̃ = [randn(dims[m], r) for m = 1:length(dims)]
+    Ũ = [_test_randn(650 + m, dims[m], r) for m = 1:length(dims)]
+    λ̇̃ = _test_randn(654, r)
+    U̇̃ = [_test_randn(655 + m, dims[m], r) for m = 1:length(dims)]
     p = TensorKitchen.pack_point_rankr(λ̃, Ũ, r)
     X = TensorKitchen.pack_point_rankr(λ̇̃, U̇̃, r)
 
@@ -672,7 +687,7 @@ end
     )
 
     model_sp = TensorKitchen.RankRCPDModel(
-        randn(dims...),
+        _test_randn(683, dims...),
         r;
         nonnegative = true,
         geometry = :softplus_metric,
@@ -685,7 +700,7 @@ end
     @test all(F -> all(isfinite, F), U_lat)
 end
 @testset "cpd/approx accept LMSolver" begin
-    A = randn(5, 4, 3)
+    A = _test_randn(696, 5, 4, 3)
     res_cpd_symbol = cpd(A, 2; solver = :lm, maxiter = 2, tol = 1e-6, verbose = false)
     @test res_cpd_symbol.solver == :lm
 
@@ -720,12 +735,12 @@ end
 end
 
 @testset "BTD exposes LM residual/Jacobian hooks on nested Tucker layouts" begin
-    A = randn(7, 6, 5)
+    A = _test_randn(731, 7, 6, 5)
     ranks = (2, 2, 2)
     manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(size(A), ranks, 2))
     backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
     model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
-    p0 = TensorKitchen.initial_point(model, :random; verbose = false)
+    p0 = TensorKitchen._btd_random_point(MersenneTwister(731), backend)
     M = TensorKitchen.manifold(model)
     p0_solver = TensorKitchen._solver_point(M, p0)
     basis = ManifoldsBase.DefaultOrthonormalBasis()
@@ -751,7 +766,7 @@ end
     coeff[1] = 1.0
     X = ManifoldsBase.get_vector(M, p0_solver, coeff, basis)
     JX = TensorKitchen.differential_action(model, p0_solver, X)
-    ambient = randn(size(A))
+    ambient = _test_randn(762, size(A))
     lhs = dot(JX, vec(ambient))
     rhs = ManifoldsBase.inner(
         M,
@@ -767,7 +782,7 @@ end
     @test norm(M, p0_solver, exact_basis_gradient - direct_gradient) ≤ 1e-12
 end
 
-@testset "Tucker retraction preserves point scalar type" begin
+@testset "Hager-Zhang preserves Tucker point scalar type" begin
     rng = MersenneTwister(811)
     dims = (5, 4, 3)
     ranks = (2, 2, 2)
@@ -780,28 +795,102 @@ end
         return Manifolds.TuckerPoint(randn(rng, T, ranks...), factors...)
     end
 
-    @test 0.1 isa Float64
-    for T in (Float32, Float64)
-        p = make_point(T)
-        X = rand(rng, M; vector_at = p)
-        method = TensorKitchen._solver_retraction_method(M, p)
-        q = ManifoldsBase.retract_fused(M, p, X, 0.1, method)
+    p = make_point(Float32)
+    method = TensorKitchen._solver_retraction_method(M, p)
+    @test !(method isa TensorKitchen._ScalarTypeRetraction)
 
-        @test eltype(q.hosvd.core) === T
-        @test all(eltype(U) === T for U in q.hosvd.U)
+    if :hagerzhang in TensorKitchen._lbfgs_supported_linesearches()
+        target = randn(rng, Float32, dims...)
+        model = JoinModel(M, target)
+        p0 = TensorKitchen._solver_point(TensorKitchen.manifold(model), (p,))
+        M_solver = TensorKitchen.manifold(model)
+        base_method = TensorKitchen._solver_retraction_method(M_solver, p0)
+        hz_method = TensorKitchen._hagerzhang_retraction_method(M_solver, base_method)
+        transport = TensorKitchen._default_vector_transport_method(M_solver, p0, hz_method)
+        linesearch = TensorKitchen._lbfgs_linesearch(
+            :hagerzhang,
+            M_solver,
+            p0,
+            hz_method,
+            transport,
+            Float32,
+        )
+        @test hz_method isa TensorKitchen._ScalarTypeRetraction
+        @test TensorKitchen._scalar_eltype(linesearch.candidate_point) === Float32
+
+        result = approx(
+            M,
+            target;
+            solver = LBFGSSolver(linesearch = :hagerzhang),
+            maxiter = 1,
+            tol = 1.0f-6,
+            verbose = false,
+        )
+        @test result isa ApproxResult
+        @test result.cost isa Float32
+        @test result.rel_error isa Float32
+        @test TensorKitchen._scalar_eltype(result.point) === Float32
     end
+end
 
-    M_product = ProductManifold(M, M)
-    p_product = ArrayPartition(make_point(Float32), make_point(Float32))
-    X_product = rand(rng, M_product; vector_at = p_product)
-    method_product = TensorKitchen._solver_retraction_method(M_product, p_product)
-    q_product =
-        ManifoldsBase.retract_fused(M_product, p_product, X_product, 0.1, method_product)
+@testset "Float32 Tucker solver results preserve scalar type" begin
+    rng = MersenneTwister(812)
+    target = randn(rng, Float32, 5, 4, 3)
+    M = Manifolds.Tucker(size(target), (2, 2, 2))
 
-    for q_part in TensorKitchen.point_parts(q_product)
-        @test eltype(q_part.hosvd.core) === Float32
-        @test all(eltype(U) === Float32 for U in q_part.hosvd.U)
-    end
+    result = approx(
+        M,
+        target;
+        solver = :rgd_fixed,
+        stepsize = 1.0f-3,
+        maxiter = 2,
+        tol = 1.0f-6,
+        verbose = false,
+    )
+    @test result isa ApproxResult
+    @test result.cost isa Float32
+    @test result.rel_error isa Float32
+    @test result.grad_norm isa Float32
+
+end
+
+@testset "Float32 LM residual operators preserve scalar type" begin
+    rng = MersenneTwister(813)
+    target = randn(rng, Float32, 4, 3, 2)
+    M = Manifolds.Tucker(size(target), (2, 2, 1))
+    model = JoinModel(M, target)
+    M_solver = TensorKitchen.manifold(model)
+    p = TensorKitchen._solver_point(
+        M_solver,
+        TensorKitchen.initial_point(model, :sthosvd; verbose = false),
+    )
+    adjoint_f =
+        TensorKitchen._lm_adjoint_action_function(model, Float32, sum(abs2, target), true)
+    X = adjoint_f(M_solver, p, randn(rng, Float64, length(target)))
+    @test TensorKitchen._scalar_eltype(X) === Float32
+
+    tucker_result =
+        approx(M, target; solver = :lm, maxiter = 1, tol = 1.0f-6, verbose = false)
+    @test tucker_result isa ApproxResult
+    @test tucker_result.cost isa Float32
+    @test tucker_result.rel_error isa Float32
+    @test TensorKitchen._scalar_eltype(tucker_result.point) === Float32
+    @test tucker_result.solver_info.uses_lm_subproblem_adapter
+
+    result = cpd(
+        randn(rng, Float32, 4, 3, 2),
+        2;
+        solver = :lm,
+        maxiter = 1,
+        tol = 1.0f-6,
+        verbose = false,
+    )
+    @test result isa CPDResult
+    @test result.cost isa Float32
+    @test result.rel_error isa Float32
+    @test result.grad_norm isa Float32
+    @test eltype(TensorKitchen.weights(result)) === Float32
+    @test all(eltype(F) === Float32 for F in TensorKitchen.factors(result))
 end
 
 @testset "BTD backend construction is ambient-workspace-free" begin
@@ -846,7 +935,7 @@ end
     )
 
     lazy_model = TensorKitchen.JoinModel{Float32,typeof(lazy_backend)}(lazy_backend)
-    lazy_point = TensorKitchen.initial_point(lazy_model, :random)
+    lazy_point = TensorKitchen._btd_random_point(MersenneTwister(936), lazy_backend)
     @test TensorKitchen.cost(lazy_model, lazy_point) isa Float32
     @test TensorKitchen.rgrad(lazy_model, lazy_point) isa ArrayPartition
     @test TensorKitchen.model_exact_join_basis_function(lazy_model)(
@@ -1043,29 +1132,30 @@ end
     @test length(join_backend.component_bufs) == length(manifolds)
 end
 
-@testset "BTD rejects LMSolver until nested Tucker LM support lands" begin
-    A = randn(7, 6, 5)
-    ranks = (2, 2, 2)
-
-    @test_throws ArgumentError btd(
+@testset "BTD supports Float32 LM on nested Tucker layouts" begin
+    A = _test_randn(817, Float32, 4, 3, 2)
+    manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(size(A), (2, 2, 1), 2))
+    backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
+    model = TensorKitchen.JoinModel{Float32,typeof(backend)}(backend)
+    p0 = TensorKitchen.initial_point(model, :sthosvd)
+    result = btd(
         A,
         2,
-        ranks;
-        solver = :lm,
-        maxiter = 2,
-        tol = 1e-6,
-        verbose = false,
-    )
-
-    @test_throws ArgumentError btd(
-        A,
-        2,
-        ranks;
+        (2, 2, 1);
         solver = LMSolver(),
-        maxiter = 2,
-        tol = 1e-6,
+        p0,
+        maxiter = 1,
+        tol = 1.0f-6,
+        warm_rel_error_gate = nothing,
+        btd_als_polish_maxiter = 0,
         verbose = false,
     )
+
+    @test result isa BTDResult
+    @test result.cost isa Float32
+    @test result.rel_error isa Float32
+    @test TensorKitchen._scalar_eltype(result.point) === Float32
+    @test result.solver_info.uses_lm_subproblem_adapter
 end
 
 @testset "BTD projected block residual matches explicit ambient residual" begin
@@ -1076,7 +1166,9 @@ end
     manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(dims, ranks, 3))
     backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
     model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
-    parts = TensorKitchen.point_parts(TensorKitchen.initial_point(model, :random))
+    parts = TensorKitchen.point_parts(
+        TensorKitchen._btd_random_point(MersenneTwister(1163), backend),
+    )
     target_before = copy(A)
 
     for b = 1:backend.r
@@ -1147,7 +1239,9 @@ end
     manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(dims, ranks, 3))
     backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
     model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
-    parts = TensorKitchen.point_parts(TensorKitchen.initial_point(model, :random))
+    parts = TensorKitchen.point_parts(
+        TensorKitchen._btd_random_point(MersenneTwister(1234), backend),
+    )
 
     for b = 1:backend.r
         residual_without_b = copy(A)
@@ -1193,7 +1287,7 @@ end
     manifolds = TensorKitchen._as_join_manifold_tuple(TuckerJoin(dims, ranks, 2))
     backend = TensorKitchen._sum_backend_instance(TensorKitchen.BTDBackend, manifolds, A)
     model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
-    p0 = TensorKitchen.initial_point(model, :random)
+    p0 = TensorKitchen._btd_random_point(MersenneTwister(1280), backend)
 
     ambient = fit_btd_als(
         A,
@@ -1254,7 +1348,7 @@ end
 @testset "cp_rank.jl: low-level rank-r solve, cost_segre, egrad_segre, cost_secant_rankr, egrad_secant_rankr" begin
     dims = (5, 4, 3)
     r = 2
-    A = randn(dims...)
+    A = _test_randn(1336, dims...)
     model = JoinModel(A, r; geometry = :canonical)
     out = solve(
         RGDSolver(1.0),
@@ -1310,7 +1404,7 @@ end
 # low-level rank-r solve + cpd packed-point helpers
 # =========================================================================
 @testset "low-level rank-r solve: unpack_point_rankr for cpd reconstruction" begin
-    A = randn(6, 5, 4)
+    A = _test_randn(1392, 6, 5, 4)
     r = 2
     model = JoinModel(A, r; geometry = :canonical)
     out = solve(
@@ -1334,8 +1428,8 @@ end
 @testset "cpd.jl: cpd(), CPDResult, reconstruct" begin
     dims = (6, 5, 4)
     r = 2
-    core = randn(r, r, r)
-    factors = [randn(dims[k], r) for k = 1:3]
+    core = _test_randn(1416, r, r, r)
+    factors = [_test_randn(1417 + k, dims[k], r) for k = 1:3]
     A = reconstruct_tucker(core, factors)
     res = cpd(A, r; verbose = false)
     @test res isa CPDResult
@@ -1347,7 +1441,7 @@ end
     @test rel_error(A, Ahat) == rel_error(A, res)
 
     model = JoinModel(A, r; geometry = :canonical)
-    p = TensorKitchen.initial_point(model, :random)
+    p = TensorKitchen.initial_point(model, HOSVDInit())
     comps = TensorKitchen.extract_components(model, p)
     @test length(comps) == r
     @test comps[1] isa TensorKitchen.CPDComponent
@@ -1363,7 +1457,7 @@ end
 end
 
 @testset "frontend defaults through public APIs" begin
-    A = randn(6, 5, 4)
+    A = _test_randn(1445, 6, 5, 4)
     cpd_res = cpd(A, 2; maxiter = 1, verbose = false)
     @test cpd_res isa CPDResult
     @test cpd_res.solver == :rgd
@@ -1509,8 +1603,7 @@ end
 end
 
 @testset "cpd.jl: nonnegative CPD keeps cost nonnegative on larger tensors" begin
-    Random.seed!(1)
-    A = abs.(randn(60, 50, 40))
+    A = abs.(_test_randn(1591, 60, 50, 40))
     res = cpd(A, 5; solver = :rgd, nonnegative = true, maxiter = 3, verbose = false)
     @test isfinite(res.cost)
     @test res.cost >= 0
@@ -1519,12 +1612,11 @@ end
 end
 
 @testset "cpd.jl: nonnegative analytic cost matches explicit residual" begin
-    Random.seed!(7)
     dims = (8, 6, 5)
     r = 3
-    A = abs.(randn(Float64, dims...))
+    A = abs.(_test_randn(1601, Float64, dims...))
     model = JoinModel(A, r; nonnegative = true)
-    p = TensorKitchen.initial_point(model, RandomInit())
+    p = TensorKitchen.initial_point(model, HOSVDInit())
     λ̃, Ũ = unpack_point_rankr(p, dims, r)
     λ = λ̃ .^ 2
     U = [Um .^ 2 for Um in Ũ]
@@ -1551,20 +1643,24 @@ end
         k in eachindex(TensorKitchen.weights(res))
     )
 
-    Random.seed!(42)
-    A1 = abs.(randn(18, 14, 10))
+    dims1 = (18, 14, 10)
+    A1 = abs.(_test_randn(1633, dims1...))
+    init_rng1 = MersenneTwister(1634)
+    p01 = CPDPoint([1.0], [rand(init_rng1, d, 1) .+ 0.1 for d in dims1])
     for solver in (:rgd, :rcg)
-        res = cpd(A1, 1; solver = solver, nonnegative = true, maxiter = 4, verbose = false)
+        res = cpd(A1, 1; solver, nonnegative = true, p0 = p01, maxiter = 4, verbose = false)
         cost, rel = explicit_stats(A1, res)
         @test res.cost ≈ expected_solver_cost(solver, cost, rel) atol = 1e-8 rtol = 1e-8
         @test res.rel_error ≈ rel atol = 1e-8 rtol = 1e-8
         @test public_columns_unit(res)
     end
 
-    Random.seed!(42)
-    Ar = abs.(randn(20, 16, 12))
+    dimsr = (20, 16, 12)
+    Ar = abs.(_test_randn(1643, dimsr...))
+    init_rngr = MersenneTwister(1644)
+    p0r = CPDPoint(ones(3), [rand(init_rngr, d, 3) .+ 0.1 for d in dimsr])
     for solver in (:als, :rgd, :rcg)
-        res = cpd(Ar, 3; solver = solver, nonnegative = true, maxiter = 4, verbose = false)
+        res = cpd(Ar, 3; solver, nonnegative = true, p0 = p0r, maxiter = 4, verbose = false)
         cost, rel = explicit_stats(Ar, res)
         @test res.cost ≈ expected_solver_cost(solver, cost, rel) atol = 1e-8 rtol = 1e-8
         @test res.rel_error ≈ rel atol = 1e-8 rtol = 1e-8
@@ -1575,7 +1671,8 @@ end
 @testset "cpd.jl: initializer objects and explicit p0" begin
     dims = (6, 5, 4)
     r = 2
-    comps = [RankOneTensor(randn(), [randn(d) for d in dims]) for _ = 1:r]
+    rng = MersenneTwister(1657)
+    comps = [RankOneTensor(randn(rng), [randn(rng, d) for d in dims]) for _ = 1:r]
     A = reconstruct_cpd_rankr(comps)
 
     model = JoinModel(A, r; geometry = :canonical)
@@ -1589,7 +1686,9 @@ end
     @test U_hosvd_sym == U_hosvd
 
     p0 = TensorKitchen.initial_point(model, TuckerDiagInit())
-    p_base = TensorKitchen.initial_point(model, RandomInit())
+    p_random = TensorKitchen.initial_point(model, RandomInit())
+    @test length(unpack_point_rankr(p_random, dims, r)[1]) == r
+    p_base = p0
     p_warm = TensorKitchen.initial_point(
         model,
         ALSWarmStartInit(2; base_init = PointInit(p_base)),
@@ -1751,7 +1850,7 @@ end
         A,
         r;
         solver = :rgd,
-        init = ALSWarmStartInit(2; base_init = RandomInit()),
+        init = ALSWarmStartInit(2; base_init = PointInit(p_random)),
         maxiter = 5,
         tol = 1e-6,
         verbose = false,
@@ -1765,7 +1864,7 @@ end
         solver = :rgd,
         init = :alswarm,
         warm_steps = 2,
-        warm_init = :random,
+        warm_init = PointInit(p_random),
         maxiter = 5,
         tol = 1e-6,
         verbose = false,
@@ -1839,7 +1938,7 @@ end
     dims = (7, 6, 5)
     r = 2
     λ = [2.0, -0.75]
-    U = [randn(dims[m], r) for m = 1:3]
+    U = [_test_randn(1921 + m, dims[m], r) for m = 1:3]
     A_ref = reconstruct_cpd_rankr(components_from_factors(λ, U))
 
     q_sep = normalize_components(CPDPoint(λ, U), :lambda_separate)
@@ -1872,7 +1971,7 @@ end
         r;
         maxiter = 3,
         tol = 1e-6,
-        init = RandomInit(),
+        init_factors = (copy(λ), [copy(F) for F in U]),
         normalization = :lambda_separate,
         verbose = false,
         return_stats = true,
@@ -1934,8 +2033,9 @@ end
     comps =
         [RankOneTensor(abs(randn(rng)), [abs.(randn(rng, d)) for d in dims]) for _ = 1:r]
     A = reconstruct_cpd_rankr(comps)
+    init_rng = MersenneTwister(2026)
+    p0 = CPDPoint(ones(r), [rand(init_rng, dims[m], r) .+ 0.1 for m = 1:length(dims)])
 
-    Random.seed!(2026)
     res_auto = cpd(
         A,
         r;
@@ -1944,11 +2044,10 @@ end
         nn_update = :nnls,
         maxiter = 40,
         tol = 1e-6,
-        init = :random,
+        p0,
         normalization = :auto,
         verbose = false,
     )
-    Random.seed!(2026)
     res_none = cpd(
         A,
         r;
@@ -1957,11 +2056,10 @@ end
         nn_update = :nnls,
         maxiter = 40,
         tol = 1e-6,
-        init = :random,
+        p0,
         normalization = :none,
         verbose = false,
     )
-    Random.seed!(2026)
     res_sep = cpd(
         A,
         r;
@@ -1970,7 +2068,7 @@ end
         nn_update = :nnls,
         maxiter = 40,
         tol = 1e-6,
-        init = :random,
+        p0,
         normalization = :lambda_separate,
         verbose = false,
     )
@@ -1982,7 +2080,6 @@ end
         isapprox(res_auto.grad_norm, res_sep.grad_norm; atol = 1e-12, rtol = 1e-12)
     )
 
-    Random.seed!(2026)
     res_default_update = cpd(
         A,
         r;
@@ -1990,7 +2087,7 @@ end
         nonnegative = true,
         maxiter = 40,
         tol = 1e-6,
-        init = :random,
+        p0,
         normalization = :auto,
         verbose = false,
     )
@@ -2006,13 +2103,17 @@ end
         [RankOneTensor(abs(randn(rng)), [abs.(randn(rng, d)) for d in dims]) for _ = 1:r]
     A = reconstruct_cpd_rankr(comps)
     A .+= 0.01 .* abs.(randn(rng, size(A)...))
+    init_rng = MersenneTwister(2128)
+    λ0 = ones(r)
+    U0 = [rand(init_rng, d, r) .+ 0.1 for d in dims]
+    p0_nn = CPDPoint(λ0, U0)
 
     out_nn = fit_cp_als(
         A,
         r;
         maxiter = 30,
         tol = 1e-6,
-        init = RandomInit(),
+        init_factors = (λ0, U0),
         verbose = false,
         return_stats = true,
         nonnegative = true,
@@ -2028,22 +2129,15 @@ end
         nonnegative = true,
         maxiter = 30,
         tol = 1e-6,
-        init = RandomInit(),
+        p0 = p0_nn,
         verbose = false,
     )
     @test all(w -> w >= -1e-12, TensorKitchen.weights(res_nn))
     @test all(F -> all(F .>= -1e-12), TensorKitchen.factors(res_nn))
     @test isfinite(res_nn.rel_error)
 
-    res_nn_api = nncpd(
-        A,
-        r;
-        solver = :als,
-        maxiter = 30,
-        tol = 1e-6,
-        init = RandomInit(),
-        verbose = false,
-    )
+    res_nn_api =
+        nncpd(A, r; solver = :als, maxiter = 30, tol = 1e-6, p0 = p0_nn, verbose = false)
     @test all(w -> w >= -1e-12, TensorKitchen.weights(res_nn_api))
     @test all(F -> all(F .>= -1e-12), TensorKitchen.factors(res_nn_api))
     @test isfinite(res_nn_api.rel_error)
@@ -2079,14 +2173,10 @@ end
     )
     @test res_nn_alswarm_rgd.rel_error ≈ res_nn_manual_rgd.rel_error atol = 1e-12
 
-    res_nn_api_heur = nncpd(
-        A;
-        solver = :als,
-        maxiter = 2,
-        tol = 1e-6,
-        init = RandomInit(),
-        verbose = false,
-    )
+    r_heur = minimum(size(A))
+    p0_heur = CPDPoint(ones(r_heur), [rand(init_rng, d, r_heur) .+ 0.1 for d in dims])
+    res_nn_api_heur =
+        nncpd(A; solver = :als, maxiter = 2, tol = 1e-6, p0 = p0_heur, verbose = false)
     @test length(TensorKitchen.weights(res_nn_api_heur)) == minimum(size(A))
     @test all(w -> w >= -1e-12, TensorKitchen.weights(res_nn_api_heur))
     @test all(F -> all(F .>= -1e-12), TensorKitchen.factors(res_nn_api_heur))
@@ -2099,7 +2189,7 @@ end
         nn_update = :mu,
         maxiter = 30,
         tol = 1e-6,
-        init = RandomInit(),
+        p0 = p0_nn,
         verbose = false,
     )
     @test isfinite(res_nn_mu.rel_error)
@@ -2114,7 +2204,7 @@ end
         nn_update = :hals,
         maxiter = 30,
         tol = 1e-6,
-        init = RandomInit(),
+        p0 = p0_nn,
         verbose = false,
     )
     @test isfinite(res_nn_hals.rel_error)
@@ -2130,7 +2220,7 @@ end
         nn_update = :nnls,
         maxiter = 30,
         tol = 1e-6,
-        init = RandomInit(),
+        p0 = p0_nn,
         verbose = false,
     )
     @test isfinite(res_nn_nnls.rel_error)
@@ -2460,7 +2550,7 @@ end
         r;
         maxiter = 1,
         tol = 1e6,
-        init = RandomInit(),
+        init = HOSVDInit(),
         verbose = false,
         return_stats = true,
         nonnegative = true,
@@ -2539,13 +2629,13 @@ end
     X_1 = ManifoldsBase.get_vector(M_native, p_native, e_1, basis_native)
     X_1 ./= max(norm(M_native, p_native, X_1), eps(Float64))
     ϵ = 1e-5
-    p_plus = ManifoldsBase.retract(
+    p_plus = TensorKitchen._independent_retract(
         M_native,
         p_native,
         ϵ * X_1,
         ManifoldsBase.ExponentialRetraction(),
     )
-    p_minus = ManifoldsBase.retract(
+    p_minus = TensorKitchen._independent_retract(
         M_native,
         p_native,
         -ϵ * X_1,
@@ -3056,8 +3146,10 @@ end
     @test map(TensorKitchen._component_manifold, backend.components) == manifolds
     model_btd = JoinModel{Float64,typeof(backend)}(backend)
     M_btd = TensorKitchen.manifold(model_btd)
-    p_btd =
-        TensorKitchen._solver_point(M_btd, TensorKitchen.initial_point(model_btd, :random))
+    p_btd = TensorKitchen._solver_point(
+        M_btd,
+        TensorKitchen._btd_random_point(MersenneTwister(3179), backend),
+    )
     basis_btd = ManifoldsBase.DefaultOrthonormalBasis()
     J_btd =
         TensorKitchen._lm_raw_jacobian_matrix(model_btd, M_btd, p_btd; basis = basis_btd)
@@ -3083,7 +3175,12 @@ end
         coeff = zeros(Float64, manifold_dimension(M_btd))
         coeff[j] = 1.0
         Xj = ManifoldsBase.get_vector(M_btd, p_btd, coeff, basis_btd)
-        p_plus = ManifoldsBase.retract(M_btd, p_btd, ϵ_btd * Xj, retraction_method_btd)
+        p_plus = TensorKitchen._independent_retract(
+            M_btd,
+            p_btd,
+            ϵ_btd * Xj,
+            retraction_method_btd,
+        )
         r_plus = TensorKitchen._lm_raw_residual_vector(model_btd, p_plus)
         fd = (r_plus .- residual0_btd) ./ ϵ_btd
         @test maximum(abs.(fd .- J_btd[:, j])) ≤ 5e-6
@@ -3116,7 +3213,7 @@ end
         q_btd = TensorKitchen._replace_block_part(
             p_btd,
             b,
-            retract(
+            TensorKitchen._independent_retract(
                 TensorKitchen._backend_manifold(backend, b),
                 parts_btd[b],
                 (-h) * block_grad,
@@ -3134,8 +3231,7 @@ end
     @test backend.workspace.perm_out isa TensorKitchen._WorkspaceTensorCache{Float64,3}
     @test backend.workspace.persist isa TensorKitchen._WorkspaceTensorCache{Float64,3}
     model = TensorKitchen.JoinModel{Float64,typeof(backend)}(backend)
-    Random.seed!(2028)
-    p_base_btd = TensorKitchen.initial_point(model, :random)
+    p_base_btd = TensorKitchen._btd_random_point(MersenneTwister(2028), backend)
     p_warm_btd = TensorKitchen.initial_point(
         model,
         BTDALSWarmStartInit(
@@ -3202,7 +3298,7 @@ end
     # Built-in Segre path (upstream-only): no project(M,p,⋅) for structured Segre tangent.
     model = TensorKitchen.Rank1CPDModel(A)
     M = TensorKitchen.manifold(model)
-    p = TensorKitchen.initial_point(model, :random)
+    p = TensorKitchen.initial_point(model, HOSVDInit())
     eg = TensorKitchen.egrad(model, p)
     g_model = grad(model, p)
     g_api = grad(M, p, eg)
@@ -3234,7 +3330,7 @@ end
 
     # Rank-r canonical direct rgrad path.
     model_c = TensorKitchen.RankRCPDModel(A, 2; geometry = :canonical)
-    p_c = TensorKitchen.initial_point(model_c, :random)
+    p_c = TensorKitchen.initial_point(model_c, HOSVDInit())
     g_c_proj = grad(model_c, p_c)
     g_c_dir = rgrad(model_c, p_c)
     gλ_c_proj, gU_c_proj = TensorKitchen.unpack_rankr_canonical(g_c_proj, dims, 2)
@@ -3596,7 +3692,7 @@ end
     dims = (5, 4, 3)
     r = 2
     λ = [1.0, -0.5]
-    U = [randn(dims[m], r) for m = 1:3]
+    U = [_test_randn(3683 + m, dims[m], r) for m = 1:3]
     p = pack_point_rankr(λ, U, r)
     λ2, U2 = unpack_point_rankr(p, dims, r)
     @test λ2 ≈ λ && all(U2[m] ≈ U[m] for m = 1:3)
@@ -3620,7 +3716,7 @@ end
     @test A_join ≈ A_in
     @test A_canon_rt ≈ A_in
 
-    A = randn(8, 6, 5)
+    A = _test_randn(3707, 8, 6, 5)
     λ0, U0 = cp_init_tucker(A, 3)
     @test length(λ0) == 3 && length(U0) == 3
     for m = 1:3
@@ -3639,11 +3735,11 @@ end
         [1.0 0.5; 0.0 sqrt(1 - 0.5^2)],
     ]
     core = reconstruct_cpd_rankr(λc, [Matrix(F) for F in Cfac])
-    Q = [Matrix(qr(randn(dims_t[m], r_t)).Q[:, 1:r_t]) for m = 1:3]
+    Q = [Matrix(qr(_test_randn(3726+m, dims_t[m], r_t)).Q[:, 1:r_t]) for m = 1:3]
     A_t = reconstruct_tucker(core, Q)
     # Tiny ambient perturbation so Tucker-diagonal weights and LS weights on HOSVD factors
     # are not identical (otherwise Frobenius errors can match to machine precision).
-    A_t = A_t .+ 1e-5 .* randn(size(A_t))
+    A_t = A_t .+ 1e-5 .* _test_randn(3730, size(A_t))
     λ_diag, U_diag = TensorKitchen.init_cpd_factors(A_t, r_t; init = :tucker_diag)
     λ_tuck, U_tuck = TensorKitchen.init_cpd_factors(A_t, r_t; init = :tucker)
     err_diag = norm(reconstruct_cpd_rankr(λ_diag, U_diag) - A_t)
@@ -3671,23 +3767,34 @@ end
     @test err_tuck_model <= err_diag_model + 1e-8
 
     # mttkrp: direct path should match explicit Khatri-Rao path
-    U3 = [randn(8, 3), randn(6, 3), randn(5, 3)]
+    U3 = [_test_randn(3758, 8, 3), _test_randn(3759, 6, 3), _test_randn(3760, 5, 3)]
     for mode = 1:3
         G_kr = mttkrp(A, U3, mode; method = :khatri_rao)
         G_dir = mttkrp(A, U3, mode; method = :direct)
         @test G_dir ≈ G_kr atol = 1e-10
     end
 
-    A4 = randn(7, 5, 4, 3)
-    U4 = [randn(7, 2), randn(5, 2), randn(4, 2), randn(3, 2)]
+    A4 = _test_randn(3765, 7, 5, 4, 3)
+    U4 = [
+        _test_randn(3766, 7, 2),
+        _test_randn(3767, 5, 2),
+        _test_randn(3768, 4, 2),
+        _test_randn(3769, 3, 2),
+    ]
     for mode = 1:4
         G_kr = mttkrp(A4, U4, mode; method = :khatri_rao)
         G_dir = mttkrp(A4, U4, mode; method = :direct)
         @test G_dir ≈ G_kr atol = 1e-10
     end
 
-    A5 = randn(4, 3, 2, 3, 2)
-    U5 = [randn(4, 2), randn(3, 2), randn(2, 2), randn(3, 2), randn(2, 2)]
+    A5 = _test_randn(3773, 4, 3, 2, 3, 2)
+    U5 = [
+        _test_randn(3774, 4, 2),
+        _test_randn(3775, 3, 2),
+        _test_randn(3776, 2, 2),
+        _test_randn(3777, 3, 2),
+        _test_randn(3778, 2, 2),
+    ]
     for mode = 1:5
         G_kr = mttkrp(A5, U5, mode; method = :khatri_rao)
         G_dir = mttkrp(A5, U5, mode; method = :direct)
@@ -3726,21 +3833,21 @@ end
     @test_throws DimensionMismatch TensorKitchen.mttkrp!(
         out_buf,
         A,
-        [randn(7, 3), U3[2], U3[3]],
+        [_test_randn(3813, 7, 3), U3[2], U3[3]],
         1;
         method = :direct,
     )
     @test_throws DimensionMismatch TensorKitchen.mttkrp!(
         out_buf,
         A,
-        [U3[1], randn(6, 2), U3[3]],
+        [U3[1], _test_randn(3820, 6, 2), U3[3]],
         1;
         method = :direct,
     )
 end
 
 @testset "utils: cross_component, build_cross_matrix, grad_lambda_cp, cp_rankr_cost_value, cross_term_gradU, gradU_column_cp" begin
-    U = [randn(4, 2), randn(3, 2), randn(5, 2)]
+    U = [_test_randn(3827, 4, 2), _test_randn(3828, 3, 2), _test_randn(3829, 5, 2)]
     r = 2
     λ = [1.0, 0.5]
     comps = [RankOneTensor(λ[k], [U[m][:, k] for m = 1:length(U)]) for k = 1:r]
@@ -3757,7 +3864,7 @@ end
     col = gradU_column_cp(
         TensorKitchen.λ(comps[1]),
         TensorKitchen.vectors(comps[1])[1],
-        randn(4),
+        _test_randn(3844, 4),
         ct,
     )
     @test length(col) == 4
@@ -3782,7 +3889,7 @@ end
 end
 
 @testset "save_result and load_result preserve experiment records" begin
-    A = randn(8, 6, 4)
+    A = _test_randn(3869, 8, 6, 4)
     ranks = (3, 2, 2)
     result = tucker(A, ranks)
     record = (

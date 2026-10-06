@@ -63,18 +63,56 @@ function _lbfgs_supported_linesearches()
     return isdefined(Manopt, :HagerZhangLinesearch) ? (base..., :hagerzhang) : base
 end
 
-@inline function _lbfgs_linesearch(kind::Symbol, retraction_method, transport)
-    kind === :wolfe && return Manopt.WolfePowellLinesearch(
-        sufficient_curvature = 0.9,
-        stop_when_stepsize_less = 1e-8,
-        stop_decreasing_at_step = 100,
-        retraction_method = retraction_method,
-        vector_transport_method = transport,
-    )
-    if kind === :hagerzhang && isdefined(Manopt, :HagerZhangLinesearch)
-        return getproperty(Manopt, :HagerZhangLinesearch)(;
+@inline function _lbfgs_linesearch(
+    kind::Symbol,
+    M,
+    p,
+    retraction_method,
+    transport,
+    ::Type{T},
+) where {T<:Real}
+    if kind === :wolfe
+        candidate_point = _independent_solver_point(p)
+        return Manopt.WolfePowellLinesearchStepsize(
+            M;
+            p = candidate_point,
+            X = zero_vector(M, candidate_point),
+            number_type = T,
+            sufficient_curvature = T(0.9),
+            stop_when_stepsize_less = T(1e-8),
+            stop_decreasing_at_step = 100,
             retraction_method = retraction_method,
             vector_transport_method = transport,
+        )
+    end
+    if kind === :hagerzhang && isdefined(Manopt, :HagerZhangLinesearch)
+        TF = _hagerzhang_workspace_type(T)
+        return getproperty(Manopt, :HagerZhangLinesearchStepsize)(
+            M;
+            initial_guess = getproperty(Manopt, :HagerZhangInitialGuess){TF}(;
+                ψ0 = TF(0.01),
+                ψ1 = TF(0.01),
+                ψ2 = TF(2.0),
+                constant_guess = TF(NaN),
+                zero_abstol = eps(TF),
+                alphamax = TF(Inf),
+            ),
+            retraction_method = retraction_method,
+            vector_transport_method = transport,
+            initial_last_stepsize = TF(NaN),
+            initial_last_cost = TF(NaN),
+            stepsize_limit = TF(Inf),
+            candidate_point = _independent_solver_point(p),
+            candidate_direction = zero_vector(M, p),
+            ϵ = TF(1.0e-6),
+            δ = TF(0.1),
+            σ = TF(0.9),
+            ω = TF(1.0e-3),
+            θ = TF(0.5),
+            γ = TF(0.66),
+            ρ = TF(5.0),
+            Δ = TF(0.7),
+            secant_acceptance_ratio = TF(1.0e-8),
         )
     end
     throw(ArgumentError("Unsupported linesearch kind $kind."))
@@ -115,9 +153,12 @@ function solve_lbfgs(
         grad_tol,
         normalized_objective,
     )
-    p0_local = setup.p0
+    p0_local = _independent_solver_point(setup.p0)
     T = setup.T
     retraction_method = _solver_retraction_method(M, p0_local)
+    if linesearch === :hagerzhang
+        retraction_method = _hagerzhang_retraction_method(M, retraction_method)
+    end
     transport =
         isnothing(vector_transport_method) ?
         _default_vector_transport_method(M, p0_local, retraction_method) :
@@ -142,6 +183,7 @@ function solve_lbfgs(
         post_step_callback,
         iteration_callbacks,
     )
+    preconditioner_kwargs = isnothing(preconditioner) ? NamedTuple() : (; preconditioner)
 
     state = Manopt.quasi_Newton(
         M,
@@ -151,11 +193,18 @@ function solve_lbfgs(
         cautious_update = cautious_update,
         direction_update = Manopt.InverseBFGS(),
         memory_size = memory_size,
-        initial_scale = initial_scale,
-        preconditioner = preconditioner,
+        initial_scale = T(initial_scale),
+        preconditioner_kwargs...,
         retraction_method = retraction_method,
         vector_transport_method = transport,
-        stepsize = _lbfgs_linesearch(linesearch, retraction_method, transport),
+        stepsize = _lbfgs_linesearch(
+            linesearch,
+            M,
+            p0_local,
+            retraction_method,
+            transport,
+            T,
+        ),
         stopping_criterion = stopping,
         debug = callbacks.debug_actions,
         callbacks = callbacks.solver_callbacks,

@@ -36,7 +36,7 @@ end
 
     # Preparing an already compatible tensor is allocation-free at the object
     # level and preserves the original array identity.
-    native = rand(Float32, 3, 2)
+    native = _test_rand(39, Float32, 3, 2)
     @test prepare_tensor(native) === native
     @test storage_type(native) === Float32
     @test compute_type(native) === Float32
@@ -219,7 +219,7 @@ end
 
     lazy_model = TensorKitchen.JoinModel(lazy, rank; geometry = :canonical)
     dense_model = TensorKitchen.JoinModel(dense, rank; geometry = :canonical)
-    point = TensorKitchen.initial_point(dense_model, RandomInit(); verbose = false)
+    point = TensorKitchen.initial_point(dense_model, HOSVDInit(); verbose = false)
     normA2 = observation_norm2(lazy)
     lazy_cost, lazy_egrad = TensorKitchen.model_cost_egrad_functions(lazy_model, normA2)
     dense_cost, dense_egrad = TensorKitchen.model_cost_egrad_functions(dense_model, normA2)
@@ -244,7 +244,7 @@ end
         geometry = :softplus_metric,
         nonnegative = true,
     )
-    nn_point = TensorKitchen.initial_point(dense_nn_model, RandomInit(); verbose = false)
+    nn_point = TensorKitchen.initial_point(dense_nn_model, HOSVDInit(); verbose = false)
     lazy_nn_cost, lazy_nn_egrad =
         TensorKitchen.model_cost_egrad_functions(lazy_nn_model, normA2)
     dense_nn_cost, dense_nn_egrad =
@@ -468,6 +468,8 @@ end
 
 @testset "lazy CP initialization boundary" begin
     raw = reshape(Int16.(1:24), 4, 3, 2)
+    # These two calls intentionally exercise the public random-initializer
+    # routing only; no numerical convergence property depends on the draw.
     random_result = cpd(
         raw,
         2;
@@ -548,7 +550,7 @@ end
         counted,
         2;
         solver = :rgd,
-        init = ALSWarmStartInit(1; base_init = RandomInit()),
+        init = ALSWarmStartInit(1; base_init = PointInit(start)),
         maxiter = 1,
         verbose = false,
     )

@@ -20,7 +20,7 @@ end
 
 function rel_error(
     A::AbstractArray,
-    res::Union{CPDResult,TuckerResult,ApproxResult,BTDResult},
+    res::Union{CPDResult,SymCPDResult,TuckerResult,ApproxResult,BTDResult},
 )
     return relative_frobenius_error(A, reconstruct(res))
 end

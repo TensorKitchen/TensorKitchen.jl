@@ -86,10 +86,14 @@ function Manopt.get_reason(c::StopWhenCostRelChangeAndGradientLess)
 end
 
 # Summarize the current dual stopping-rule state for Manopt displays.
-function Manopt.status_summary(c::StopWhenCostRelChangeAndGradientLess)
+function Manopt.status_summary(
+    c::StopWhenCostRelChangeAndGradientLess;
+    context::Symbol = :default,
+)
     has_stopped = c.at_iteration >= 0
     status = has_stopped ? "reached" : "not reached"
-    return "cost rel change < $(c.tol_cost) and |grad f| < $(c.tol_grad): $status"
+    summary = "cost rel change < $(c.tol_cost) and |grad f| < $(c.tol_grad): $status"
+    return context === :inline ? "A stopping criterion requiring $summary" : summary
 end
 
 # Mark the dual stopping rule as convergence, not failure or exhaustion.
@@ -124,30 +128,35 @@ function _tk_get_solver_result(state)
 end
 
 
-# Match gradients/tangents to the point container Manopt is currently using.
-@inline _align_layout_like_point(p, x) =
-    hasproperty(p, :x) ?
-    (hasproperty(x, :x) ? x : (x isa Tuple ? ArrayPartition(x...) : x)) :
-    (hasproperty(x, :x) ? Tuple(getproperty(x, :x)) : x)
-
-
-# Recursively convert tuple-like product points to ArrayPartition layout.
-function _to_array_partition(x)
-    if x isa ArrayPartition
-        return ArrayPartition(map(_to_array_partition, x.x)...)
-    elseif hasproperty(x, :x)
-        return ArrayPartition(map(_to_array_partition, getproperty(x, :x))...)
-    elseif x isa Tuple
-        return ArrayPartition(map(_to_array_partition, x)...)
-    end
-    return x
-end
+# Match only the outer gradient/tangent container to Manopt's point layout.
+@inline _align_layout_like_point(p, x) = outer_container_like(p, x)
 
 
 # Adapt an initial point to the layout expected by the solver manifold.
 function _solver_point(M, p0)
     M2 = _unwrap_solver_manifold(M)
-    return M2 isa ProductManifold ? _to_array_partition(p0) : p0
+    return join_solver_point(M2, p0)
+end
+
+
+# Keep mutable nested component storage independent across Manopt state and
+# line-search workspaces. Some manifold-aware `copy(M, p)` implementations
+# copy only the outer product container for vector-of-vectors representations.
+@inline _independent_solver_point(p) = deepcopy(p)
+
+
+# Allocate a retraction result whose nested mutable storage cannot alias the
+# source point. Some ProductManifold allocation paths copy only the outer
+# container for vector-of-vectors representations.
+function _independent_retract(M, p, X, method)
+    q = _independent_solver_point(p)
+    ManifoldsBase.retract!(M, q, p, X, method)
+    return q
+end
+
+function _independent_retract(M, p, X)
+    method = ManifoldsBase.default_retraction_method(M, typeof(p))
+    return _independent_retract(M, p, X, method)
 end
 
 
@@ -159,14 +168,61 @@ end
 # as Segre or SoftplusEuclidean may choose ExponentialRetraction, while sphere-like
 # factors may choose their ManifoldsBase default.
 # Manifolds' Tucker polar retraction requires its fused step scalar to match the
-# point precision, while some Manopt line searches report a Float64 step.
+# point precision. This adapter is reserved for solver paths, such as the
+# Hager--Zhang line search, that do not yet derive their scalar type from the
+# current point.
 struct _ScalarTypeRetraction{R<:ManifoldsBase.AbstractRetractionMethod} <:
        ManifoldsBase.AbstractRetractionMethod
     method::R
 end
 
+function ManifoldsBase.retract_fused(
+    M::ManifoldsBase.AbstractManifold,
+    p,
+    X,
+    t::Number,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    T = _scalar_eltype(p)
+    return ManifoldsBase.retract_fused(M, p, X, T(t), method.method; kwargs...)
+end
+
+function ManifoldsBase.retract_fused(
+    M::ProductManifold,
+    p,
+    X,
+    t::Number,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    T = _scalar_eltype(p)
+    return ManifoldsBase.retract_fused(M, p, X, T(t), method.method; kwargs...)
+end
+
+function ManifoldsBase.retract(
+    M::ProductManifold,
+    p,
+    X,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    return ManifoldsBase.retract(M, p, X, method.method; kwargs...)
+end
+
 function ManifoldsBase.retract!(
     M::ManifoldsBase.AbstractManifold,
+    q,
+    p,
+    X,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    return ManifoldsBase.retract!(M, q, p, X, method.method; kwargs...)
+end
+
+function ManifoldsBase.retract!(
+    M::ProductManifold,
     q,
     p,
     X,
@@ -189,9 +245,21 @@ function ManifoldsBase.retract_fused!(
     return ManifoldsBase.retract_fused!(M, q, p, X, T(t), method.method; kwargs...)
 end
 
+function ManifoldsBase.retract_fused!(
+    M::ProductManifold,
+    q,
+    p,
+    X,
+    t::Number,
+    method::_ScalarTypeRetraction;
+    kwargs...,
+)
+    T = _scalar_eltype(p)
+    return ManifoldsBase.retract_fused!(M, q, p, X, T(t), method.method; kwargs...)
+end
+
 @inline function _default_component_retraction_method(Mi, pi)
-    method = ManifoldsBase.default_retraction_method(Mi, typeof(pi))
-    return Mi isa Manifolds.Tucker ? _ScalarTypeRetraction(method) : method
+    return ManifoldsBase.default_retraction_method(Mi, typeof(pi))
 end
 
 
@@ -201,8 +269,7 @@ function _solver_retraction_method(M, p)
 end
 
 function _solver_retraction_method_unwrapped(M::ProductManifold, p)
-    pparts0 = point_parts(p)
-    pparts = pparts0 isa Tuple ? pparts0 : Tuple(pparts0)
+    pparts = join_parts(M, p)
     n = length(M.manifolds)
     length(pparts) == n || throw(
         ArgumentError(
@@ -217,11 +284,23 @@ end
 _solver_retraction_method_unwrapped(M, p) = _default_component_retraction_method(M, p)
 
 
+# Detect nested Tucker factors before enabling the narrow mixed-scalar fallback.
+function _contains_tucker_manifold(M)
+    M2 = _unwrap_solver_manifold(M)
+    M2 isa Manifolds.Tucker && return true
+    return M2 isa ProductManifold && any(_contains_tucker_manifold, M2.manifolds)
+end
+
+@inline function _hagerzhang_retraction_method(M, method)
+    return _contains_tucker_manifold(M) ? _ScalarTypeRetraction(method) : method
+end
+
+
 # Conservative compatibility probe for vector transports used by Manopt solvers.
 function _supports_vector_transport_to(M, p, vt, retraction_method)
     try
         X = zero_vector(M, p)
-        q = retract(M, p, X, retraction_method)
+        q = _independent_retract(M, p, X, retraction_method)
         vector_transport_to(M, p, X, q, vt)
         return true
     catch
@@ -297,7 +376,7 @@ function _adaptive_initial_stepsize(
     (!isfinite(dnorm) || dnorm <= sqrt(eps(T))) && return base_stepsize
     δ = delta_scale / max(dnorm, one(T))
     q = try
-        retract(M, p0, δ .* d, retraction_method)
+        _independent_retract(M, p0, δ .* d, retraction_method)
     catch
         return base_stepsize
     end
@@ -389,7 +468,7 @@ end
 @inline _scale_solver_tangent(x::Number, scale::Real) = x * scale
 _scale_solver_tangent(x::AbstractArray, scale::Real) = x .* scale
 _scale_solver_tangent(x::ArrayPartition, scale::Real) =
-    ArrayPartition(map(part -> _scale_solver_tangent(part, scale), x.x)...)
+    _partition_parts(map(part -> _scale_solver_tangent(part, scale), x.x))
 _scale_solver_tangent(x::Tuple, scale::Real) =
     map(part -> _scale_solver_tangent(part, scale), x)
 function _scale_solver_tangent(x, scale::Real)
@@ -597,14 +676,14 @@ function _solver_stats(
     normalized_objective::Bool = false,
 )
     T = typeof(tol_T)
-    final_cost = model_cost(M, p_opt)
+    final_cost = T(model_cost(M, p_opt))
     rel_error = _solver_rel_error(final_cost, normA2, normalized_objective, T)
     grad_state = use_state_gradient ? _solver_gradient(state) : nothing
     grad_from_state = !isnothing(grad_state)
     grad_final =
         isnothing(grad_state) ? model_grad(M, p_opt) :
         _align_layout_like_point(p_opt, grad_state)
-    grad_norm = norm(M, p_opt, grad_final)
+    grad_norm = T(norm(M, p_opt, grad_final))
     iterations = _solver_iterations(state, maxiter)
     converged_grad =
         grad_norm < tol_T || (!isnothing(tiny_grad_tol) && grad_norm < tiny_grad_tol)
@@ -807,7 +886,7 @@ function _solver_post_step_callback(
         )
         p_new = _align_layout_like_point(p_old, p_new)
         p_new === p_old && return nothing
-        set_iterate!(state, M, p_new)
+        copyto!(M, p_old, p_new)
         if solver_sym == :rcg && hasproperty(state, :X)
             get_gradient!(problem, state.X, get_iterate(state))
             if hasproperty(state, :δ)
