@@ -62,14 +62,22 @@
     # The same outer adaptation also preserves Segre and Tucker native points.
     S = Manifolds.Segre((3, 3))
     segre_model = JoinModel(S, 2, zeros(3, 3))
-    segre_native = TensorKitchen.initial_point(segre_model, :random)
+    segre_native = TensorKitchen.initial_point(segre_model, :deterministic)
     segre_solver = TensorKitchen._solver_point(manifold(segre_model), segre_native)
     @test typeof(segre_solver.x[1]) === typeof(segre_native.x[1])
     @test is_point(manifold(segre_model), segre_solver)
 
     T = Manifolds.Tucker((3, 3), (1, 1))
     tucker_model = JoinModel(T, 2, zeros(3, 3))
-    tucker_native = TensorKitchen.initial_point(tucker_model, :random)
+    tucker_component = Manifolds.TuckerPoint(
+        reshape([1.0], 1, 1),
+        reshape([1.0, 0.0, 0.0], 3, 1),
+        reshape([0.0, 1.0, 0.0], 3, 1),
+    )
+    tucker_native = TensorKitchen.join_point(
+        manifold(tucker_model),
+        (deepcopy(tucker_component), deepcopy(tucker_component)),
+    )
     tucker_solver = TensorKitchen._solver_point(manifold(tucker_model), tucker_native)
     @test tucker_solver.x[1] isa Manifolds.TuckerPoint
     @test is_point(manifold(tucker_model), tucker_solver)
