@@ -26,62 +26,11 @@ function _symcpd_cg(
     tol::T,
     maxiter::Int,
 ) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
-    0 < tol < 1 || throw(ArgumentError("CG tol must lie in (0, 1)."))
     M = model.backend.product_manifold
-    solution = ManifoldsBase.zero_vector(M, p)
-    residual = copy(b)
-    direction = copy(residual)
-    residual_norm2 = inner(M, p, residual, residual)
-    initial_norm = sqrt(max(residual_norm2, zero(T)))
-    threshold = tol * initial_norm
-    if initial_norm == zero(T)
-        info = (
-            initial_residual_norm = zero(T),
-            final_residual_norm = zero(T),
-            relative_residual = zero(T),
-            threshold = zero(T),
-            tolerance = tol,
-            termination_reason = :initial_residual,
-        )
-        return solution, 0, true, info
-    end
-    iterations = 0
-    converged = false
-    termination_reason = :maxiter
-    final_norm = initial_norm
-    for k = 1:maxiter
-        action = normal_operator(model, p, direction)
-        action = action + _scale_solver_tangent(direction, damping)
-        curvature = inner(M, p, direction, action)
-        if !isfinite(curvature) || curvature <= eps(T) * max(residual_norm2, one(T))
-            termination_reason =
-                isfinite(curvature) ? :nonpositive_curvature : :nonfinite_curvature
-            break
-        end
-        alpha = residual_norm2 / curvature
-        solution = solution + _scale_solver_tangent(direction, alpha)
-        residual = residual - _scale_solver_tangent(action, alpha)
-        next_norm2 = inner(M, p, residual, residual)
-        iterations = k
-        final_norm = sqrt(max(next_norm2, zero(T)))
-        if final_norm <= threshold
-            converged = true
-            termination_reason = :converged
-            break
-        end
-        beta = next_norm2 / residual_norm2
-        direction = residual + _scale_solver_tangent(direction, beta)
-        residual_norm2 = next_norm2
-    end
-    info = (
-        initial_residual_norm = initial_norm,
-        final_residual_norm = final_norm,
-        relative_residual = final_norm / initial_norm,
-        threshold = threshold,
-        tolerance = tol,
-        termination_reason = termination_reason,
-    )
-    return solution, iterations, converged, info
+    damped_normal =
+        direction ->
+            normal_operator(model, p, direction) + _scale_solver_tangent(direction, damping)
+    return _tangent_cg(M, p, damped_normal, b; tol, maxiter)
 end
 
 @doc raw"""
