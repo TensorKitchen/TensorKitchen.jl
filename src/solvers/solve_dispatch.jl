@@ -52,7 +52,6 @@ function _solver_object(::Val{:lm}, ::Real; kwargs...)
         damping_term_min = get(kwargs, :damping_term_min, 0.1),
         β = get(kwargs, :β, 5.0),
         expect_zero_residual = get(kwargs, :expect_zero_residual, false),
-        linear_subsolver = get(kwargs, :linear_subsolver, Manopt.default_lm_lin_solve!),
     )
 end
 

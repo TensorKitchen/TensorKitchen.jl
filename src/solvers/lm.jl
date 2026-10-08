@@ -3,20 +3,22 @@ export LMSolver
 
 """
     LMSolver(; η=0.2, damping_term_min=0.1, β=5.0,
-        expect_zero_residual=false, linear_subsolver=Manopt.default_lm_lin_solve!)
+        expect_zero_residual=false)
 
 Configure the Riemannian Levenberg--Marquardt solver used for nonlinear
 least-squares models. `η` controls step acceptance, `damping_term_min` is the
 minimum damping scale, and `β` controls damping updates. Set
 `expect_zero_residual=true` only when the model is expected to fit the target
 exactly.
+
+The operator-based Manopt path uses its tangent conjugate-residual subproblem
+solver.
 """
 struct LMSolver <: AbstractSecondOrderROSolver
     η::Float64
     damping_term_min::Float64
     β::Float64
     expect_zero_residual::Bool
-    linear_subsolver::Any
 end
 
 function LMSolver(;
@@ -24,19 +26,12 @@ function LMSolver(;
     damping_term_min::Real = 0.1,
     β::Real = 5.0,
     expect_zero_residual::Bool = false,
-    linear_subsolver = Manopt.default_lm_lin_solve!,
 )
     0 < η < 1 || throw(ArgumentError("η must satisfy 0 < η < 1, got $η"))
     damping_term_min > 0 ||
         throw(ArgumentError("damping_term_min must be > 0, got $damping_term_min"))
     β > 1 || throw(ArgumentError("β must be > 1, got $β"))
-    return LMSolver(
-        Float64(η),
-        Float64(damping_term_min),
-        Float64(β),
-        expect_zero_residual,
-        linear_subsolver,
-    )
+    return LMSolver(Float64(η), Float64(damping_term_min), Float64(β), expect_zero_residual)
 end
 
 solver_symbol(::LMSolver) = :lm
@@ -146,7 +141,6 @@ function solve_lm(
     damping_term_min::Real = 0.1,
     β::Real = 5.0,
     expect_zero_residual::Bool = false,
-    linear_subsolver = Manopt.default_lm_lin_solve!,
     grad_tol = nothing,
     normalized_objective::Bool = true,
 )
@@ -273,7 +267,6 @@ function solve_lm(
             uses_direct_adjoint_action = true,
             uses_coordinate_linear_solver = false,
             uses_lm_subproblem_adapter = M_subproblem !== M,
-            uses_user_linear_subsolver = linear_subsolver !== Manopt.default_lm_lin_solve!,
             uses_vector_transport = !isnothing(vector_transport_method),
         ),
     )
@@ -313,7 +306,6 @@ function run_second_order_solver(
         damping_term_min = solver.damping_term_min,
         β = solver.β,
         expect_zero_residual = solver.expect_zero_residual,
-        linear_subsolver = solver.linear_subsolver,
         grad_tol,
         normalized_objective,
     )
