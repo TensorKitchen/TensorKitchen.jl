@@ -58,6 +58,7 @@ See [Choosing a decomposition](PIPELINE.md) for a longer comparison.
 
 ## Guides
 
+- [Start here: TensorKitchen without the tensor math](user_guide/README.md)
 - [Preparing large data](preparing_data.md)
 - [CP decomposition](cpd.md)
 - [Symmetric CP decomposition](symcpd.md)
