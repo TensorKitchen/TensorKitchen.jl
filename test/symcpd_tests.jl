@@ -22,8 +22,14 @@ _symcpd_coordinates(M, p) = TensorKitchen._symcpd_embed_coordinates(M, p)
         @test !converged(limited)
         @test solver_info(limited).termination_reason == :maxiter
         @test solver_info(limited).requested_init == :explicit
-        exact = symcpd(A, 1; solver = method, p0 = (([1.2], copy(x)),),
-                       maxiter = 0, verbose = false)
+        exact = symcpd(
+            A,
+            1;
+            solver = method,
+            p0 = (([1.2], copy(x)),),
+            maxiter = 0,
+            verbose = false,
+        )
         @test converged(exact)
         @test solver_info(exact).termination_reason == :gradient_tolerance
         @test cost(exact) ≈ 0 atol = 1e-14
