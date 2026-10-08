@@ -9,6 +9,28 @@ end
 
 _symcpd_coordinates(M, p) = TensorKitchen._symcpd_embed_coordinates(M, p)
 
+@testset "SymCPD GN initialization and termination baseline" begin
+    x = normalize([1.0, 0.4, -0.2])
+    A = _symcpd_full_term(1.2, x, 3)
+    model = JoinModel(SymmetricRankOne(3, 3), 1, DenseSymmetricTarget(A))
+    p0 = (([0.6], copy(x)),)
+    snapshot = deepcopy(p0)
+    for method in (:gn_cg, :gn_dense)
+        limited = symcpd(A, 1; solver = method, p0, maxiter = 0, verbose = false)
+        @test cost(limited) ≈ cost(model, p0)
+        @test iterations(limited) == 0
+        @test !converged(limited)
+        @test solver_info(limited).termination_reason == :maxiter
+        @test solver_info(limited).requested_init == :explicit
+        exact = symcpd(A, 1; solver = method, p0 = (([1.2], copy(x)),),
+                       maxiter = 0, verbose = false)
+        @test converged(exact)
+        @test solver_info(exact).termination_reason == :gradient_tolerance
+        @test cost(exact) ≈ 0 atol = 1e-14
+    end
+    @test TensorKitchen._join_cache_point_equal(p0, snapshot)
+end
+
 @testset "SymCPD compressed representation" begin
     indices = symmetric_multiindices(3, 4)
     @test length(indices) == binomial(6, 4)
