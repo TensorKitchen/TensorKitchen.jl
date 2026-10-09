@@ -1,5 +1,8 @@
 # Damped Riemannian Gauss--Newton for the structured symmetric model.
 
+_default_symcpd_inner_options() =
+    InnerSolveOptions(tolerance = AdaptiveResidualTolerance(minimum = 1e-10))
+
 @doc raw"""
     _symcpd_cg(model, p, b, damping; tol, maxiter)
 
@@ -25,12 +28,13 @@ function _symcpd_cg(
     damping::T;
     tol::T,
     maxiter::Int,
+    absolute::Bool = false,
 ) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
     M = model.backend.product_manifold
     damped_normal =
         direction ->
             normal_operator(model, p, direction) + _scale_solver_tangent(direction, damping)
-    return _tangent_cg(M, p, damped_normal, b; tol, maxiter)
+    return _tangent_cg(M, p, damped_normal, b; tol, maxiter, absolute)
 end
 
 @doc raw"""
@@ -64,8 +68,8 @@ decrease it. The predicted reduction intentionally uses the undamped
 Gauss--Newton model; damping controls the step rather than redefining the
 reported model agreement.
 
-With `adaptive_cg=true`, the inner relative residual tolerance is the forcing
-term
+With `inner=InnerSolveOptions(tolerance=AdaptiveResidualTolerance(...))`, the
+inner relative residual tolerance is the forcing term
 
 ```math
 \xi_k=\operatorname{clamp}
@@ -73,11 +77,11 @@ term
 \xi_{\min},\xi_{\max}\right),
 ```
 
-where `cg_tol` is ``\xi_{\max}``, `cg_min_tol` is ``\xi_{\min}``, and the
-scale and exponent are `cg_forcing_scale` and `cg_forcing_power`. Thus early
-linear systems may be solved approximately while the requested accuracy
-tightens near a stationary point. `adaptive_cg=false` uses the fixed relative
-tolerance `cg_tol`.
+where `maximum` is ``\xi_{\max}``, `minimum` is ``\xi_{\min}``, and `scale`
+and `power` define the forcing schedule. Thus early linear systems may be
+solved approximately while the requested accuracy tightens near a stationary
+point. `RelativeResidualTolerance` selects a fixed relative threshold and
+`AbsoluteResidualTolerance` selects an absolute residual threshold.
 
 This relative-residual forcing condition follows R. S. Dembo, S. C. Eisenstat,
 and T. Steihaug, "Inexact Newton Methods," *SIAM Journal on Numerical
@@ -108,12 +112,7 @@ function _solve_symcpd_gn(
     damping::Real = 1.0e-6,
     damping_increase::Real = 10,
     damping_decrease::Real = 0.3,
-    cg_tol::Real = 1.0e-2,
-    adaptive_cg::Bool = true,
-    cg_min_tol::Real = 1.0e-10,
-    cg_forcing_scale::Real = 1,
-    cg_forcing_power::Real = 0.5,
-    cg_maxiter::Int = max(20 * manifold_dimension(model.backend.product_manifold), 200),
+    inner::InnerSolveOptions = _default_symcpd_inner_options(),
     max_damping_trials::Int = 8,
     acceptance_ratio::Real = 1.0e-4,
     poor_step_ratio::Real = 0.25,
@@ -128,15 +127,6 @@ function _solve_symcpd_gn(
     damping_increase > 1 || throw(ArgumentError("damping_increase must exceed one."))
     0 < damping_decrease <= 1 ||
         throw(ArgumentError("damping_decrease must lie in (0, 1]."))
-    0 < cg_tol < 1 || throw(ArgumentError("cg_tol must lie in (0, 1)."))
-    if adaptive_cg
-        0 < cg_min_tol <= cg_tol ||
-            throw(ArgumentError("Require 0 < cg_min_tol <= cg_tol for adaptive CG."))
-        cg_forcing_scale > 0 || throw(ArgumentError("cg_forcing_scale must be positive."))
-        0 < cg_forcing_power <= 1 ||
-            throw(ArgumentError("cg_forcing_power must lie in (0, 1]."))
-    end
-    cg_maxiter > 0 || throw(ArgumentError("cg_maxiter must be positive."))
     max_damping_trials > 0 || throw(ArgumentError("max_damping_trials must be positive."))
     0 <= acceptance_ratio < poor_step_ratio < good_step_ratio <= 1 || throw(
         ArgumentError(
@@ -145,6 +135,17 @@ function _solve_symcpd_gn(
     )
 
     M = model.backend.product_manifold
+    damping_policy = DampingPolicy(
+        initial = damping,
+        increase_factor = damping_increase,
+        reduction_factor = damping_decrease,
+        acceptance_threshold = acceptance_ratio,
+        increase_threshold = poor_step_ratio,
+        reduction_threshold = good_step_ratio,
+        max_trials = max_damping_trials,
+    )
+    inner_options = inner
+    inner_maxiter = _inner_maxiter(inner_options, manifold_dimension(M))
     requested_init = isnothing(p0) ? _symcpd_init_label(init) : :explicit
     resolved_spec = isnothing(p0) ? _resolve_symcpd_init(model, init) : :explicit
     resolved_init = isnothing(p0) ? _symcpd_init_label(resolved_spec) : :explicit
@@ -152,17 +153,14 @@ function _solve_symcpd_gn(
     p = join_solver_point(M, deepcopy(p_initial))
     retraction_method = _solver_retraction_method(M, p)
     current_cost = cost(model, p)
-    mu = T(damping)
+    mu = T(damping_policy.initial)
     tolerance = T(tol)
-    total_cg_iterations = 0
-    cg_iterations_history = Int[]
-    cg_converged_history = Bool[]
-    cg_tolerance_history = T[]
-    cg_initial_residual_history = T[]
-    cg_final_residual_history = T[]
-    cg_relative_residual_history = T[]
-    cg_termination_history = Symbol[]
-    cg_failed_count = 0
+    inner_iterations_history = Int[]
+    inner_converged_history = Bool[]
+    inner_tolerance_history = T[]
+    inner_initial_residual_history = T[]
+    inner_final_residual_history = T[]
+    inner_termination_history = Symbol[]
     accepted_steps = 0
     rejected_steps = 0
     predicted_reduction_history = T[]
@@ -197,38 +195,27 @@ function _solve_symcpd_gn(
 
         accepted = false
         accepted_step_norm = T(Inf)
-        effective_cg_tol = if adaptive_cg
-            _bounded_forcing(
-                gradient_norm,
-                T(cg_tol),
-                T(cg_min_tol),
-                T(cg_forcing_scale),
-                T(cg_forcing_power),
-            )
-        else
-            T(cg_tol)
-        end
-        for _ = 1:max_damping_trials
+        effective_inner_tolerance = _inner_tolerance(inner_options.tolerance, gradient_norm)
+        for _ = 1:damping_policy.max_trials
             push!(damping_history, mu)
             step = if linear_solver == :cg
                 rhs = _scale_solver_tangent(gradient, -one(T))
-                candidate_step, cg_iterations, cg_converged, cg_info = _symcpd_cg(
-                    model,
-                    p,
-                    rhs,
-                    mu;
-                    tol = effective_cg_tol,
-                    maxiter = cg_maxiter,
-                )
-                total_cg_iterations += cg_iterations
-                push!(cg_iterations_history, cg_iterations)
-                push!(cg_converged_history, cg_converged)
-                push!(cg_tolerance_history, effective_cg_tol)
-                push!(cg_initial_residual_history, cg_info.initial_residual_norm)
-                push!(cg_final_residual_history, cg_info.final_residual_norm)
-                push!(cg_relative_residual_history, cg_info.relative_residual)
-                push!(cg_termination_history, cg_info.termination_reason)
-                cg_failed_count += !cg_converged
+                candidate_step, inner_iterations, inner_converged, inner_info =
+                    _symcpd_cg(
+                        model,
+                        p,
+                        rhs,
+                        mu;
+                        tol = effective_inner_tolerance,
+                        maxiter = inner_maxiter,
+                        absolute = inner_options.tolerance isa AbsoluteResidualTolerance,
+                    )
+                push!(inner_iterations_history, inner_iterations)
+                push!(inner_converged_history, inner_converged)
+                push!(inner_tolerance_history, effective_inner_tolerance)
+                push!(inner_initial_residual_history, inner_info.initial_residual_norm)
+                push!(inner_final_residual_history, inner_info.final_residual_norm)
+                push!(inner_termination_history, inner_info.termination_reason)
                 candidate_step
             else
                 H = dense_normal_matrix(model, p)
@@ -245,19 +232,20 @@ function _solve_symcpd_gn(
                 push!(rho_history, T(-Inf))
                 push!(step_accepted_history, false)
                 rejected_steps += 1
-                mu *= T(damping_increase)
+                mu = _increase_damping(damping_policy, mu)
                 continue
             end
             normal_step = normal_operator(model, p, step)
             predicted_reduction =
-                -inner(M, p, gradient, step) - T(0.5) * inner(M, p, step, normal_step)
+                -ManifoldsBase.inner(M, p, gradient, step) -
+                T(0.5) * ManifoldsBase.inner(M, p, step, normal_step)
             push!(predicted_reduction_history, predicted_reduction)
             if !isfinite(predicted_reduction) || predicted_reduction <= zero(T)
                 push!(actual_reduction_history, T(NaN))
                 push!(rho_history, T(-Inf))
                 push!(step_accepted_history, false)
                 rejected_steps += 1
-                mu *= T(damping_increase)
+                mu = _increase_damping(damping_policy, mu)
                 continue
             end
 
@@ -270,7 +258,9 @@ function _solve_symcpd_gn(
             actual_reduction = current_cost - candidate_cost
             rho = actual_reduction / predicted_reduction
             trial_accepted =
-                isfinite(candidate_cost) && isfinite(rho) && rho >= T(acceptance_ratio)
+                isfinite(candidate_cost) &&
+                isfinite(rho) &&
+                rho >= T(damping_policy.acceptance_threshold)
             push!(actual_reduction_history, actual_reduction)
             push!(rho_history, rho)
             push!(step_accepted_history, trial_accepted)
@@ -281,16 +271,12 @@ function _solve_symcpd_gn(
                 accepted = true
                 accepted_steps += 1
                 accepted_step_norm = step_norm
-                if rho > T(good_step_ratio)
-                    mu = max(mu * T(damping_decrease), eps(T))
-                elseif rho < T(poor_step_ratio)
-                    mu *= T(damping_increase)
-                end
+                mu = _update_accepted_damping(damping_policy, mu, rho)
                 break
             end
 
             rejected_steps += 1
-            mu *= T(damping_increase)
+            mu = _increase_damping(damping_policy, mu)
         end
         iterations_done = iteration
         if !accepted
@@ -327,21 +313,17 @@ function _solve_symcpd_gn(
             linear_solver = linear_solver,
             matrix_free_normal = linear_solver == :cg,
             materializes_jacobian = false,
-            total_cg_iterations = total_cg_iterations,
-            cg_iterations_history = cg_iterations_history,
-            cg_converged_history = cg_converged_history,
-            cg_tolerance_history = cg_tolerance_history,
-            cg_initial_residual_history = cg_initial_residual_history,
-            cg_final_residual_history = cg_final_residual_history,
-            cg_relative_residual_history = cg_relative_residual_history,
-            cg_termination_history = cg_termination_history,
-            cg_failed_count = cg_failed_count,
-            all_cg_converged = isempty(cg_converged_history) ? nothing :
-                               all(cg_converged_history),
-            adaptive_cg = adaptive_cg,
-            cg_min_tol = T(cg_min_tol),
-            cg_forcing_scale = T(cg_forcing_scale),
-            cg_forcing_power = T(cg_forcing_power),
+            inner = _inner_history_info(
+                inner_iterations_history,
+                inner_tolerance_history,
+                inner_initial_residual_history,
+                inner_final_residual_history,
+                inner_termination_history;
+                solver = linear_solver,
+                policy = inner_options.tolerance,
+                maxiter = inner_maxiter,
+                converged = inner_converged_history,
+            ),
             accepted_steps = accepted_steps,
             rejected_steps = rejected_steps,
             predicted_reduction_history = predicted_reduction_history,
@@ -353,6 +335,7 @@ function _solve_symcpd_gn(
             poor_step_ratio = T(poor_step_ratio),
             good_step_ratio = T(good_step_ratio),
             final_damping = mu,
+            damping_policy = damping_policy,
             termination_reason = termination_reason,
         ),
     )

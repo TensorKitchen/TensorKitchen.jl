@@ -19,7 +19,7 @@ counts and elapsed times; inner iteration and residual histories are always
 reported. `damping_reduction_threshold=nothing` preserves the policy selected
 by `expect_zero_residual`; a finite override enables controlled comparisons.
 """
-struct LMSolver{I<:LMInnerOptions} <: AbstractSecondOrderROSolver
+struct LMSolver{I<:InnerSolveOptions} <: AbstractSecondOrderROSolver
     η::Float64
     damping_term_min::Float64
     β::Float64
@@ -34,7 +34,7 @@ function LMSolver(;
     damping_term_min::Real = 0.1,
     β::Real = 5.0,
     expect_zero_residual::Bool = false,
-    inner::LMInnerOptions = LMInnerOptions(),
+    inner::InnerSolveOptions = InnerSolveOptions(),
     diagnostics::Bool = false,
     damping_reduction_threshold::Union{Nothing,Real} = nothing,
 )
@@ -147,6 +147,18 @@ function _lm_adjoint_action_function(
     end
 end
 
+function _lm_adjoint_action_function!(
+    model::AbstractDecompositionModel,
+    ::Type{T},
+    normA2,
+    normalized_objective::Bool,
+) where {T<:AbstractFloat}
+    scale = _lm_scaling_factor(T, normA2, normalized_objective)
+    return function (M, out, p, a)
+        return adjoint_action!(out, model, p, _lm_scaled_vector(a, T, scale))
+    end
+end
+
 function _lm_vector_differential_function(
     model::AbstractDecompositionModel,
     ::Type{T},
@@ -163,8 +175,7 @@ function _lm_vector_differential_function(
         out .*= scale
         return out
     end
-    adjoint_f = _lm_adjoint_action_function(model, T, normA2, normalized_objective)
-    adjoint_f! = (M, out, p, a) -> ManifoldsBase.copyto!(M, out, p, adjoint_f(M, p, a))
+    adjoint_f! = _lm_adjoint_action_function!(model, T, normA2, normalized_objective)
     return Manopt.VectorDifferentialFunction(
         _measure_lm(residual_f!, operator_stats, 1),
         _measure_lm(differential_f!, operator_stats, 2),
@@ -197,7 +208,7 @@ function solve_lm(
     damping_term_min::Real = 0.1,
     β::Real = 5.0,
     expect_zero_residual::Bool = false,
-    inner::LMInnerOptions = LMInnerOptions(),
+    inner::InnerSolveOptions = InnerSolveOptions(),
     diagnostics::Bool = false,
     damping_reduction_threshold::Union{Nothing,Real} = nothing,
     grad_tol = nothing,
@@ -219,6 +230,18 @@ function solve_lm(
     η_T = T(η)
     damping_term_min_T = T(damping_term_min)
     β_T = T(β)
+    reduction_threshold =
+        isnothing(damping_reduction_threshold) ? (expect_zero_residual ? η_T : T(Inf)) :
+        T(damping_reduction_threshold)
+    damping_policy = DampingPolicy(
+        initial = damping_term_min_T,
+        minimum = damping_term_min_T,
+        increase_factor = β_T,
+        reduction_factor = inv(β_T),
+        acceptance_threshold = η_T,
+        increase_threshold = η_T,
+        reduction_threshold = reduction_threshold,
+    )
     operator_stats = diagnostics ? _LMOperatorStats() : nothing
     inner_trace = _LMInnerTrace(T, diagnostics)
     residual_f = _lm_residual_function(model, T, normA2, setup.uses_relative_objective)
@@ -232,11 +255,7 @@ function solve_lm(
     )
     initial_residual = _measure_lm(residual_f, operator_stats, 1)
     initial_residual_values = copy(initial_residual(M, p0_local))
-    nlso = Manopt.ManifoldNonlinearLeastSquaresObjective(
-        vdf,
-        Manopt.ComponentwiseRobustifierFunction(Manopt.IdentityRobustifier()),
-        copy(initial_residual_values),
-    )
+    nlso = _lm_nonlinear_least_squares_objective(vdf, initial_residual_values)
     initial_jacobian_matrices = fill(nothing, 1)
     sub_objective = Manopt.construct_lm_subobjective(
         false,
@@ -250,9 +269,6 @@ function solve_lm(
     M_subproblem = _lm_subproblem_manifold(M)
     sub_problem, sub_state =
         _lm_cr_state(M, p0_local, sub_objective, inner, setup.objective_scale, inner_trace)
-    reduction_threshold =
-        isnothing(damping_reduction_threshold) ? (expect_zero_residual ? η_T : T(Inf)) :
-        T(damping_reduction_threshold)
     retraction_method = _solver_retraction_method(M, p0_local)
     stopping = StopWhenAny(
         StopAfterIteration(maxiter),
@@ -284,14 +300,14 @@ function solve_lm(
         retraction_method = retraction_method,
         stopping_criterion = stopping,
         initial_residual_values = initial_residual_values,
-        candidate_acceptance_threshold = η_T,
-        damping_increase_factor = β_T,
-        damping_increase_threshold = η_T,
-        damping_reduction_threshold = reduction_threshold,
-        damping_reduction_factor = inv(β_T),
-        damping_term_min = damping_term_min_T,
-        damping_term_max = T(Inf),
-        initial_damping_term = damping_term_min_T,
+        candidate_acceptance_threshold = T(damping_policy.acceptance_threshold),
+        damping_increase_factor = T(damping_policy.increase_factor),
+        damping_increase_threshold = T(damping_policy.increase_threshold),
+        damping_reduction_threshold = T(damping_policy.reduction_threshold),
+        damping_reduction_factor = T(damping_policy.reduction_factor),
+        damping_term_min = T(damping_policy.minimum),
+        damping_term_max = T(damping_policy.maximum),
+        initial_damping_term = T(damping_policy.initial),
         scaling_threshold = T(1.0e-6),
         minimum_acceptable_model_improvement = eps(T),
         use_unified_basis = false,
@@ -331,10 +347,14 @@ function solve_lm(
                 uses_lm_subproblem_adapter = M_subproblem !== M,
                 uses_vector_transport = !isnothing(vector_transport_method),
                 damping_reduction_threshold = reduction_threshold,
-                inner_tolerance_policy = inner.tolerance,
+                damping_policy = damping_policy,
                 diagnostics = diagnostics,
             ),
-            _lm_inner_info(inner_trace),
+            _lm_inner_info(
+                inner_trace,
+                inner,
+                _inner_maxiter(inner, manifold_dimension(M)),
+            ),
             _lm_operator_info(operator_stats),
         ),
     )

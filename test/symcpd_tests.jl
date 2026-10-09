@@ -617,29 +617,30 @@ end
         solver = :gn_cg,
         maxiter = 3,
         damping = damping,
-        cg_tol = 1e-16,
-        adaptive_cg = false,
-        cg_maxiter = 1,
+        inner = InnerSolveOptions(
+            tolerance = RelativeResidualTolerance(1e-16),
+            maxiter = 1,
+        ),
         verbose = false,
     )
     info = solver_info(result)
     @test isfinite(cost(result))
     @test cost(result) < initial_cost
-    @test !isempty(info.cg_converged_history)
-    @test info.cg_failed_count == count(!, info.cg_converged_history)
-    @test info.total_cg_iterations == sum(info.cg_iterations_history)
-    @test info.cg_failed_count > 0
-    @test !info.adaptive_cg
-    @test all(==(1e-16), info.cg_tolerance_history)
-    @test length(info.cg_tolerance_history) == length(info.cg_iterations_history)
-    @test length(info.cg_final_residual_history) == length(info.cg_iterations_history)
-    @test length(info.cg_relative_residual_history) == length(info.cg_iterations_history)
-    @test length(info.cg_termination_history) == length(info.cg_iterations_history)
+    @test !isempty(info.inner.converged)
+    @test info.inner.failed_count == count(!, info.inner.converged)
+    @test info.inner.total_iterations == sum(info.inner.iterations)
+    @test info.inner.failed_count > 0
+    @test info.inner.tolerance_policy isa RelativeResidualTolerance
+    @test all(==(1e-16), info.inner.tolerances)
+    @test length(info.inner.tolerances) == length(info.inner.iterations)
+    @test length(info.inner.final_residuals) == length(info.inner.iterations)
+    @test length(info.inner.relative_residuals) == length(info.inner.iterations)
+    @test length(info.inner.termination_reasons) == length(info.inner.iterations)
     @test all(
         isapprox(
-            info.cg_final_residual_history[k] / info.cg_initial_residual_history[k],
-            info.cg_relative_residual_history[k],
-        ) for k in eachindex(info.cg_iterations_history)
+            info.inner.final_residuals[k] / info.inner.initial_residuals[k],
+            info.inner.relative_residuals[k],
+        ) for k in eachindex(info.inner.iterations)
     )
     trial_count = length(info.damping_history)
     @test trial_count == length(info.predicted_reduction_history)
@@ -680,8 +681,7 @@ end
         maxiter = 2,
         tol = 1e-3,
         damping = 1e8,
-        cg_tol = 1e-12,
-        adaptive_cg = false,
+        inner = InnerSolveOptions(tolerance = RelativeResidualTolerance(1e-12)),
         verbose = false,
     )
     @test solver_info(stalled).termination_reason == :small_step
@@ -737,12 +737,12 @@ end
         @test solver_info(result).matrix_free_normal == (method == :gn_cg)
         if method == :gn_cg
             info = solver_info(result)
-            @test info.adaptive_cg
+            @test info.inner.tolerance_policy isa AdaptiveResidualTolerance
             @test all(
-                tolerance -> info.cg_min_tol <= tolerance <= 1e-2,
-                info.cg_tolerance_history,
+                tolerance -> info.inner.tolerance_policy.minimum <= tolerance <= 1e-2,
+                info.inner.tolerances,
             )
-            @test length(info.cg_tolerance_history) == length(info.cg_converged_history)
+            @test length(info.inner.tolerances) == length(info.inner.converged)
         end
     end
 

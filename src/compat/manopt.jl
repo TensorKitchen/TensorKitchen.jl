@@ -30,6 +30,35 @@ ManifoldsBase.get_forwarding_type(::_LMSubproblemManifold, _) =
 ManifoldsBase.get_forwarding_type(::_LMSubproblemManifold, _, ::Type) =
     ManifoldsBase.SimpleForwardingType()
 
+# Manopt's generic nonlinear least-squares gradient expands a vector residual
+# into scalar components and applies the adjoint once per coordinate. LM
+# already supplies a full vector adjoint, so preserve the identity loss while
+# dispatching the gradient through one block adjoint application.
+struct _LMBlockIdentityRobustifier <: Manopt.AbstractRobustifierFunction end
+
+Manopt.get_robustifier_values(::_LMBlockIdentityRobustifier, x::Real) = (x, one(x), zero(x))
+
+function Manopt._add_gradient!(
+    M,
+    X,
+    vdf::Manopt.AbstractFirstOrderVectorFunction,
+    ::_LMBlockIdentityRobustifier,
+    p;
+    value_cache = Manopt.get_value(M, vdf, p),
+    jacobian_cache = nothing,
+)
+    Manopt.add_adjoint_jacobian!(M, X, vdf, p, value_cache)
+    return X
+end
+
+function _lm_nonlinear_least_squares_objective(vdf, initial_residual_values)
+    return Manopt.ManifoldNonlinearLeastSquaresObjective(
+        [vdf],
+        [_LMBlockIdentityRobustifier()],
+        copy(initial_residual_values),
+    )
+end
+
 @inline _lm_coordinate_storage(p::Manifolds.TuckerPoint) = p.hosvd.core
 @inline _lm_coordinate_storage(p::Manifolds.TuckerTangentVector) = p.Ċ
 @inline _lm_coordinate_storage(p::RecursiveArrayTools.ArrayPartition) =

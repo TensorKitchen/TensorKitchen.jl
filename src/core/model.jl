@@ -12,6 +12,7 @@ export AbstractDecompositionModel,
     differential_action,
     differential_action!,
     adjoint_action,
+    adjoint_action!,
     EuclideanResidualSpace,
     residual_space,
     residual_dimension,
@@ -201,6 +202,24 @@ function adjoint_action(
     return ManifoldsBase.get_vector(M, p, coeff, basis)
 end
 
+"""Write the metric adjoint action into `out`.
+
+Models may specialize this method to reuse tangent workspaces. The default
+preserves the allocating `adjoint_action` contract and performs a
+manifold-aware copy, so structured tangent representations remain valid.
+"""
+function adjoint_action!(
+    out,
+    model::AbstractDecompositionModel,
+    p,
+    a::AbstractVector;
+    kwargs...,
+)
+    M = manifold(model)
+    ManifoldsBase.copyto!(M, out, p, adjoint_action(model, p, a; kwargs...))
+    return out
+end
+
 """Apply the Gauss--Newton normal operator `J*J`, using the manifold metric
 adjoint and Euclidean residual coordinates. This is not the exact Riemannian
 Hessian. Models may specialize this fallback with a fused contraction kernel.
@@ -215,4 +234,14 @@ end
 
 function adjoint_action(model::AbstractDecompositionModel, p, a::AbstractArray; kwargs...)
     return adjoint_action(model, p, vec(a); kwargs...)
+end
+
+function adjoint_action!(
+    out,
+    model::AbstractDecompositionModel,
+    p,
+    a::AbstractArray;
+    kwargs...,
+)
+    return adjoint_action!(out, model, p, vec(a); kwargs...)
 end

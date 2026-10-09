@@ -159,6 +159,28 @@ function adjoint_action(
     return pullback(model, p, a)
 end
 
+function adjoint_action!(
+    out,
+    model::JoinModel{T,B},
+    p,
+    a::AbstractVector;
+    kwargs...,
+) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
+    backend = model.backend
+    expected = ambient_length(backend.component)
+    length(a) == expected ||
+        throw(DimensionMismatch("Expected an ambient cotangent of length $expected."))
+    M = backend.product_manifold
+    parts = join_parts(M, p)
+    outparts = join_parts(M, out)
+    _check_parts_len(parts, backend.rank, "symmetric adjoint input")
+    _check_parts_len(outparts, backend.rank, "symmetric adjoint output")
+    @inbounds for r = 1:backend.rank
+        _symcpd_pullback_coordinates!(outparts[r], backend.component.manifold, parts[r], a)
+    end
+    return out
+end
+
 @doc raw"""
     normal_operator!(Y, model, p, X)
 

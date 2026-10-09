@@ -13,11 +13,11 @@ end
 
 function _LMInnerStopping(
     ::Type{T},
-    options::LMInnerOptions,
+    options::InnerSolveOptions,
     dimension,
     objective_scale,
 ) where {T}
-    cap = isnothing(options.maxiter) ? max(20 * dimension, 200) : options.maxiter
+    cap = _inner_maxiter(options, dimension)
     return _LMInnerStopping(
         options.tolerance,
         Manopt.StopWhenRelativeResidualLess(one(T), T(1e-2)),
@@ -90,7 +90,7 @@ end
 _LMInnerTrace(::Type{T}, timed) where {T} =
     _LMInnerTrace(Int[], T[], T[], T[], Symbol[], Float64[], UInt64(0), timed)
 
-function _lm_cr_state(M, p, objective, options::LMInnerOptions, objective_scale, trace)
+function _lm_cr_state(M, p, objective, options::InnerSolveOptions, objective_scale, trace)
     T = _scalar_eltype(p)
     TpM = TangentSpace(_lm_subproblem_manifold(M), p)
     stop = _LMInnerStopping(T, options, manifold_dimension(M), objective_scale)
@@ -127,19 +127,23 @@ function _lm_cr_state(M, p, objective, options::LMInnerOptions, objective_scale,
     return Manopt.DefaultManoptProblem(TpM, objective), state
 end
 
-function _lm_inner_info(trace::_LMInnerTrace)
+function _lm_inner_info(trace::_LMInnerTrace, options::InnerSolveOptions, maxiter::Int)
+    convergence = [
+        reason in (:zero_residual, :absolute_tolerance, :relative_tolerance) for
+        reason in trace.reason
+    ]
     return (
-        inner_iterations = copy(trace.iterations),
-        total_inner_iterations = sum(trace.iterations),
-        inner_tolerances = copy(trace.tolerance),
-        inner_initial_residuals = copy(trace.initial_residual),
-        inner_final_residuals = copy(trace.final_residual),
-        inner_relative_residuals = [
-            iszero(a) ? zero(a) : b / a for
-            (a, b) in zip(trace.initial_residual, trace.final_residual)
-        ],
-        inner_termination_reasons = copy(trace.reason),
-        inner_seconds = trace.timed ? copy(trace.seconds) : nothing,
-        inner_zero_start = true,
+        inner = _inner_history_info(
+            trace.iterations,
+            trace.tolerance,
+            trace.initial_residual,
+            trace.final_residual,
+            trace.reason;
+            solver = :cr,
+            policy = options.tolerance,
+            maxiter,
+            converged = convergence,
+            seconds = trace.timed ? trace.seconds : nothing,
+        ),
     )
 end

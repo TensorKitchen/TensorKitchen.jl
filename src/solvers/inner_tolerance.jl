@@ -3,6 +3,7 @@ export AbstractInnerTolerance,
     RelativeResidualTolerance,
     AdaptiveResidualTolerance,
     AbsoluteResidualTolerance,
+    InnerSolveOptions,
     LMInnerOptions
 
 abstract type AbstractInnerTolerance end
@@ -54,8 +55,7 @@ end
 @inline _bounded_forcing(g, maximum, minimum, scale, power) =
     clamp(scale * g^power, minimum, maximum)
 
-_inner_tolerance(policy::RelativeResidualTolerance, g::T) where {T} =
-    max(T(policy.tolerance), eps(T))
+_inner_tolerance(policy::RelativeResidualTolerance, g::T) where {T} = T(policy.tolerance)
 _inner_tolerance(policy::AbsoluteResidualTolerance, g::T) where {T} = T(policy.tolerance)
 function _inner_tolerance(policy::AdaptiveResidualTolerance, g::T) where {T}
     return _bounded_forcing(
@@ -67,15 +67,15 @@ function _inner_tolerance(policy::AdaptiveResidualTolerance, g::T) where {T}
     )
 end
 
-"""Configure the LM tangent CR solve. Each solve starts from zero.
+"""Configure an iterative tangent-space linear solve.
 
 `maxiter=nothing` uses `max(20*dim(M), 200)` as a safety cap. Accuracy is
 controlled by `tolerance`, independently of the outer stopping criteria.
 """
-struct LMInnerOptions{P<:AbstractInnerTolerance}
+struct InnerSolveOptions{P<:AbstractInnerTolerance}
     tolerance::P
     maxiter::Union{Nothing,Int}
-    function LMInnerOptions(;
+    function InnerSolveOptions(;
         tolerance::P = AdaptiveResidualTolerance(),
         maxiter::Union{Nothing,Integer} = nothing,
     ) where {P<:AbstractInnerTolerance}
@@ -84,4 +84,48 @@ struct LMInnerOptions{P<:AbstractInnerTolerance}
             throw(ArgumentError("Inner maxiter must be positive."))
         new{P}(tolerance, isnothing(maxiter) ? nothing : Int(maxiter))
     end
+end
+
+const LMInnerOptions = InnerSolveOptions
+
+_inner_maxiter(options::InnerSolveOptions, dimension::Integer) =
+    isnothing(options.maxiter) ? max(20 * dimension, 200) : options.maxiter
+
+function _inner_history_info(
+    iterations,
+    tolerances,
+    initial_residuals,
+    final_residuals,
+    reasons;
+    solver::Symbol,
+    policy::AbstractInnerTolerance,
+    maxiter::Int,
+    converged = nothing,
+    seconds = nothing,
+    zero_start::Bool = true,
+)
+    relative_residuals = [
+        iszero(initial) ? zero(initial) : final / initial for
+        (initial, final) in zip(initial_residuals, final_residuals)
+    ]
+    convergence = isnothing(converged) ? nothing : copy(converged)
+    return (
+        solver = solver,
+        adaptive = policy isa AdaptiveResidualTolerance,
+        tolerance_policy = policy,
+        max_iterations = maxiter,
+        total_iterations = sum(iterations),
+        iterations = copy(iterations),
+        converged = convergence,
+        failed_count = isnothing(convergence) ? nothing : count(!, convergence),
+        all_converged = isnothing(convergence) || isempty(convergence) ? nothing :
+                        all(convergence),
+        tolerances = copy(tolerances),
+        initial_residuals = copy(initial_residuals),
+        final_residuals = copy(final_residuals),
+        relative_residuals = relative_residuals,
+        termination_reasons = copy(reasons),
+        seconds = isnothing(seconds) ? nothing : copy(seconds),
+        zero_start = zero_start,
+    )
 end

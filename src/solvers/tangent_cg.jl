@@ -12,15 +12,25 @@ initial and final residual norms, relative residual, requested tolerance, and
 termination reason. The caller is responsible for supplying a self-adjoint,
 positive-definite operator in this metric (for example, a damped normal action).
 """
-function _tangent_cg(M, p, operator, b; tol::T, maxiter::Int) where {T<:AbstractFloat}
-    0 < tol < 1 || throw(ArgumentError("CG tol must lie in (0, 1)."))
+function _tangent_cg(
+    M,
+    p,
+    operator,
+    b;
+    tol::T,
+    maxiter::Int,
+    absolute::Bool = false,
+) where {T<:AbstractFloat}
+    (tol > 0 && (absolute || tol < 1)) || throw(
+        ArgumentError("CG tolerance must be positive and relative tolerances below one."),
+    )
     maxiter >= 0 || throw(ArgumentError("CG maxiter must be nonnegative."))
     solution = ManifoldsBase.zero_vector(M, p)
     residual = copy(b)
     direction = copy(residual)
     residual_norm2 = inner(M, p, residual, residual)
     initial_norm = sqrt(max(residual_norm2, zero(T)))
-    threshold = tol * initial_norm
+    threshold = absolute ? tol : tol * initial_norm
     if initial_norm == zero(T)
         info = (
             initial_residual_norm = zero(T),
@@ -28,6 +38,7 @@ function _tangent_cg(M, p, operator, b; tol::T, maxiter::Int) where {T<:Abstract
             relative_residual = zero(T),
             threshold = zero(T),
             tolerance = tol,
+            tolerance_kind = absolute ? :absolute : :relative,
             termination_reason = :initial_residual,
         )
         return solution, 0, true, info
@@ -70,6 +81,7 @@ function _tangent_cg(M, p, operator, b; tol::T, maxiter::Int) where {T<:Abstract
         relative_residual = final_norm / initial_norm,
         threshold = threshold,
         tolerance = tol,
+        tolerance_kind = absolute ? :absolute : :relative,
         termination_reason = termination_reason,
     )
     return solution, iterations, converged, info
