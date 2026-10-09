@@ -95,11 +95,11 @@ preparation and permits operator-defined targets such as
 # Solvers
 
 - `:rgd`, `:rcg`, and `:lbfgs` use TensorKitchen's first-order Riemannian path.
-- `:gn_cg` uses damped Riemannian Gauss--Newton with the analytic matrix-free
-  `J'J` operator and tangent CG.
-- `:gn_dense` builds the intrinsic `r*N` square normal matrix from operator
-  columns and solves it directly. It is intended for validation and small
-  problems.
+- `:gn_cg` or `GaussNewtonSolver(linear_solver=:cg)` uses damped Riemannian
+  Gauss--Newton with the analytic matrix-free `J'J` operator and tangent CG.
+- `:gn_dense` or `GaussNewtonSolver(linear_solver=:dense)` builds the intrinsic
+  `r*N` square normal matrix from operator columns and solves it directly. It
+  is intended for validation and small problems.
 - `:cls` or [`SymmetricCLS`](@ref) runs normalized conditional least squares
   as a standalone solver.
   Every sweep uses tensor contractions instead of an unfolding, normalizes
@@ -280,24 +280,6 @@ function symcpd(
             pinv_rtol = weight_pinv_rtol_eff,
             kwargs...,
         )
-    elseif solver in (:gn_cg, :gn_dense)
-        _solve_symcpd_gn(
-            model;
-            init,
-            p0,
-            maxiter,
-            tol,
-            linear_solver = solver == :gn_cg ? :cg : :dense,
-            damping,
-            damping_increase,
-            damping_decrease,
-            inner,
-            max_damping_trials,
-            acceptance_ratio,
-            poor_step_ratio,
-            good_step_ratio,
-            verbose,
-        )
     else
         _solve_model(
             model;
@@ -312,6 +294,14 @@ function symcpd(
             verbose,
             vector_transport_method,
             observation_norm2_cache = target_norm2(target),
+            damping,
+            damping_increase,
+            damping_decrease,
+            inner,
+            max_damping_trials,
+            acceptance_ratio,
+            poor_step_ratio,
+            good_step_ratio,
             kwargs...,
         )
     end

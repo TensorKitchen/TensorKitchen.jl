@@ -3,7 +3,7 @@
 function _solver_object(solver, ::Real; kwargs...)
     throw(
         ArgumentError(
-            "Unsupported solver specification $(typeof(solver)). Use a solver symbol such as :als, :cls, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, or :btd_tsd, or pass an AbstractSolver object.",
+            "Unsupported solver specification $(typeof(solver)). Use a solver symbol such as :als, :cls, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, :gn_cg, :gn_dense, or :btd_tsd, or pass an AbstractSolver object.",
         ),
     )
 end
@@ -58,6 +58,30 @@ function _solver_object(::Val{:lm}, ::Real; kwargs...)
     )
 end
 
+function _gauss_newton_solver(linear_solver::Symbol; kwargs...)
+    damping_policy = get(kwargs, :damping_policy, nothing)
+    if isnothing(damping_policy)
+        damping_policy = DampingPolicy(
+            initial = get(kwargs, :damping, 1.0e-6),
+            increase_factor = get(kwargs, :damping_increase, 10),
+            reduction_factor = get(kwargs, :damping_decrease, 0.3),
+            acceptance_threshold = get(kwargs, :acceptance_ratio, 1.0e-4),
+            increase_threshold = get(kwargs, :poor_step_ratio, 0.25),
+            reduction_threshold = get(kwargs, :good_step_ratio, 0.75),
+            max_trials = get(kwargs, :max_damping_trials, 8),
+        )
+    end
+    return GaussNewtonSolver(;
+        linear_solver,
+        inner = get(kwargs, :inner, _default_symcpd_inner_options()),
+        damping = damping_policy,
+    )
+end
+
+_solver_object(::Val{:gn_cg}, ::Real; kwargs...) = _gauss_newton_solver(:cg; kwargs...)
+_solver_object(::Val{:gn_dense}, ::Real; kwargs...) =
+    _gauss_newton_solver(:dense; kwargs...)
+
 function _solver_object(::Val{:btd_tsd}, stepsize::Real; kwargs...)
     return BTDTSDSolver(;
         stepsize,
@@ -72,7 +96,7 @@ end
 function _solver_object(::Val{S}, ::Real; kwargs...) where {S}
     throw(
         ArgumentError(
-            "Unknown solver=$S. Use :als, :cls, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, or :btd_tsd.",
+            "Unknown solver=$S. Use :als, :cls, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, :gn_cg, :gn_dense, or :btd_tsd.",
         ),
     )
 end

@@ -1,7 +1,46 @@
 # Damped Riemannian Gauss--Newton for the structured symmetric model.
 
+export GaussNewtonSolver
+
 _default_symcpd_inner_options() =
     InnerSolveOptions(tolerance = AdaptiveResidualTolerance(minimum = 1e-10))
+
+_default_gauss_newton_damping() = DampingPolicy(
+    initial = 1.0e-6,
+    increase_factor = 10,
+    reduction_factor = 0.3,
+    acceptance_threshold = 1.0e-4,
+    increase_threshold = 0.25,
+    reduction_threshold = 0.75,
+    max_trials = 8,
+)
+
+"""Configure damped Riemannian Gauss--Newton.
+
+`linear_solver=:cg` uses a matrix-free tangent-space Krylov solve, while
+`linear_solver=:dense` materializes the intrinsic normal matrix. `inner`
+controls the iterative linear solve and `damping` owns step acceptance and
+damping updates.
+"""
+struct GaussNewtonSolver{I<:InnerSolveOptions} <: AbstractSecondOrderROSolver
+    linear_solver::Symbol
+    inner::I
+    damping::DampingPolicy
+end
+
+function GaussNewtonSolver(;
+    linear_solver::Symbol = :cg,
+    inner::InnerSolveOptions = _default_symcpd_inner_options(),
+    damping::DampingPolicy = _default_gauss_newton_damping(),
+)
+    linear_solver in (:cg, :dense) ||
+        throw(ArgumentError("linear_solver must be :cg or :dense, got $linear_solver."))
+    damping.initial > 0 ||
+        throw(ArgumentError("Gauss--Newton requires positive initial damping."))
+    return GaussNewtonSolver(linear_solver, inner, damping)
+end
+
+solver_symbol(solver::GaussNewtonSolver) = solver.linear_solver == :cg ? :gn_cg : :gn_dense
 
 @doc raw"""
     _symcpd_cg(model, p, b, damping; tol, maxiter)
@@ -38,7 +77,7 @@ function _symcpd_cg(
 end
 
 @doc raw"""
-    _solve_symcpd_gn(model; linear_solver=:cg, ...)
+    _solve_symcpd_gn(solver, model; ...)
 
 Run damped Riemannian Gauss--Newton on a symmetric [`JoinModel`](@ref). The
 step solves
@@ -103,48 +142,21 @@ De Lathauwer (2013), doi:10.1137/120868323, and Singh et al. (2021),
 doi:10.1137/20M1344561.
 """
 function _solve_symcpd_gn(
+    solver::GaussNewtonSolver,
     model::JoinModel{T,B};
     init = :auto,
     p0 = nothing,
     maxiter::Int = 100,
     tol::Real = 1.0e-8,
-    linear_solver::Symbol = :cg,
-    damping::Real = 1.0e-6,
-    damping_increase::Real = 10,
-    damping_decrease::Real = 0.3,
-    inner::InnerSolveOptions = _default_symcpd_inner_options(),
-    max_damping_trials::Int = 8,
-    acceptance_ratio::Real = 1.0e-4,
-    poor_step_ratio::Real = 0.25,
-    good_step_ratio::Real = 0.75,
     verbose::Bool = true,
 ) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
-    linear_solver in (:cg, :dense) ||
-        throw(ArgumentError("linear_solver must be :cg or :dense, got $linear_solver."))
     maxiter >= 0 || throw(ArgumentError("maxiter must be nonnegative."))
     tol > 0 || throw(ArgumentError("tol must be positive."))
-    damping > 0 || throw(ArgumentError("damping must be positive."))
-    damping_increase > 1 || throw(ArgumentError("damping_increase must exceed one."))
-    0 < damping_decrease <= 1 ||
-        throw(ArgumentError("damping_decrease must lie in (0, 1]."))
-    max_damping_trials > 0 || throw(ArgumentError("max_damping_trials must be positive."))
-    0 <= acceptance_ratio < poor_step_ratio < good_step_ratio <= 1 || throw(
-        ArgumentError(
-            "Require 0 <= acceptance_ratio < poor_step_ratio < good_step_ratio <= 1.",
-        ),
-    )
 
     M = model.backend.product_manifold
-    damping_policy = DampingPolicy(
-        initial = damping,
-        increase_factor = damping_increase,
-        reduction_factor = damping_decrease,
-        acceptance_threshold = acceptance_ratio,
-        increase_threshold = poor_step_ratio,
-        reduction_threshold = good_step_ratio,
-        max_trials = max_damping_trials,
-    )
-    inner_options = inner
+    linear_solver = solver.linear_solver
+    damping_policy = solver.damping
+    inner_options = solver.inner
     inner_maxiter = _inner_maxiter(inner_options, manifold_dimension(M))
     requested_init = isnothing(p0) ? _symcpd_init_label(init) : :explicit
     resolved_spec = isnothing(p0) ? _resolve_symcpd_init(model, init) : :explicit
@@ -331,12 +343,27 @@ function _solve_symcpd_gn(
             rho_history = rho_history,
             damping_history = damping_history,
             step_accepted_history = step_accepted_history,
-            acceptance_ratio = T(acceptance_ratio),
-            poor_step_ratio = T(poor_step_ratio),
-            good_step_ratio = T(good_step_ratio),
+            acceptance_ratio = T(damping_policy.acceptance_threshold),
+            poor_step_ratio = T(damping_policy.increase_threshold),
+            good_step_ratio = T(damping_policy.reduction_threshold),
             final_damping = mu,
             damping_policy = damping_policy,
             termination_reason = termination_reason,
         ),
     )
+end
+
+function solve(
+    solver::GaussNewtonSolver,
+    model::JoinModel{T,B};
+    init = :auto,
+    p0 = nothing,
+    maxiter::Int = 100,
+    tol::Real = 1.0e-8,
+    verbose::Bool = true,
+    return_stats::Bool = false,
+    kwargs...,
+) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
+    result = _solve_symcpd_gn(solver, model; init, p0, maxiter, tol, verbose)
+    return return_stats ? result : result.point
 end
