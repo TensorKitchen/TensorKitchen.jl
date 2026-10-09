@@ -198,10 +198,12 @@ function _solve_symcpd_gn(
         accepted = false
         accepted_step_norm = T(Inf)
         effective_cg_tol = if adaptive_cg
-            clamp(
-                T(cg_forcing_scale) * gradient_norm^T(cg_forcing_power),
-                T(cg_min_tol),
+            _bounded_forcing(
+                gradient_norm,
                 T(cg_tol),
+                T(cg_min_tol),
+                T(cg_forcing_scale),
+                T(cg_forcing_power),
             )
         else
             T(cg_tol)
