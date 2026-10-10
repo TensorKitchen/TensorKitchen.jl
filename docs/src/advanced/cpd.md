@@ -24,10 +24,9 @@ and scale.
 
 ## Initialization and refinement
 
-The CP objective is nonconvex. A structured or ALS-based warm start can place a
-manifold solver in a better basin than a random point, but no initializer
-guarantees the globally best rank-``R`` approximation. Compare multiple seeds or
-initializers when the fitted model will support scientific conclusions.
+The CP objective is nonconvex, so different starting points can lead to
+different fitted components. Initializers provide the first parameter point;
+none guarantees the globally smallest rank-``R`` error.
 
 ALS updates one factor matrix at a time. Riemannian gradient, conjugate-gradient,
 L-BFGS, and Levenberg--Marquardt methods instead refine the full parameter point
@@ -36,10 +35,9 @@ constructors and diagnostics.
 
 ## Nonnegative CPD
 
-Nonnegative CPD constrains the fitted weights and factors to be nonnegative. It
-is appropriate only when negative components would be physically or
-semantically invalid. Nonnegativity changes the feasible model; it is not merely
-a numerical stabilization of unconstrained CPD.
+Nonnegative CPD constrains the fitted weights and factors to be nonnegative.
+This changes the set of tensors that the model can represent; it is not only a
+numerical setting for ordinary CPD.
 
 The canonical, squaring, and softplus geometries use different coordinates near
 zero. Their current availability and defaults are maintained in the `nncpd`

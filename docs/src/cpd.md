@@ -20,8 +20,8 @@ weight, and ``u_r^{(k)}`` is its factor vector for mode ``k``.
 - `A`: the numerical tensor to approximate.
 - `rank`: the number of rank-one components to keep.
 
-Larger ranks can improve reconstruction accuracy, but they also use more
-storage and take longer to fit.
+The rank sets the number of components and therefore the size of the fitted
+model.
 
 ## Example
 

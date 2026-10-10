@@ -76,13 +76,42 @@ function differential_action!(
     return pushforward!(out, model, p, X)
 end
 
-function differential_action(
-    model::JoinModel{T,B},
-    p,
-    X,
-) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
-    out = zeros(T, ambient_length(model.backend.component))
-    return pushforward!(out, model, p, X)
+residual_space(model::JoinModel{T,B}) where {T<:AbstractFloat,B<:SymmetricCPDBackend} =
+    EuclideanResidualSpace{T}(ambient_length(model.backend.component))
+
+_symcpd_target_coordinates(component, target::CompressedSymmetricTarget) =
+    copy(target.coefficients)
+_symcpd_target_coordinates(component, target::DenseSymmetricTarget) =
+    _compress_symmetric_tensor(component.manifold, target.data)
+_symcpd_target_coordinates(component, target::FunctionalSymmetricTarget) = throw(
+    ArgumentError(
+        "Explicit symmetric residuals require a dense or compressed target; use GN-CG for a functional target.",
+    ),
+)
+
+function _symcpd_residual(model, p, target_coordinates)
+    backend = model.backend
+    out = -target_coordinates
+    work = similar(out)
+    parts = join_parts(manifold(model), p)
+    _check_parts_len(parts, backend.rank, "symmetric residual")
+    for part in parts
+        _symcpd_embed_coordinates!(work, backend.component.manifold, part)
+        out .+= work
+    end
+    return out
+end
+
+"""Explicit residual in orthonormal symmetric coordinates, for dense/compressed
+targets. The contraction-based cost, gradient and normal action do not use it.
+"""
+function residual(model::JoinModel{T,B}, p) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
+    backend = model.backend
+    return _symcpd_residual(
+        model,
+        p,
+        _symcpd_target_coordinates(backend.component, backend.target),
+    )
 end
 
 @doc raw"""
@@ -128,6 +157,28 @@ function adjoint_action(
     kwargs...,
 ) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
     return pullback(model, p, a)
+end
+
+function adjoint_action!(
+    out,
+    model::JoinModel{T,B},
+    p,
+    a::AbstractVector;
+    kwargs...,
+) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
+    backend = model.backend
+    expected = ambient_length(backend.component)
+    length(a) == expected ||
+        throw(DimensionMismatch("Expected an ambient cotangent of length $expected."))
+    M = backend.product_manifold
+    parts = join_parts(M, p)
+    outparts = join_parts(M, out)
+    _check_parts_len(parts, backend.rank, "symmetric adjoint input")
+    _check_parts_len(outparts, backend.rank, "symmetric adjoint output")
+    @inbounds for r = 1:backend.rank
+        _symcpd_pullback_coordinates!(outparts[r], backend.component.manifold, parts[r], a)
+    end
+    return out
 end
 
 @doc raw"""

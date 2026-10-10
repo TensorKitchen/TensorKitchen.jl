@@ -1,8 +1,6 @@
 # Block Term Decomposition
 
 Block term decomposition (BTD) represents a tensor as a sum of Tucker blocks.
-It can be useful when one Tucker decomposition is not flexible enough to
-describe the data.
 
 With ``B`` blocks, a BTD approximation is
 
@@ -74,9 +72,8 @@ as `A`, and a smaller relative error means a closer reconstruction.
 
 ## Choosing blocks and ranks
 
-Start with a small number of blocks and small ranks. Increase them only when
-the reconstruction error is too large for your application. More blocks and
-larger ranks can improve the fit, but they require more memory and computation.
+The number of blocks and the rank tuple determine the size of the model. Check
+`rel_error(A, result)` when comparing different choices.
 
 For large tensors, fitting the compact BTD factors avoids storing a full
 reconstruction during most of the calculation. Calling `reconstruct(result)`

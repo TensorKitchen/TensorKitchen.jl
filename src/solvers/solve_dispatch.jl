@@ -3,7 +3,7 @@
 function _solver_object(solver, ::Real; kwargs...)
     throw(
         ArgumentError(
-            "Unsupported solver specification $(typeof(solver)). Use a solver symbol such as :als, :cls, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, or :btd_tsd, or pass an AbstractSolver object.",
+            "Unsupported solver specification $(typeof(solver)). Use a solver symbol such as :als, :cls, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, :gn_cg, :gn_dense, or :btd_tsd, or pass an AbstractSolver object.",
         ),
     )
 end
@@ -52,8 +52,77 @@ function _solver_object(::Val{:lm}, ::Real; kwargs...)
         damping_term_min = get(kwargs, :damping_term_min, 0.1),
         β = get(kwargs, :β, 5.0),
         expect_zero_residual = get(kwargs, :expect_zero_residual, false),
-        linear_subsolver = get(kwargs, :linear_subsolver, Manopt.default_lm_lin_solve!),
+        inner = something(get(kwargs, :inner, nothing), InnerSolveOptions()),
+        diagnostics = get(kwargs, :diagnostics, false),
+        damping_reduction_threshold = get(kwargs, :damping_reduction_threshold, nothing),
     )
+end
+
+const _GN_OPTION_KEYS = (
+    :damping,
+    :damping_increase,
+    :damping_decrease,
+    :inner,
+    :max_damping_trials,
+    :acceptance_ratio,
+    :poor_step_ratio,
+    :good_step_ratio,
+    :damping_policy,
+)
+
+function _solver_object(solver::GaussNewtonSolver, ::Real; kwargs...)
+    conflicts = [key for key in _GN_OPTION_KEYS if !isnothing(get(kwargs, key, nothing))]
+    isempty(conflicts) || throw(
+        ArgumentError(
+            "Configure $conflicts on GaussNewtonSolver instead of also passing separate keywords.",
+        ),
+    )
+    return solver
+end
+
+_gn_option(kwargs, key, default) = something(get(kwargs, key, nothing), default)
+
+function _gauss_newton_solver(linear_solver::Symbol; kwargs...)
+    damping_policy = get(kwargs, :damping_policy, nothing)
+    if !isnothing(damping_policy)
+        conflicts = [
+            key for key in _GN_OPTION_KEYS if
+            key ∉ (:inner, :damping_policy) && !isnothing(get(kwargs, key, nothing))
+        ]
+        isempty(conflicts) || throw(
+            ArgumentError(
+                "damping_policy conflicts with scalar damping options $conflicts.",
+            ),
+        )
+    end
+    if isnothing(damping_policy)
+        damping_policy = DampingPolicy(
+            initial = _gn_option(kwargs, :damping, 1.0e-6),
+            increase_factor = _gn_option(kwargs, :damping_increase, 10),
+            reduction_factor = _gn_option(kwargs, :damping_decrease, 0.3),
+            acceptance_threshold = _gn_option(kwargs, :acceptance_ratio, 1.0e-4),
+            increase_threshold = _gn_option(kwargs, :poor_step_ratio, 0.25),
+            reduction_threshold = _gn_option(kwargs, :good_step_ratio, 0.75),
+            max_trials = _gn_option(kwargs, :max_damping_trials, 8),
+        )
+    end
+    return GaussNewtonSolver(;
+        linear_solver,
+        inner = _gn_option(kwargs, :inner, _default_symcpd_inner_options()),
+        damping = damping_policy,
+    )
+end
+
+_solver_object(::Val{:gn_cg}, ::Real; kwargs...) = _gauss_newton_solver(:cg; kwargs...)
+_solver_object(::Val{:gn_dense}, ::Real; kwargs...) =
+    _gauss_newton_solver(:dense; kwargs...)
+
+function _solve_with_solver(solver::GaussNewtonSolver, model; kwargs...)
+    # Configuration was consumed by _solver_object. Execution keywords are
+    # checked by solve, including unsupported shared RO controls.
+    execution =
+        (; (key => value for (key, value) in pairs(kwargs) if key ∉ _GN_OPTION_KEYS)...)
+    return solve(solver, model; return_stats = true, execution...)
 end
 
 function _solver_object(::Val{:btd_tsd}, stepsize::Real; kwargs...)
@@ -70,7 +139,7 @@ end
 function _solver_object(::Val{S}, ::Real; kwargs...) where {S}
     throw(
         ArgumentError(
-            "Unknown solver=$S. Use :als, :cls, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, or :btd_tsd.",
+            "Unknown solver=$S. Use :als, :cls, :rgd, :rgd_fixed, :rcg, :lbfgs, :lm, :gn_cg, :gn_dense, or :btd_tsd.",
         ),
     )
 end

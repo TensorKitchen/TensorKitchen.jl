@@ -8,6 +8,7 @@ difference is the structure used to represent the input tensor.
 | Use case | Function | Main size parameter | Output |
 | --- | --- | --- | --- |
 | Shared rank-one components across all modes | `cpd(A, rank)` | Number of components | `CPDResult` |
+| Shared rank-one factors for a symmetric tensor | `symcpd(A, rank)` | Number of symmetric components | `SymCPDResult` |
 | Nonnegative data and components | `nncpd(A, rank)` | Number of components | `CPDResult` |
 | A compact core with a separate rank per mode | `tucker(A, ranks)` | Rank tuple | `TuckerResult` |
 | A sum of several Tucker blocks | `btd(A, blocks, ranks)` | Blocks and rank tuple | `BTDResult` |
@@ -58,8 +59,9 @@ larger than the compact decomposition result.
 ## Next steps
 
 - [CP decomposition](cpd.md)
+- [Symmetric CP decomposition](symcpd.md)
 - [Tucker decomposition](tucker.md)
 - [Block term decomposition](btd.md)
 - [Join decomposition](join.md)
 - [Saving and loading results](utils.md)
-- [Advanced methods](advanced/index.md)
+- [Advanced guide](advanced/index.md)

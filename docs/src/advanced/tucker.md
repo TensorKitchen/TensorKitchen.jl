@@ -1,35 +1,31 @@
-# Tucker Methods for Advanced Usage
+# Tucker Methods
 
-For an input tensor ``\mathcal A \in \mathbb R^{n_1\times\cdots\times n_d}``, a
-Tucker approximation of multilinear rank ``(r_1,\ldots,r_d)`` is
+For ``\mathcal A\in\mathbb R^{n_1\times\cdots\times n_d}``, a Tucker
+approximation with multilinear rank ``(r_1,\ldots,r_d)`` is
 
 ```math
 \hat{\mathcal A}
-= \mathcal G \times_1 U^{(1)} \cdots \times_d U^{(d)},
-\qquad U^{(k)} \in \mathbb R^{n_k\times r_k}.
+=\mathcal G\times_1U^{(1)}\cdots\times_dU^{(d)},
+\qquad
+U^{(k)}\in\mathbb R^{n_k\times r_k}.
 ```
+
+The core ``\mathcal G`` stores the compressed coordinates. Each factor matrix
+maps one compressed mode back to its original size.
 
 ## ST-HOSVD
 
-Sequentially Truncated HOSVD processes one mode at a time. If ``\mathcal B`` is
-the current working tensor, the update for mode ``k`` is:
+Sequentially Truncated HOSVD processes one mode at a time. For mode ``k`` it:
 
-1. obtain the leading ``r_k`` left singular vectors of the mode-``k`` unfolding
-   ``B_{(k)}``;
-2. store them as ``U^{(k)}``;
-3. project the working tensor with ``\mathcal B \leftarrow
-   \mathcal B\times_k U^{(k)\mathsf T}``.
+1. finds the leading ``r_k`` left singular vectors of the current mode-``k``
+   unfolding ``B_{(k)}``;
+2. stores them in ``U^{(k)}``;
+3. replaces the working tensor by
+   ``\mathcal B\times_kU^{(k)\mathsf T}``.
 
-The processing order can affect runtime and the final approximation. The
-automatic rank-aware heuristic processes modes in decreasing order of
-``n_k/r_k`` (equivalently, increasing ``r_k/n_k``), so the mode with the
-strongest fractional compression reduces the working tensor first. This is a
-storage-reduction heuristic, not a proof of optimal runtime or error.
-
-When ranks are unavailable, `optimal_mode_order(dims)` instead follows the
-size-only compact-SVD heuristic from the ST-HOSVD paper and processes modes in
-increasing order of ``n_k``. Domain knowledge or benchmarking can still justify
-an explicit `processing_order`.
+The automatic rank-aware order processes modes in decreasing order of
+``n_k/r_k``. This reduces the most strongly compressed mode first. An explicit
+order can be supplied when needed:
 
 ```julia
 result = tucker(
@@ -40,51 +36,29 @@ result = tucker(
 )
 ```
 
-The high-level dispatcher and current method choices are maintained with the
-implementation:
+When ranks are not supplied, `optimal_mode_order(dims)` uses the size-only
+ordering from the ST-HOSVD algorithm.
 
-```@docs
-tucker
-```
+## Randomized ST-HOSVD
 
-## Implicit randomized sketching
-
-For a target rank ``r_k``, randomized ST-HOSVD uses a sketch size
-``\ell=r_k+p``, where ``p`` is the oversampling parameter. With a Gaussian test
-matrix ``\Omega``, it forms
+For mode ``k``, the randomized backend uses a test matrix ``\Omega`` and forms
 
 ```math
-Y = B_{(k)}\Omega,
-\qquad Q = \mathrm{orth}(Y).
-```
-
-Optional power iterations replace the basic sketch by
-
-```math
-Y = \left(B_{(k)}B_{(k)}^{\mathsf T}\right)^q B_{(k)}\Omega,
-```
-
-which can improve the subspace estimate when singular values decay slowly.
-After constructing ``Q``, TensorKitchen forms the projected matrix conceptually
-as
-
-```math
-C = Q^{\mathsf T}B_{(k)}.
-```
-
-It then diagonalizes the small Gram matrix
-``CC^{\mathsf T}=R\Lambda R^{\mathsf T}`` and uses
-
-```math
-U^{(k)} = QR_{[:,1:r_k]},
+Y=B_{(k)}\Omega,
 \qquad
-C_{\mathrm{new}} = R_{[:,1:r_k]}^{\mathsf T}C.
+Q=\operatorname{orth}(Y).
 ```
 
-TensorKitchen evaluates these products through tensor contractions and generates
-the Gaussian test matrix in bounded column blocks. It therefore does not retain
-a full mode unfolding or a full ``\Omega``. This is a projection of all
-conceptual unfolding columns, not random column selection.
+The number of sketch columns is ``\ell=r_k+p``, where ``p`` is
+`oversampling`. With ``q`` power iterations, the sketch becomes
+
+```math
+Y=\left(B_{(k)}B_{(k)}^\mathsf T\right)^qB_{(k)}\Omega.
+```
+
+TensorKitchen computes these products by tensor contractions. It does not
+store the complete unfolding or test matrix. The algorithm sketches all
+conceptual unfolding columns; it does not select a random subset of columns.
 
 ```julia
 result = tucker(
@@ -98,24 +72,20 @@ result = tucker(
 )
 ```
 
-Increasing `oversampling` or `power_iterations` can improve accuracy but also
-increases computation. `block_columns` controls temporary sketch memory rather
-than the target rank.
+`block_columns` limits the number of conceptual unfolding columns processed at
+once. It changes temporary memory use, not the requested Tucker ranks.
 
-The implemented power loop is algebraically the randomized power method
-``(B_{(k)}B_{(k)}^{\mathsf T})^qB_{(k)}\Omega`` and orthonormalizes after each
-complete Gram application. It does not perform the intermediate
-orthonormalization between every multiplication by ``B_{(k)}^{\mathsf T}`` and
-``B_{(k)}`` used by the fully stabilized subspace-iteration variant. Large
-`power_iterations` values can therefore lose weak singular directions through
-roundoff; use small values and verify `rel_error(A, result)`.
+The implemented power loop orthonormalizes after each complete application of
+``B_{(k)}B_{(k)}^\mathsf T``. It is not the fully stabilized variant that
+orthonormalizes between both matrix products. Large values of
+`power_iterations` can therefore lose small singular directions through
+roundoff.
 
 ## HOOI
 
-Higher-Order Orthogonal Iteration alternates over the factor matrices. When
-updating mode ``k``, it projects ``\mathcal A`` along all other modes and then
-selects the leading ``r_k`` left singular vectors of that projected tensor.
-Repeated sweeps seek a lower reconstruction error than the initial Tucker fit.
+Higher-Order Orthogonal Iteration updates one factor matrix at a time. To
+update mode ``k``, it projects the target along every other mode and computes
+the leading ``r_k`` left singular vectors of the projected tensor.
 
 ```julia
 result = tucker(
@@ -134,38 +104,36 @@ hooi
 
 ## Classical T-HOSVD
 
-T-HOSVD computes every mode factor from the original tensor before projecting
-to the core. Unlike ST-HOSVD, it does not shrink the working tensor between mode
-factor computations. It is primarily useful as a reference algorithm.
+T-HOSVD computes every factor matrix from the original tensor and projects to
+the core only after all factors have been found.
 
 ```@docs
 thosvd
 ```
 
-## Error evaluation
+## Error measures
 
-Always available:
+For every Tucker result, use
 
 ```julia
 rel_error(A, result)
 ```
 
-For an exact ST-HOSVD result, orthogonality of the sequential projection
-residuals gives
+For exact ST-HOSVD, the stored singular values also give
 
 ```math
 \left\|\mathcal A-\hat{\mathcal A}\right\|_F^2
-= \sum_{k=1}^{d}\sum_{j>r_{p_k}}\sigma_{k,j}^2,
+=\sum_{k=1}^{d}\sum_{j>r_{p_k}}\sigma_{k,j}^2,
 ```
 
-where ``p_k`` is the mode processed at step ``k`` and ``\sigma_{k,j}`` are the
-singular values of that step's working unfolding. `error_bound(result)` evaluates
-this quantity from stored spectra. Its exact-equality interpretation is specific
-to exact ST-HOSVD; use reconstruction-based `rel_error` for HOOI and other Tucker
-results. The randomized backend does not store complete discarded spectra and
-therefore cannot use `error_bound`.
+where ``p_k`` is the mode processed at step ``k``. `error_bound(result)`
+computes this value. Randomized ST-HOSVD does not store all discarded singular
+values, so it does not provide `error_bound`.
+
+## API
 
 ```@docs
+tucker
 optimal_mode_order
 processing_order
 singular_values
@@ -173,5 +141,5 @@ sthosvd
 error_bound
 ```
 
-See [References](../references.md) for ST-HOSVD and randomized range-finding
-sources.
+See [References](../references.md) for the ST-HOSVD and randomized
+range-finding sources.

@@ -12,12 +12,12 @@ subproblems. Manopt currently allocates a coordinate scratch vector while
 applying its matrix-free LM surrogate, even when a `FunctionVectorialType`
 Jacobian ignores that scratch space. Manifolds' `ProductManifold` allocator
 delegates this allocation to its first point component; this fails when that
-component is a `TuckerPoint` because it is a structured container rather than
-an array.
+component is a `TuckerPoint` or a native Veronese tuple rather than an array.
 
 The decorator forwards manifold operations unchanged and only supplies the
-flat coordinate scratch allocation. It can be removed when the upstream
-allocation path supports structured product components directly.
+flat coordinate scratch allocation and manifold-aware tangent-space copying.
+It can be removed when the upstream allocation path supports structured
+product components directly.
 """
 struct _LMSubproblemManifold{F,M<:ManifoldsBase.AbstractManifold{F}} <:
        ManifoldsBase.AbstractDecoratorManifold{F}
@@ -29,6 +29,35 @@ ManifoldsBase.get_forwarding_type(::_LMSubproblemManifold, _) =
     ManifoldsBase.SimpleForwardingType()
 ManifoldsBase.get_forwarding_type(::_LMSubproblemManifold, _, ::Type) =
     ManifoldsBase.SimpleForwardingType()
+
+# Manopt's generic nonlinear least-squares gradient expands a vector residual
+# into scalar components and applies the adjoint once per coordinate. LM
+# already supplies a full vector adjoint, so preserve the identity loss while
+# dispatching the gradient through one block adjoint application.
+struct _LMBlockIdentityRobustifier <: Manopt.AbstractRobustifierFunction end
+
+Manopt.get_robustifier_values(::_LMBlockIdentityRobustifier, x::Real) = (x, one(x), zero(x))
+
+function Manopt._add_gradient!(
+    M,
+    X,
+    vdf::Manopt.AbstractFirstOrderVectorFunction,
+    ::_LMBlockIdentityRobustifier,
+    p;
+    value_cache = Manopt.get_value(M, vdf, p),
+    jacobian_cache = nothing,
+)
+    Manopt.add_adjoint_jacobian!(M, X, vdf, p, value_cache)
+    return X
+end
+
+function _lm_nonlinear_least_squares_objective(vdf, initial_residual_values)
+    return Manopt.ManifoldNonlinearLeastSquaresObjective(
+        [vdf],
+        [_LMBlockIdentityRobustifier()],
+        copy(initial_residual_values),
+    )
+end
 
 @inline _lm_coordinate_storage(p::Manifolds.TuckerPoint) = p.hosvd.core
 @inline _lm_coordinate_storage(p::Manifolds.TuckerTangentVector) = p.Ċ
@@ -51,7 +80,22 @@ function ManifoldsBase.allocate_result(
 end
 
 @inline function _lm_subproblem_manifold(M)
-    return _contains_tucker_manifold(M) ? _LMSubproblemManifold(M) : M
+    return _lm_needs_storage_adapter(M) ? _LMSubproblemManifold(M) : M
+end
+
+_lm_needs_storage_adapter(M) = _contains_tucker_manifold(M) || M isa Manifolds.Veronese
+_lm_needs_storage_adapter(M::ProductManifold) = any(_lm_needs_storage_adapter, M.manifolds)
+
+# CR copies points of a tangent space. The generic Fiber fallback uses array
+# copying, which cannot handle native Veronese tuples inside ArrayPartition.
+# Scope this correction to our decorator and delegate to the base geometry.
+function ManifoldsBase.copyto!(
+    TpM::ManifoldsBase.TangentSpace{F,<:_LMSubproblemManifold},
+    dest,
+    src,
+) where {F}
+    M = ManifoldsBase.base_manifold(TpM).manifold
+    return ManifoldsBase.copyto!(M, dest, ManifoldsBase.base_point(TpM), src)
 end
 
 # Hager--Zhang currently seeds its evaluation history with

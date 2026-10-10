@@ -1,40 +1,25 @@
-# Preparing data without an unnecessary full copy
+# Preparing Data
 
-TensorKitchen separates the type used to store observations from the
-floating-point type used for numerical work. This matters when, for example, a
-large tensor is stored as `Int16` but the decomposition should run in
-`Float32`.
+TensorKitchen can store observations in one number type and compute in another.
+For example, an `Int16` tensor can remain in integer storage while the
+decomposition uses `Float32` arithmetic.
 
-Start with the cheapest exact option. Avoid a full converted copy first; choose
-a randomized algorithm only when the approximation reduces enough work to be
-useful.
-
-```text
-Is converting the whole input the memory problem?
-│
-├─ no  → use the usual decomposition API
-│
-└─ yes → keep native storage and choose compute_type
-         │
-         ├─ CP or nonnegative CP → exact ALS or manifold optimization
-         │                          with implicit contractions
-         │
-         ├─ BTD → projected HOOI updates and projected multistart
-         │         initialization
-         │
-         └─ Tucker → randomized ST-HOSVD when approximation is acceptable
+```julia
+counts = rand(Int16(0):Int16(100), 200, 150, 80)
 ```
 
-## Exact CP decomposition from integer storage
+The two main options are:
 
-The public API prepares real-valued input automatically. With
-`materialize=false`, TensorKitchen keeps the original storage and converts
-bounded pieces as exact kernels read them:
+- `compute_type`: floating-point type used by the decomposition;
+- `materialize`: whether to create a full converted copy of the input.
+
+## CPD and nonnegative CPD
+
+With `materialize=false`, CPD reads the original observations in bounded pieces
+and converts them as needed:
 
 ```julia
 using TensorKitchen
-
-counts = rand(Int16(0):Int16(100), 200, 150, 80)
 
 result = cpd(
     counts,
@@ -47,57 +32,35 @@ result = cpd(
 )
 ```
 
-This CP-ALS path uses all observations. It does not construct a dense unfolding
-or Khatri--Rao matrix and is not a randomized approximation.
+This is an exact CP-ALS computation over all observations. It is not a random
+sample or sketch. The gradient-based solvers `:rgd`, `:rgd_fixed`, `:rcg`, and
+`:lbfgs` also support this input path.
 
-The same lazy input can be used by the gradient-based manifold solvers. The
-default `init=:auto` selects a random initializer for a lazy converted input so
-the basic public call remains observation-preserving:
+For lazy input, `init=:auto` uses a random initializer. Explicit
+`RandomInit()`, `PointInit(...)`, and an ALS warm start based on random
+initialization are also supported. Tucker-based CP initializers and
+`solver=:lm` require `materialize=true`.
 
-```julia
-result = cpd(
-    counts,
-    10;
-    compute_type = Float32,
-    materialize = false,
-    solver = :lbfgs, # also :rgd, :rgd_fixed, or :rcg
-    verbose = false,
-)
-```
-
-An explicit `RandomInit()`, `PointInit(...)`, or
-`ALSWarmStartInit(...; base_init=RandomInit())` is also safe. Explicit
-structured initializers such as `TuckerInit()` and `TuckerDiagInit()` are
-rejected unless the input is materialized.
-
-For rank two and above, objective and gradient evaluations use exact implicit
-MTTKRP contractions. Rank-one models use exact tensor-vector contractions.
-Their norm, component trace, and final-error diagnostics also preserve lazy
-storage. The target norm is computed once and reused across initialization,
-optimization, and diagnostics. These methods still inspect all observations;
-they are not sketches.
-
-For nonnegative data, use the same storage options with `nncpd`:
+Nonnegative CPD uses the same storage options:
 
 ```julia
 result = nncpd(
     counts,
     10;
     compute_type = Float32,
+    materialize = false,
     solver = :als,
     verbose = false,
 )
 ```
 
-`nncpd` checks the input for nonfinite and negative observations in a streaming
-pass before fitting. Its lazy path supports the same `:als`, `:rgd`,
-`:rgd_fixed`, `:rcg`, and `:lbfgs` solver choices.
+Before fitting, `nncpd` checks for nonfinite and negative observations without
+creating a full converted copy.
 
 ## Tucker decomposition
 
-Exact ST-HOSVD and HOOI currently require materialized compute storage. When a
-randomized approximation is acceptable, randomized ST-HOSVD can consume a lazy
-converted tensor without constructing complete mode unfoldings:
+Exact ST-HOSVD and HOOI require materialized compute storage. Randomized
+ST-HOSVD can use lazy converted input:
 
 ```julia
 result = tucker(
@@ -111,23 +74,11 @@ result = tucker(
 )
 ```
 
-Set `materialize=true` when you deliberately want an exact ST-HOSVD or HOOI
-run:
-
-```julia
-result = tucker(
-    counts,
-    (20, 15, 10);
-    compute_type = Float32,
-    materialize = true,
-)
-```
+Use `materialize=true` for exact ST-HOSVD or HOOI.
 
 ## Block term decomposition
 
-BTD can also keep integer observations in native storage. Its lazy ALS path
-updates each Tucker block from projected target contractions, without building
-the full residual tensor:
+Lazy BTD uses projected HOOI contractions instead of a full residual tensor:
 
 ```julia
 result = btd(
@@ -141,38 +92,27 @@ result = btd(
 )
 ```
 
-For a lazy input, `init=:auto` selects
-[`BTDProjectedMultistartInit`](@ref). Its candidates are random compact Tucker
-points, optionally screened by short projected HOOI runs, and selected using
-the analytic BTD objective. This is exact observation-preserving computation,
-not randomized sketching: every projected contraction still uses all input
-observations.
+For lazy input, `init=:auto` selects
+[`BTDProjectedMultistartInit`](@ref). Its contractions use all observations.
+Lazy BTD requires `block_method=:hooi`; HOSVD initialization and
+`block_method=:sthosvd` require `materialize=true`.
 
-Lazy BTD currently requires `block_method=:hooi`. HOSVD-based initializers and
-`block_method=:sthosvd` need an ambient tensor and are rejected unless you set
-`materialize=true`. Explicit requests are never changed silently.
+## Meaning of `materialize=false`
 
-## What `materialize=false` guarantees
+When preprocessing returns a [`ComputeArray`](@ref), `materialize=false` means
+that TensorKitchen does not allocate an input-sized copy in `compute_type`.
+Compact factors, cores, and temporary workspaces are still allocated.
 
-When preprocessing produces a [`ComputeArray`](@ref), `materialize=false`
-means that TensorKitchen does not allocate an input-sized copy containing every
-observation in compute precision. Decomposition factors, projected Tucker
-cores, and bounded workspaces are still allocated.
+Unsupported combinations raise `ArgumentError`. TensorKitchen does not
+silently materialize the input or replace an explicitly requested method.
 
-Unsupported lazy combinations fail with an `ArgumentError` and explain which
-option must change. TensorKitchen does not silently materialize the input or
-silently replace an explicitly requested initializer or exact method. The
-automatic CP/NNCP initialization policy selects `RandomInit()` for lazy inputs;
-explicit structured CP initializers and `solver=:lm` still require a
-materialized input. LM constructs an input-sized ambient residual. Automatic
-BTD initialization uses projected multistart for lazy inputs, and its ALS
-updates remain on the projected HOOI path.
+Calling `reconstruct(result)` is separate from input preparation: it creates a
+full tensor with the original dimensions.
 
-## Inspect preprocessing directly
+## Inspect prepared data
 
-Most users can pass preprocessing keywords directly to `cpd`, `nncpd`, `btd`,
-or `tucker`. The lower-level functions are useful when inspecting or reusing a
-prepared tensor:
+Most calls can pass preprocessing options directly. Use the lower-level API to
+inspect or reuse a prepared tensor:
 
 ```julia
 A = prepare_tensor(counts; compute_type = Float32, materialize = false)
