@@ -31,15 +31,15 @@ function _tangent_cg(
     residual_norm2 = inner(M, p, residual, residual)
     initial_norm = sqrt(max(residual_norm2, zero(T)))
     threshold = absolute ? tol : tol * initial_norm
-    if initial_norm == zero(T)
+    if isfinite(initial_norm) && initial_norm <= threshold
         info = (
-            initial_residual_norm = zero(T),
-            final_residual_norm = zero(T),
-            relative_residual = zero(T),
-            threshold = zero(T),
+            initial_residual_norm = initial_norm,
+            final_residual_norm = initial_norm,
+            relative_residual = iszero(initial_norm) ? zero(T) : one(T),
+            threshold = threshold,
             tolerance = tol,
             tolerance_kind = absolute ? :absolute : :relative,
-            termination_reason = :initial_residual,
+            termination_reason = iszero(initial_norm) ? :initial_residual : :converged,
         )
         return solution, 0, true, info
     end

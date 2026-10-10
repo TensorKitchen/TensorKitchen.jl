@@ -1,3 +1,166 @@
+struct _UnsupportedGNModel <: AbstractDecompositionModel{Float64} end
+
+@testset "Gauss Newton execution options and direct diagnostics" begin
+    @test_throws ArgumentError solve(GaussNewtonSolver(), _UnsupportedGNModel())
+    x = normalize([1.0, 0.4, -0.2])
+    A = [1.2 * x[i] * x[j] * x[k] for i = 1:3, j = 1:3, k = 1:3]
+    p0 = (([0.6], copy(x)),)
+    snapshot = deepcopy(p0)
+    model = JoinModel(SymmetricRankOne(3, 3), 1, DenseSymmetricTarget(A))
+    for method in (:gn_cg, :gn_dense)
+        object = GaussNewtonSolver(linear_solver = method == :gn_cg ? :cg : :dense)
+        for specification in (method, object)
+            result = symcpd(A, 1; p0, solver = specification, maxiter = 1, verbose = false)
+            info = solver_info(result)
+            @test cost(result) < cost(model, p0)
+            @test info.inner.solve_count == length(info.damping_history) > 0
+            @test length(info.inner.converged) == info.inner.solve_count
+            @test length(info.inner.final_residuals) == info.inner.solve_count
+            @test !info.normalized_objective
+            loose = symcpd(
+                A,
+                1;
+                p0,
+                solver = specification,
+                grad_tol = 10.0,
+                maxiter = 2,
+                verbose = false,
+            )
+            @test iterations(loose) == 0
+            @test converged(loose)
+            @test solver_info(loose).inner.solve_count == 0
+            for options in (
+                (gradient_mode = :invalid,),
+                (gradient_mode = :egrad_project,),
+                (normalized_objective = true,),
+                (iteration_callbacks = ((args...) -> nothing,),),
+                (vector_transport_method = ParallelTransport(),),
+                (unknown_option = 1,),
+            )
+                @test_throws ArgumentError symcpd(
+                    A,
+                    1;
+                    p0,
+                    solver = specification,
+                    verbose = false,
+                    options...,
+                )
+            end
+            if method == :gn_dense
+                for key in (
+                    :adaptive,
+                    :tolerance_policy,
+                    :iterations,
+                    :total_iterations,
+                    :max_iterations,
+                    :tolerances,
+                    :zero_start,
+                )
+                    @test isnothing(getproperty(info.inner, key))
+                end
+                @test all(==(:direct_solve), info.inner.termination_reasons)
+                @test all(<(1e-10), info.inner.relative_residuals)
+            else
+                @test info.inner.total_iterations == sum(info.inner.iterations)
+                @test all(
+                    reason -> reason in (:zero_residual, :relative_tolerance),
+                    info.inner.termination_reasons,
+                )
+            end
+        end
+        for options in ((inner = InnerSolveOptions(),), (damping = 1e-6,))
+            @test_throws ArgumentError symcpd(
+                A,
+                1;
+                p0,
+                solver = object,
+                verbose = false,
+                options...,
+            )
+        end
+        @test_throws ArgumentError solve(object, model; p0, typo = true)
+    end
+    @test TensorKitchen._join_cache_point_equal(p0, snapshot)
+    policy = TensorKitchen._default_gauss_newton_damping()
+    options = InnerSolveOptions(tolerance = RelativeResidualTolerance(1e-4), maxiter = 1)
+    configured = GaussNewtonSolver(inner = options, damping = policy)
+    by_object = symcpd(A, 1; p0, solver = configured, maxiter = 1, verbose = false)
+    by_symbol = symcpd(
+        A,
+        1;
+        p0,
+        inner = options,
+        damping_policy = policy,
+        maxiter = 1,
+        verbose = false,
+    )
+    @test cost(by_object) ≈ cost(by_symbol)
+    @test solver_info(by_object).inner.max_iterations == 1
+    @test solver_info(by_object).inner.tolerance_policy === options.tolerance
+    @test solver_info(by_object).damping_policy === policy
+    @test_throws ArgumentError symcpd(A, 1; p0, damping_policy = policy, damping = 1e-6)
+    @test_throws ArgumentError symcpd(A, 1; p0, grad_tol = Inf)
+    @test_throws ArgumentError solve(
+        GaussNewtonSolver(),
+        model;
+        p0,
+        normalization = SeparateLambdaNormalization(),
+    )
+    absolute = symcpd(
+        A,
+        1;
+        p0,
+        maxiter = 1,
+        verbose = false,
+        inner = InnerSolveOptions(tolerance = AbsoluteResidualTolerance(10)),
+    )
+    @test all(==(:absolute_tolerance), solver_info(absolute).inner.termination_reasons)
+    @test all(iszero, solver_info(absolute).inner.iterations)
+end
+
+@testset "Damping bounds across scalar types" begin
+    for T in (Float32, Float64)
+        policy = DampingPolicy(
+            initial = 1e-20,
+            maximum = 1e-19,
+            increase_factor = 10,
+            reduction_factor = 0.3,
+            acceptance_threshold = 0.1,
+            increase_threshold = 0.2,
+            reduction_threshold = 0.8,
+        )
+        mu = T(policy.initial)
+        @test TensorKitchen._update_accepted_damping(policy, mu, T(0.9)) < mu
+        for ratio in (T(0.1), T(0.5), T(0.9))
+            value = mu
+            for _ = 1:200
+                value = TensorKitchen._update_accepted_damping(policy, value, ratio)
+                @test isfinite(value) && 0 < value <= policy.maximum
+            end
+        end
+        @test 0 < TensorKitchen._increase_damping(policy, T(Inf)) <= policy.maximum
+    end
+    base = (
+        initial = 1.0,
+        increase_factor = 10,
+        reduction_factor = 0.3,
+        acceptance_threshold = 0.1,
+        increase_threshold = 0.2,
+        reduction_threshold = Inf,
+    )
+    for change in (
+        (initial = Inf,),
+        (increase_factor = Inf,),
+        (increase_threshold = 2.0,),
+        (maximum = NaN,),
+        (initial = NaN,),
+    )
+        @test_throws ArgumentError DampingPolicy(; merge(base, change)...)
+    end
+    tiny = DampingPolicy(; merge(base, (initial = 1e-100, maximum = 1e-99))...)
+    @test_throws ArgumentError TensorKitchen._damping_bounds(tiny, Float32)
+end
+
 # Small full-tensor oracle used only for numerical validation.
 function _symcpd_full_term(λ, x, d)
     A = Array{typeof(λ)}(undef, ntuple(_ -> length(x), d))

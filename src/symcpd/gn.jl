@@ -21,6 +21,13 @@ _default_gauss_newton_damping() = DampingPolicy(
 `linear_solver=:dense` materializes the intrinsic normal matrix. `inner`
 controls the iterative linear solve and `damping` owns step acceptance and
 damping updates.
+
+The current implementation supports symmetric `JoinModel`s and the unnormalized
+objective. `grad_tol` controls gradient convergence (default `tol`); `tol` also
+controls small-step termination. Nonempty `iteration_callbacks`, objective
+normalization, and vector transport are currently rejected. When passing a
+solver object to `symcpd`, configure its inner solve and damping on the object;
+duplicate configuration keywords are rejected.
 """
 struct GaussNewtonSolver{I<:InnerSolveOptions} <: AbstractSecondOrderROSolver
     linear_solver::Symbol
@@ -148,10 +155,14 @@ function _solve_symcpd_gn(
     p0 = nothing,
     maxiter::Int = 100,
     tol::Real = 1.0e-8,
+    grad_tol::Real = tol,
+    observation_norm2_cache = nothing,
     verbose::Bool = true,
 ) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
     maxiter >= 0 || throw(ArgumentError("maxiter must be nonnegative."))
-    tol > 0 || throw(ArgumentError("tol must be positive."))
+    isfinite(tol) && tol > 0 || throw(ArgumentError("tol must be finite and positive."))
+    isfinite(grad_tol) && grad_tol > 0 ||
+        throw(ArgumentError("grad_tol must be finite and positive."))
 
     M = model.backend.product_manifold
     linear_solver = solver.linear_solver
@@ -165,8 +176,18 @@ function _solve_symcpd_gn(
     p = join_solver_point(M, deepcopy(p_initial))
     retraction_method = _solver_retraction_method(M, p)
     current_cost = cost(model, p)
+    lower, upper = _damping_bounds(damping_policy, T)
     mu = T(damping_policy.initial)
+    isfinite(mu) && mu > 0 ||
+        throw(ArgumentError("Initial damping must be positive and finite in $T."))
+    mu = clamp(mu, lower, upper)
     tolerance = T(tol)
+    gradient_tolerance = T(grad_tol)
+    isfinite(tolerance) &&
+    tolerance > 0 &&
+    isfinite(gradient_tolerance) &&
+    gradient_tolerance > 0 ||
+        throw(ArgumentError("Stopping tolerances must be positive and finite in $T."))
     inner_iterations_history = Int[]
     inner_converged_history = Bool[]
     inner_tolerance_history = T[]
@@ -198,7 +219,7 @@ function _solve_symcpd_gn(
                 "grad_norm=$(gradient_norm), damping=$(mu)",
             )
         end
-        if gradient_norm <= tolerance
+        if gradient_norm <= gradient_tolerance
             converged_flag = true
             termination_reason = :gradient_tolerance
             iterations_done = iteration - 1
@@ -235,6 +256,16 @@ function _solve_symcpd_gn(
                     ManifoldsBase.get_coordinates(M, p, gradient, basis)
                 H[diagind(H)] .+= mu
                 step_coordinates = -(H \ gradient_coordinates)
+                final_residual = norm(H * step_coordinates + gradient_coordinates)
+                finite_solution =
+                    all(isfinite, step_coordinates) && isfinite(final_residual)
+                push!(inner_converged_history, finite_solution)
+                push!(inner_initial_residual_history, norm(gradient_coordinates))
+                push!(inner_final_residual_history, final_residual)
+                push!(
+                    inner_termination_history,
+                    finite_solution ? :direct_solve : :nonfinite_residual,
+                )
                 ManifoldsBase.get_vector(M, p, step_coordinates, basis)
             end
             step_norm = norm(M, p, step)
@@ -303,11 +334,13 @@ function _solve_symcpd_gn(
 
     final_gradient = rgrad(model, p)
     final_gradient_norm = norm(M, p, final_gradient)
-    if final_gradient_norm <= tolerance
+    if final_gradient_norm <= gradient_tolerance
         converged_flag = true
         termination_reason = :gradient_tolerance
     end
-    norm2 = target_norm2(model.backend.target)
+    norm2 =
+        isnothing(observation_norm2_cache) ? target_norm2(model.backend.target) :
+        T(observation_norm2_cache)
     residual_norm2 = max(T(2) * current_cost, zero(T))
     relative_error = norm2 > zero(T) ? sqrt(residual_norm2 / norm2) : sqrt(residual_norm2)
     solver_symbol = linear_solver == :cg ? :gn_cg : :gn_dense
@@ -335,6 +368,7 @@ function _solve_symcpd_gn(
                 policy = inner_options.tolerance,
                 maxiter = inner_maxiter,
                 converged = inner_converged_history,
+                iterative = linear_solver == :cg,
             ),
             accepted_steps = accepted_steps,
             rejected_steps = rejected_steps,
@@ -349,6 +383,8 @@ function _solve_symcpd_gn(
             final_damping = mu,
             damping_policy = damping_policy,
             termination_reason = termination_reason,
+            grad_tol = gradient_tolerance,
+            normalized_objective = false,
         ),
     )
 end
@@ -362,8 +398,57 @@ function solve(
     tol::Real = 1.0e-8,
     verbose::Bool = true,
     return_stats::Bool = false,
+    gradient_mode = :riemannian,
+    normalization = NoNormalization(),
+    grad_tol = nothing,
+    normalized_objective::Bool = false,
+    iteration_callbacks = (),
+    vector_transport_method = nothing,
+    observation_norm2_cache = nothing,
     kwargs...,
 ) where {T<:AbstractFloat,B<:SymmetricCPDBackend}
-    result = _solve_symcpd_gn(solver, model; init, p0, maxiter, tol, verbose)
+    isempty(kwargs) || throw(
+        ArgumentError(
+            "Unsupported GaussNewtonSolver keywords $(keys(kwargs)). Configure inner and damping on the solver object.",
+        ),
+    )
+    gradient_mode_policy(gradient_mode) isa RiemannianGradientMode ||
+        throw(ArgumentError("GaussNewtonSolver requires gradient_mode=:riemannian."))
+    _normalization_policy(normalization) isa NoNormalization ||
+        throw(ArgumentError("GaussNewtonSolver only supports NoNormalization()."))
+    normalized_objective && throw(
+        ArgumentError("GaussNewtonSolver currently requires normalized_objective=false."),
+    )
+    isempty(iteration_callbacks) ||
+        throw(ArgumentError("GaussNewtonSolver does not yet support iteration_callbacks."))
+    isnothing(vector_transport_method) ||
+        throw(ArgumentError("GaussNewtonSolver does not use vector_transport_method."))
+    if !isnothing(observation_norm2_cache)
+        isfinite(observation_norm2_cache) && observation_norm2_cache >= 0 ||
+            throw(ArgumentError("observation_norm2_cache must be finite and nonnegative."))
+    end
+    result = _solve_symcpd_gn(
+        solver,
+        model;
+        init,
+        p0,
+        maxiter,
+        tol,
+        grad_tol = isnothing(grad_tol) ? tol : grad_tol,
+        observation_norm2_cache,
+        verbose,
+    )
     return return_stats ? result : result.point
+end
+
+function solve(
+    ::GaussNewtonSolver,
+    model::AbstractDecompositionModel{T};
+    kwargs...,
+) where {T<:AbstractFloat}
+    throw(
+        ArgumentError(
+            "GaussNewtonSolver currently supports only symmetric JoinModel models, got $(typeof(model)).",
+        ),
+    )
 end

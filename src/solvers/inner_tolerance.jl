@@ -91,6 +91,19 @@ const LMInnerOptions = InnerSolveOptions
 _inner_maxiter(options::InnerSolveOptions, dimension::Integer) =
     isnothing(options.maxiter) ? max(20 * dimension, 200) : options.maxiter
 
+_inner_termination_reason(reason, policy) =
+    reason == :initial_residual ? :zero_residual :
+    reason == :converged ?
+    (policy isa AbsoluteResidualTolerance ? :absolute_tolerance : :relative_tolerance) :
+    reason
+
+"""Build per-linear-solve diagnostics. `solve_count` includes direct solves.
+
+For direct solves, iteration counts, tolerance settings, and zero-start status
+are `nothing`. `:direct_solve` means the factorization returned a finite solution
+and residual; the achieved residual reports accuracy without an iterative
+stopping threshold.
+"""
 function _inner_history_info(
     iterations,
     tolerances,
@@ -103,29 +116,33 @@ function _inner_history_info(
     converged = nothing,
     seconds = nothing,
     zero_start::Bool = true,
+    iterative::Bool = true,
 )
     relative_residuals = [
-        iszero(initial) ? zero(initial) : final / initial for
+        iszero(initial) && iszero(final) ? zero(initial) : final / initial for
         (initial, final) in zip(initial_residuals, final_residuals)
     ]
     convergence = isnothing(converged) ? nothing : copy(converged)
     return (
         solver = solver,
-        adaptive = policy isa AdaptiveResidualTolerance,
-        tolerance_policy = policy,
-        max_iterations = maxiter,
-        total_iterations = sum(iterations),
-        iterations = copy(iterations),
+        adaptive = iterative ? policy isa AdaptiveResidualTolerance : nothing,
+        tolerance_policy = iterative ? policy : nothing,
+        max_iterations = iterative ? maxiter : nothing,
+        solve_count = length(reasons),
+        total_iterations = iterative ? sum(iterations) : nothing,
+        iterations = iterative ? copy(iterations) : nothing,
         converged = convergence,
         failed_count = isnothing(convergence) ? nothing : count(!, convergence),
         all_converged = isnothing(convergence) || isempty(convergence) ? nothing :
                         all(convergence),
-        tolerances = copy(tolerances),
+        tolerances = iterative ? copy(tolerances) : nothing,
         initial_residuals = copy(initial_residuals),
         final_residuals = copy(final_residuals),
         relative_residuals = relative_residuals,
-        termination_reasons = copy(reasons),
+        termination_reasons = [
+            _inner_termination_reason(reason, policy) for reason in reasons
+        ],
         seconds = isnothing(seconds) ? nothing : copy(seconds),
-        zero_start = zero_start,
+        zero_start = iterative ? zero_start : nothing,
     )
 end
