@@ -3,20 +3,30 @@ export LMSolver
 
 """
     LMSolver(; η=0.2, damping_term_min=0.1, β=5.0,
-        expect_zero_residual=false, linear_subsolver=Manopt.default_lm_lin_solve!)
+        expect_zero_residual=false, inner=LMInnerOptions(), diagnostics=false,
+        damping_reduction_threshold=nothing)
 
 Configure the Riemannian Levenberg--Marquardt solver used for nonlinear
 least-squares models. `η` controls step acceptance, `damping_term_min` is the
 minimum damping scale, and `β` controls damping updates. Set
 `expect_zero_residual=true` only when the model is expected to fit the target
 exactly.
+
+The operator-based Manopt path uses its tangent conjugate-residual subproblem
+solver with a zero start at every outer iteration. `inner` configures its
+accuracy and iteration cap. `diagnostics=true` records residual/JVP/VJP call
+counts and elapsed times; inner iteration and residual histories are always
+reported. `damping_reduction_threshold=nothing` preserves the policy selected
+by `expect_zero_residual`; a finite override enables controlled comparisons.
 """
-struct LMSolver <: AbstractSecondOrderROSolver
+struct LMSolver{I<:InnerSolveOptions} <: AbstractSecondOrderROSolver
     η::Float64
     damping_term_min::Float64
     β::Float64
     expect_zero_residual::Bool
-    linear_subsolver::Any
+    inner::I
+    diagnostics::Bool
+    damping_reduction_threshold::Union{Nothing,Float64}
 end
 
 function LMSolver(;
@@ -24,20 +34,36 @@ function LMSolver(;
     damping_term_min::Real = 0.1,
     β::Real = 5.0,
     expect_zero_residual::Bool = false,
-    linear_subsolver = Manopt.default_lm_lin_solve!,
+    inner::InnerSolveOptions = InnerSolveOptions(),
+    diagnostics::Bool = false,
+    damping_reduction_threshold::Union{Nothing,Real} = nothing,
 )
     0 < η < 1 || throw(ArgumentError("η must satisfy 0 < η < 1, got $η"))
     damping_term_min > 0 ||
         throw(ArgumentError("damping_term_min must be > 0, got $damping_term_min"))
     β > 1 || throw(ArgumentError("β must be > 1, got $β"))
+    if !isnothing(damping_reduction_threshold)
+        (η <= damping_reduction_threshold <= 1 || damping_reduction_threshold == Inf) ||
+            throw(
+                ArgumentError("Damping reduction threshold must lie in [η, 1] or be Inf."),
+            )
+    end
+    threshold =
+        isnothing(damping_reduction_threshold) ? nothing :
+        Float64(damping_reduction_threshold)
     return LMSolver(
         Float64(η),
         Float64(damping_term_min),
         Float64(β),
         expect_zero_residual,
-        linear_subsolver,
+        inner,
+        diagnostics,
+        threshold,
     )
 end
+
+LMSolver(η::Real, damping_term_min::Real, β::Real, expect_zero_residual::Bool) =
+    LMSolver(; η, damping_term_min, β, expect_zero_residual)
 
 solver_symbol(::LMSolver) = :lm
 
@@ -48,6 +74,11 @@ end
 
 _lm_raw_residual_vector(model::AbstractDecompositionModel, p) = residual(model, p)
 
+# Identity scaling needs no copy. Fuse conversion with scaling otherwise;
+# never mutate model-provided residuals or Manopt's adjoint input.
+_lm_scaled_vector(a, ::Type{T}, scale) where {T} =
+    eltype(a) === T && scale == one(T) ? a : T.(scale .* a)
+
 function _lm_raw_jacobian_matrix(
     model::AbstractDecompositionModel,
     M,
@@ -55,7 +86,7 @@ function _lm_raw_jacobian_matrix(
     basis = ManifoldsBase.DefaultOrthonormalBasis(),
 )
     T = _scalar_eltype(p)
-    ambient_dim = length(tensor(model))
+    ambient_dim = residual_dimension(model)
     d = manifold_dimension(M)
     J = Matrix{T}(undef, ambient_dim, d)
     coeff = zeros(T, d)
@@ -77,7 +108,21 @@ function _lm_residual_function(
     normalized_objective::Bool,
 ) where {T<:AbstractFloat}
     scale = _lm_scaling_factor(T, normA2, normalized_objective)
-    return (M, p) -> scale .* _lm_raw_residual_vector(model, p)
+    return (M, p) -> _lm_scaled_vector(_lm_raw_residual_vector(model, p), T, scale)
+end
+
+# Cache the fixed target coordinates once per callback, never in the model.
+function _lm_residual_function(
+    model::JoinModel{S,B},
+    ::Type{T},
+    normA2,
+    normalized_objective::Bool,
+) where {S,T<:AbstractFloat,B<:SymmetricCPDBackend}
+    backend = model.backend
+    target_coordinates = _symcpd_target_coordinates(backend.component, backend.target)
+    scale = _lm_scaling_factor(T, normA2, normalized_objective)
+    return (M, p) ->
+        _lm_scaled_vector(_symcpd_residual(model, p, target_coordinates), T, scale)
 end
 
 function _lm_differential_action_function(
@@ -87,7 +132,7 @@ function _lm_differential_action_function(
     normalized_objective::Bool,
 ) where {T<:AbstractFloat}
     scale = _lm_scaling_factor(T, normA2, normalized_objective)
-    return (M, p, X) -> scale .* differential_action(model, p, X)
+    return (M, p, X) -> _lm_scaled_vector(differential_action(model, p, X), T, scale)
 end
 
 function _lm_adjoint_action_function(
@@ -98,8 +143,19 @@ function _lm_adjoint_action_function(
 ) where {T<:AbstractFloat}
     scale = _lm_scaling_factor(T, normA2, normalized_objective)
     return function (M, p, a)
-        a_T = eltype(a) === T ? a : T.(a)
-        return adjoint_action(model, p, scale .* a_T)
+        return adjoint_action(model, p, _lm_scaled_vector(a, T, scale))
+    end
+end
+
+function _lm_adjoint_action_function!(
+    model::AbstractDecompositionModel,
+    ::Type{T},
+    normA2,
+    normalized_objective::Bool,
+) where {T<:AbstractFloat}
+    scale = _lm_scaling_factor(T, normA2, normalized_objective)
+    return function (M, out, p, a)
+        return adjoint_action!(out, model, p, _lm_scaled_vector(a, T, scale))
     end
 end
 
@@ -107,19 +163,25 @@ function _lm_vector_differential_function(
     model::AbstractDecompositionModel,
     ::Type{T},
     normA2,
-    normalized_objective::Bool,
+    normalized_objective::Bool;
+    operator_stats = nothing,
+    residual_f = _lm_residual_function(model, T, normA2, normalized_objective),
 ) where {T<:AbstractFloat}
-    ambient_dim = length(tensor(model))
-    residual_f = _lm_residual_function(model, T, normA2, normalized_objective)
-    differential_f =
-        _lm_differential_action_function(model, T, normA2, normalized_objective)
-    adjoint_f = _lm_adjoint_action_function(model, T, normA2, normalized_objective)
+    ambient_dim = residual_dimension(model)
+    scale = _lm_scaling_factor(T, normA2, normalized_objective)
+    residual_f! = (M, out, p) -> copyto!(out, residual_f(M, p))
+    differential_f! = function (M, out, p, X)
+        differential_action!(out, model, p, X)
+        out .*= scale
+        return out
+    end
+    adjoint_f! = _lm_adjoint_action_function!(model, T, normA2, normalized_objective)
     return Manopt.VectorDifferentialFunction(
-        residual_f,
-        differential_f,
-        adjoint_f,
+        _measure_lm(residual_f!, operator_stats, 1),
+        _measure_lm(differential_f!, operator_stats, 2),
+        _measure_lm(adjoint_f!, operator_stats, 3),
         ambient_dim;
-        evaluation = Manopt.AllocatingEvaluation(),
+        evaluation = Manopt.InplaceEvaluation(),
         function_type = Manopt.FunctionVectorialType(),
         jacobian_type = Manopt.FunctionVectorialType(),
         adjoint_jacobian_type = Manopt.FunctionVectorialType(),
@@ -146,7 +208,9 @@ function solve_lm(
     damping_term_min::Real = 0.1,
     β::Real = 5.0,
     expect_zero_residual::Bool = false,
-    linear_subsolver = Manopt.default_lm_lin_solve!,
+    inner::InnerSolveOptions = InnerSolveOptions(),
+    diagnostics::Bool = false,
+    damping_reduction_threshold::Union{Nothing,Real} = nothing,
     grad_tol = nothing,
     normalized_objective::Bool = true,
 )
@@ -166,17 +230,32 @@ function solve_lm(
     η_T = T(η)
     damping_term_min_T = T(damping_term_min)
     β_T = T(β)
-    vdf = _lm_vector_differential_function(model, T, normA2, setup.uses_relative_objective)
-    initial_residual_values = T.(residual(model, p0_local))
-    scale = _lm_scaling_factor(T, normA2, setup.uses_relative_objective)
-    if scale != one(T)
-        initial_residual_values .*= scale
-    end
-    nlso = Manopt.ManifoldNonlinearLeastSquaresObjective(
-        vdf,
-        Manopt.ComponentwiseRobustifierFunction(Manopt.IdentityRobustifier()),
-        copy(initial_residual_values),
+    reduction_threshold =
+        isnothing(damping_reduction_threshold) ? (expect_zero_residual ? η_T : T(Inf)) :
+        T(damping_reduction_threshold)
+    damping_policy = DampingPolicy(
+        initial = damping_term_min_T,
+        minimum = damping_term_min_T,
+        increase_factor = β_T,
+        reduction_factor = inv(β_T),
+        acceptance_threshold = η_T,
+        increase_threshold = η_T,
+        reduction_threshold = reduction_threshold,
     )
+    operator_stats = diagnostics ? _LMOperatorStats() : nothing
+    inner_trace = _LMInnerTrace(T, diagnostics)
+    residual_f = _lm_residual_function(model, T, normA2, setup.uses_relative_objective)
+    vdf = _lm_vector_differential_function(
+        model,
+        T,
+        normA2,
+        setup.uses_relative_objective;
+        operator_stats,
+        residual_f,
+    )
+    initial_residual = _measure_lm(residual_f, operator_stats, 1)
+    initial_residual_values = copy(initial_residual(M, p0_local))
+    nlso = _lm_nonlinear_least_squares_objective(vdf, initial_residual_values)
     initial_jacobian_matrices = fill(nothing, 1)
     sub_objective = Manopt.construct_lm_subobjective(
         false,
@@ -188,16 +267,8 @@ function solve_lm(
         initial_jacobian_matrices,
     )
     M_subproblem = _lm_subproblem_manifold(M)
-    tangent_subproblem = TangentSpace(M_subproblem, p0_local)
-    sub_problem = Manopt.DefaultManoptProblem(tangent_subproblem, sub_objective)
-    sub_state = Manopt.ConjugateResidualState(
-        tangent_subproblem,
-        sub_objective;
-        α = zero(T),
-        β = zero(T),
-        stopping_criterion = StopAfterIteration(max(20 * manifold_dimension(M), 200)) |
-                             StopWhenGradientNormLess(T(1e-16)),
-    )
+    sub_problem, sub_state =
+        _lm_cr_state(M, p0_local, sub_objective, inner, setup.objective_scale, inner_trace)
     retraction_method = _solver_retraction_method(M, p0_local)
     stopping = StopWhenAny(
         StopAfterIteration(maxiter),
@@ -229,14 +300,14 @@ function solve_lm(
         retraction_method = retraction_method,
         stopping_criterion = stopping,
         initial_residual_values = initial_residual_values,
-        candidate_acceptance_threshold = η_T,
-        damping_increase_factor = β_T,
-        damping_increase_threshold = η_T,
-        damping_reduction_threshold = expect_zero_residual ? η_T : T(Inf),
-        damping_reduction_factor = inv(β_T),
-        damping_term_min = damping_term_min_T,
-        damping_term_max = T(Inf),
-        initial_damping_term = damping_term_min_T,
+        candidate_acceptance_threshold = T(damping_policy.acceptance_threshold),
+        damping_increase_factor = T(damping_policy.increase_factor),
+        damping_increase_threshold = T(damping_policy.increase_threshold),
+        damping_reduction_threshold = T(damping_policy.reduction_threshold),
+        damping_reduction_factor = T(damping_policy.reduction_factor),
+        damping_term_min = T(damping_policy.minimum),
+        damping_term_max = T(damping_policy.maximum),
+        initial_damping_term = T(damping_policy.initial),
         scaling_threshold = T(1.0e-6),
         minimum_acceptable_model_improvement = eps(T),
         use_unified_basis = false,
@@ -264,17 +335,27 @@ function solve_lm(
         return_stats,
         verbose,
         normalized_objective = setup.uses_relative_objective,
-        solver_info_extra = (
-            η = Float64(η),
-            damping_term_min = Float64(damping_term_min),
-            β = Float64(β),
-            expect_zero_residual = expect_zero_residual,
-            uses_operator_jacobian = true,
-            uses_direct_adjoint_action = true,
-            uses_coordinate_linear_solver = false,
-            uses_lm_subproblem_adapter = M_subproblem !== M,
-            uses_user_linear_subsolver = linear_subsolver !== Manopt.default_lm_lin_solve!,
-            uses_vector_transport = !isnothing(vector_transport_method),
+        solver_info_extra = merge(
+            (
+                η = Float64(η),
+                damping_term_min = Float64(damping_term_min),
+                β = Float64(β),
+                expect_zero_residual = expect_zero_residual,
+                uses_operator_jacobian = true,
+                uses_direct_adjoint_action = true,
+                uses_coordinate_linear_solver = false,
+                uses_lm_subproblem_adapter = M_subproblem !== M,
+                uses_vector_transport = !isnothing(vector_transport_method),
+                damping_reduction_threshold = reduction_threshold,
+                damping_policy = damping_policy,
+                diagnostics = diagnostics,
+            ),
+            _lm_inner_info(
+                inner_trace,
+                inner,
+                _inner_maxiter(inner, manifold_dimension(M)),
+            ),
+            _lm_operator_info(operator_stats),
         ),
     )
 end
@@ -313,7 +394,9 @@ function run_second_order_solver(
         damping_term_min = solver.damping_term_min,
         β = solver.β,
         expect_zero_residual = solver.expect_zero_residual,
-        linear_subsolver = solver.linear_subsolver,
+        inner = solver.inner,
+        diagnostics = solver.diagnostics,
+        damping_reduction_threshold = solver.damping_reduction_threshold,
         grad_tol,
         normalized_objective,
     )

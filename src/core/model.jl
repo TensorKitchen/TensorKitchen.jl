@@ -11,7 +11,14 @@ export AbstractDecompositionModel,
     residual,
     differential_action,
     differential_action!,
-    adjoint_action
+    adjoint_action,
+    adjoint_action!,
+    EuclideanResidualSpace,
+    residual_space,
+    residual_dimension,
+    allocate_residual,
+    normal_operator,
+    normal_operator!
 """
     AbstractDecompositionModel{T}
 
@@ -26,6 +33,33 @@ Direct Tucker algorithms (`sthosvd`, `thosvd`, `hooi`) are not subtypes of
 `AbstractDecompositionModel`; they follow a separate non-optimization path.
 """
 abstract type AbstractDecompositionModel{T<:AbstractFloat} end
+
+"""Residual coordinates with the ordinary Euclidean inner product.
+
+The coordinates may represent a full tensor, compressed symmetric entries,
+or observations only. Compression must preserve the objective norm.
+"""
+struct EuclideanResidualSpace{T<:AbstractFloat}
+    dimension::Int
+    function EuclideanResidualSpace{T}(dimension::Int) where {T<:AbstractFloat}
+        dimension >= 0 || throw(ArgumentError("Residual dimension must be nonnegative."))
+        return new{T}(dimension)
+    end
+end
+
+"""Return the residual coordinate space, independently of target storage.
+
+The default is a flattened tensor; models with compressed or implicit targets
+must specialize this method. A contraction-only model need not implement an
+explicit residual evaluation merely to provide a cost or normal operator.
+"""
+residual_space(model::AbstractDecompositionModel{T}) where {T} =
+    EuclideanResidualSpace{T}(length(tensor(model)))
+residual_dimension(model::AbstractDecompositionModel) = residual_space(model).dimension
+allocate_residual(space::EuclideanResidualSpace{T}) where {T} =
+    Vector{T}(undef, space.dimension)
+allocate_residual(model::AbstractDecompositionModel, p) =
+    allocate_residual(residual_space(model))
 
 function cost(model::AbstractDecompositionModel, p)
     error("cost not implemented for $(typeof(model))")
@@ -136,8 +170,7 @@ function differential_action!(out::AbstractVector, model::AbstractDecompositionM
 end
 
 function differential_action(model::AbstractDecompositionModel, p, X)
-    T = eltype(tensor(model))
-    out = Vector{T}(undef, length(tensor(model)))
+    out = allocate_residual(model, p)
     differential_action!(out, model, p, X)
     return out
 end
@@ -150,9 +183,9 @@ function adjoint_action(
 )
     M = manifold(model)
     d = manifold_dimension(M)
-    length(a) == length(tensor(model)) || throw(
+    length(a) == residual_dimension(model) || throw(
         DimensionMismatch(
-            "adjoint_action expected ambient vector of length $(length(tensor(model))) for $(typeof(model)), got $(length(a)).",
+            "adjoint_action expected residual vector of length $(residual_dimension(model)) for $(typeof(model)), got $(length(a)).",
         ),
     )
     T = _scalar_eltype(p)
@@ -169,6 +202,46 @@ function adjoint_action(
     return ManifoldsBase.get_vector(M, p, coeff, basis)
 end
 
+"""Write the metric adjoint action into `out`.
+
+Models may specialize this method to reuse tangent workspaces. The default
+preserves the allocating `adjoint_action` contract and performs a
+manifold-aware copy, so structured tangent representations remain valid.
+"""
+function adjoint_action!(
+    out,
+    model::AbstractDecompositionModel,
+    p,
+    a::AbstractVector;
+    kwargs...,
+)
+    M = manifold(model)
+    ManifoldsBase.copyto!(M, out, p, adjoint_action(model, p, a; kwargs...))
+    return out
+end
+
+"""Apply the Gauss--Newton normal operator `J*J`, using the manifold metric
+adjoint and Euclidean residual coordinates. This is not the exact Riemannian
+Hessian. Models may specialize this fallback with a fused contraction kernel.
+"""
+normal_operator(model::AbstractDecompositionModel, p, X) =
+    adjoint_action(model, p, differential_action(model, p, X))
+
+function normal_operator!(Y, model::AbstractDecompositionModel, p, X)
+    ManifoldsBase.copyto!(manifold(model), Y, p, normal_operator(model, p, X))
+    return Y
+end
+
 function adjoint_action(model::AbstractDecompositionModel, p, a::AbstractArray; kwargs...)
     return adjoint_action(model, p, vec(a); kwargs...)
+end
+
+function adjoint_action!(
+    out,
+    model::AbstractDecompositionModel,
+    p,
+    a::AbstractArray;
+    kwargs...,
+)
+    return adjoint_action!(out, model, p, vec(a); kwargs...)
 end

@@ -129,21 +129,32 @@ function _symcpd_embed_coordinates(M, p)
     return _symcpd_embed_coordinates!(out, M, p)
 end
 
-function _symcpd_pullback_coordinates(M, p, ambient::AbstractVector)
+function _symcpd_pullback_coordinates!(out, M, p, ambient::AbstractVector)
     n, order = _symcpd_manifold_size(M)
     expected = _check_symmetric_coordinate_size(n, order)
     length(ambient) == expected ||
         throw(DimensionMismatch("Expected an ambient cotangent of length $expected."))
-    T = promote_type(eltype(p[1]), eltype(p[2]), eltype(ambient))
-    factor_covector = zeros(T, n)
-    radial = zero(T)
+    length(out[2]) == n ||
+        throw(DimensionMismatch("Expected a factor tangent of length $n."))
+    T = promote_type(eltype(out[1]), eltype(out[2]), eltype(p[1]), eltype(ambient))
+    factor_gradient = out[2]
+    fill!(factor_gradient, zero(T))
+    radial = Ref(zero(T))
     _symmetric_coordinates(n, order, p[2]; differential = true) do k, monomial, gradient
-        radial += ambient[k] * monomial
-        factor_covector .+= ambient[k] .* gradient
+        radial[] += ambient[k] * monomial
+        factor_gradient .+= ambient[k] .* gradient
     end
-    factor_gradient = (factor_covector .- order .* radial .* p[2]) ./ (order * p[1][1])
+    factor_gradient .-= order .* radial[] .* p[2]
+    factor_gradient ./= order * p[1][1]
     factor_gradient .-= dot(p[2], factor_gradient) .* p[2]
-    return _symcpd_tangent(T(radial), factor_gradient)
+    out[1][1] = T(radial[])
+    return out
+end
+
+function _symcpd_pullback_coordinates(M, p, ambient::AbstractVector)
+    T = promote_type(eltype(p[1]), eltype(p[2]), eltype(ambient))
+    out = _symcpd_tangent(zero(T), zeros(T, length(p[2])))
+    return _symcpd_pullback_coordinates!(out, M, p, ambient)
 end
 
 # Visit every distinct index in the permutation orbit of one multi-index.

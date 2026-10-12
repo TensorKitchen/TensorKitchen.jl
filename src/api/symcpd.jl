@@ -95,11 +95,11 @@ preparation and permits operator-defined targets such as
 # Solvers
 
 - `:rgd`, `:rcg`, and `:lbfgs` use TensorKitchen's first-order Riemannian path.
-- `:gn_cg` uses damped Riemannian Gauss--Newton with the analytic matrix-free
-  `J'J` operator and tangent CG.
-- `:gn_dense` builds the intrinsic `r*N` square normal matrix from operator
-  columns and solves it directly. It is intended for validation and small
-  problems.
+- `:gn_cg` or `GaussNewtonSolver(linear_solver=:cg)` uses damped Riemannian
+  Gauss--Newton with the analytic matrix-free `J'J` operator and tangent CG.
+- `:gn_dense` or `GaussNewtonSolver(linear_solver=:dense)` builds the intrinsic
+  `r*N` square normal matrix from operator columns and solves it directly. It
+  is intended for validation and small problems.
 - `:cls` or [`SymmetricCLS`](@ref) runs normalized conditional least squares
   as a standalone solver.
   Every sweep uses tensor contractions instead of an unfolding, normalizes
@@ -147,19 +147,14 @@ function symcpd(
     symmetry_atol::Real = 0,
     symmetry_rtol::Real = sqrt(eps(float(eltype(A)))),
     vector_transport_method = nothing,
-    damping::Real = 1.0e-6,
-    damping_increase::Real = 10,
-    damping_decrease::Real = 0.3,
-    cg_tol::Real = 1.0e-2,
-    adaptive_cg::Bool = true,
-    cg_min_tol::Real = 1.0e-10,
-    cg_forcing_scale::Real = 1,
-    cg_forcing_power::Real = 0.5,
-    cg_maxiter = nothing,
-    max_damping_trials::Int = 8,
-    acceptance_ratio::Real = 1.0e-4,
-    poor_step_ratio::Real = 0.25,
-    good_step_ratio::Real = 0.75,
+    damping::Union{Nothing,Real} = nothing,
+    damping_increase::Union{Nothing,Real} = nothing,
+    damping_decrease::Union{Nothing,Real} = nothing,
+    inner::Union{Nothing,InnerSolveOptions} = nothing,
+    max_damping_trials::Union{Nothing,Int} = nothing,
+    acceptance_ratio::Union{Nothing,Real} = nothing,
+    poor_step_ratio::Union{Nothing,Real} = nothing,
+    good_step_ratio::Union{Nothing,Real} = nothing,
     variable_projection::Bool = false,
     weight_pinv_rtol::Union{Nothing,Real} = nothing,
     cls_damping::Real = 1.0e-10,
@@ -199,12 +194,7 @@ function symcpd(
         damping,
         damping_increase,
         damping_decrease,
-        cg_tol,
-        adaptive_cg,
-        cg_min_tol,
-        cg_forcing_scale,
-        cg_forcing_power,
-        cg_maxiter,
+        inner,
         max_damping_trials,
         acceptance_ratio,
         poor_step_ratio,
@@ -231,19 +221,14 @@ function symcpd(
     gradient_mode = :riemannian,
     verbose::Bool = true,
     vector_transport_method = nothing,
-    damping::Real = 1.0e-6,
-    damping_increase::Real = 10,
-    damping_decrease::Real = 0.3,
-    cg_tol::Real = 1.0e-2,
-    adaptive_cg::Bool = true,
-    cg_min_tol::Real = 1.0e-10,
-    cg_forcing_scale::Real = 1,
-    cg_forcing_power::Real = 0.5,
-    cg_maxiter = nothing,
-    max_damping_trials::Int = 8,
-    acceptance_ratio::Real = 1.0e-4,
-    poor_step_ratio::Real = 0.25,
-    good_step_ratio::Real = 0.75,
+    damping::Union{Nothing,Real} = nothing,
+    damping_increase::Union{Nothing,Real} = nothing,
+    damping_decrease::Union{Nothing,Real} = nothing,
+    inner::Union{Nothing,InnerSolveOptions} = nothing,
+    max_damping_trials::Union{Nothing,Int} = nothing,
+    acceptance_ratio::Union{Nothing,Real} = nothing,
+    poor_step_ratio::Union{Nothing,Real} = nothing,
+    good_step_ratio::Union{Nothing,Real} = nothing,
     variable_projection::Bool = false,
     weight_pinv_rtol::Union{Nothing,Real} = nothing,
     cls_damping::Real = 1.0e-10,
@@ -295,32 +280,6 @@ function symcpd(
             pinv_rtol = weight_pinv_rtol_eff,
             kwargs...,
         )
-    elseif solver in (:gn_cg, :gn_dense)
-        cg_iterations =
-            isnothing(cg_maxiter) ? max(20 * manifold_dimension(manifold(model)), 200) :
-            Int(cg_maxiter)
-        _solve_symcpd_gn(
-            model;
-            init,
-            p0,
-            maxiter,
-            tol,
-            linear_solver = solver == :gn_cg ? :cg : :dense,
-            damping,
-            damping_increase,
-            damping_decrease,
-            cg_tol,
-            adaptive_cg,
-            cg_min_tol,
-            cg_forcing_scale,
-            cg_forcing_power,
-            cg_maxiter = cg_iterations,
-            max_damping_trials,
-            acceptance_ratio,
-            poor_step_ratio,
-            good_step_ratio,
-            verbose,
-        )
     else
         _solve_model(
             model;
@@ -335,6 +294,15 @@ function symcpd(
             verbose,
             vector_transport_method,
             observation_norm2_cache = target_norm2(target),
+            damping,
+            damping_increase,
+            damping_decrease,
+            inner = solver == :lm && isnothing(inner) ?
+                    _default_symcpd_inner_options() : inner,
+            max_damping_trials,
+            acceptance_ratio,
+            poor_step_ratio,
+            good_step_ratio,
             kwargs...,
         )
     end

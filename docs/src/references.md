@@ -23,6 +23,27 @@
 
 ## Symmetric CPD and Matrix-Free Gauss--Newton
 
+- **Symmetric PARAFAC for Volterra kernels:** G. Favier and T. Bouilloc,
+  "Parametric complexity reduction of Volterra models using tensor
+  decompositions," *17th European Signal Processing Conference (EUSIPCO)*,
+  pp. 2288--2292, 2009. [Proceedings PDF](https://eurasip.org/Proceedings/Eusipco/Eusipco2009/contents/papers/1569190634.pdf).
+- **Alternating least squares and symmetric constraints:** P. Comon,
+  X. Luciani, and A. L. F. de Almeida, "Tensor decompositions, alternating
+  least squares and other tales," *Journal of Chemometrics*, vol. 23,
+  pp. 393--405, 2009. [DOI](https://doi.org/10.1002/cem.1236).
+- **Shifted symmetric higher-order power method:** T. G. Kolda and
+  J. R. Mayo, "Shifted power method for computing tensor eigenpairs,"
+  *SIAM Journal on Matrix Analysis and Applications*, vol. 32, no. 4,
+  pp. 1095--1124, 2011. [DOI](https://doi.org/10.1137/100801482).
+- **Conditional least squares for symmetric PARAFAC:** G. Favier,
+  A. Y. Kibangou, and T. Bouilloc, "Nonlinear system modeling and
+  identification using Volterra-PARAFAC models," *International Journal of
+  Adaptive Control and Signal Processing*, vol. 26, no. 1, pp. 30--53, 2012.
+  [DOI](https://doi.org/10.1002/acs.1272).
+- **Variable projection:** G. H. Golub and V. Pereyra, "The differentiation
+  of pseudo-inverses and nonlinear least squares problems whose variables
+  separate," *SIAM Journal on Numerical Analysis*, vol. 10, no. 2,
+  pp. 413--432, 1973. [DOI](https://doi.org/10.1137/0710036).
 - **Riemannian symmetric tensor approximation:** R. Khouja, H. Khalil, and B. Mourrain, "Riemannian Newton optimization methods for the symmetric tensor approximation problem," *Linear Algebra and its Applications*, vol. 637, pp. 175–211, 2022. [DOI](https://doi.org/10.1016/j.laa.2021.12.008).
 - **Matrix-free nonlinear least squares for CPD and BTD:** L. Sorber, M. Van Barel, and L. De Lathauwer, "Optimization-Based Algorithms for Tensor Decompositions: Canonical Polyadic Decomposition, Decomposition in Rank-$(L_r,L_r,1)$ Terms, and a New Generalization," *SIAM Journal on Optimization*, vol. 23, no. 2, pp. 695–720, 2013. [DOI](https://doi.org/10.1137/120868323).
 - **Implicit normal products and GN-CG for CPD:** N. Singh, L. Ma, H. Yang, and E. Solomonik, "Comparison of Accuracy and Scalability of Gauss--Newton and Alternating Least Squares for CANDECOMC/PARAFAC Decomposition," *SIAM Journal on Scientific Computing*, vol. 43, no. 4, pp. C290–C311, 2021. [DOI](https://doi.org/10.1137/20M1344561).

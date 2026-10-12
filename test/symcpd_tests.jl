@@ -1,3 +1,166 @@
+struct _UnsupportedGNModel <: AbstractDecompositionModel{Float64} end
+
+@testset "Gauss Newton execution options and direct diagnostics" begin
+    @test_throws ArgumentError solve(GaussNewtonSolver(), _UnsupportedGNModel())
+    x = normalize([1.0, 0.4, -0.2])
+    A = [1.2 * x[i] * x[j] * x[k] for i = 1:3, j = 1:3, k = 1:3]
+    p0 = (([0.6], copy(x)),)
+    snapshot = deepcopy(p0)
+    model = JoinModel(SymmetricRankOne(3, 3), 1, DenseSymmetricTarget(A))
+    for method in (:gn_cg, :gn_dense)
+        object = GaussNewtonSolver(linear_solver = method == :gn_cg ? :cg : :dense)
+        for specification in (method, object)
+            result = symcpd(A, 1; p0, solver = specification, maxiter = 1, verbose = false)
+            info = solver_info(result)
+            @test cost(result) < cost(model, p0)
+            @test info.inner.solve_count == length(info.damping_history) > 0
+            @test length(info.inner.converged) == info.inner.solve_count
+            @test length(info.inner.final_residuals) == info.inner.solve_count
+            @test !info.normalized_objective
+            loose = symcpd(
+                A,
+                1;
+                p0,
+                solver = specification,
+                grad_tol = 10.0,
+                maxiter = 2,
+                verbose = false,
+            )
+            @test iterations(loose) == 0
+            @test converged(loose)
+            @test solver_info(loose).inner.solve_count == 0
+            for options in (
+                (gradient_mode = :invalid,),
+                (gradient_mode = :egrad_project,),
+                (normalized_objective = true,),
+                (iteration_callbacks = ((args...) -> nothing,),),
+                (vector_transport_method = ParallelTransport(),),
+                (unknown_option = 1,),
+            )
+                @test_throws ArgumentError symcpd(
+                    A,
+                    1;
+                    p0,
+                    solver = specification,
+                    verbose = false,
+                    options...,
+                )
+            end
+            if method == :gn_dense
+                for key in (
+                    :adaptive,
+                    :tolerance_policy,
+                    :iterations,
+                    :total_iterations,
+                    :max_iterations,
+                    :tolerances,
+                    :zero_start,
+                )
+                    @test isnothing(getproperty(info.inner, key))
+                end
+                @test all(==(:direct_solve), info.inner.termination_reasons)
+                @test all(<(1e-10), info.inner.relative_residuals)
+            else
+                @test info.inner.total_iterations == sum(info.inner.iterations)
+                @test all(
+                    reason -> reason in (:zero_residual, :relative_tolerance),
+                    info.inner.termination_reasons,
+                )
+            end
+        end
+        for options in ((inner = InnerSolveOptions(),), (damping = 1e-6,))
+            @test_throws ArgumentError symcpd(
+                A,
+                1;
+                p0,
+                solver = object,
+                verbose = false,
+                options...,
+            )
+        end
+        @test_throws ArgumentError solve(object, model; p0, typo = true)
+    end
+    @test TensorKitchen._join_cache_point_equal(p0, snapshot)
+    policy = TensorKitchen._default_gauss_newton_damping()
+    options = InnerSolveOptions(tolerance = RelativeResidualTolerance(1e-4), maxiter = 1)
+    configured = GaussNewtonSolver(inner = options, damping = policy)
+    by_object = symcpd(A, 1; p0, solver = configured, maxiter = 1, verbose = false)
+    by_symbol = symcpd(
+        A,
+        1;
+        p0,
+        inner = options,
+        damping_policy = policy,
+        maxiter = 1,
+        verbose = false,
+    )
+    @test cost(by_object) ≈ cost(by_symbol)
+    @test solver_info(by_object).inner.max_iterations == 1
+    @test solver_info(by_object).inner.tolerance_policy === options.tolerance
+    @test solver_info(by_object).damping_policy === policy
+    @test_throws ArgumentError symcpd(A, 1; p0, damping_policy = policy, damping = 1e-6)
+    @test_throws ArgumentError symcpd(A, 1; p0, grad_tol = Inf)
+    @test_throws ArgumentError solve(
+        GaussNewtonSolver(),
+        model;
+        p0,
+        normalization = SeparateLambdaNormalization(),
+    )
+    absolute = symcpd(
+        A,
+        1;
+        p0,
+        maxiter = 1,
+        verbose = false,
+        inner = InnerSolveOptions(tolerance = AbsoluteResidualTolerance(10)),
+    )
+    @test all(==(:absolute_tolerance), solver_info(absolute).inner.termination_reasons)
+    @test all(iszero, solver_info(absolute).inner.iterations)
+end
+
+@testset "Damping bounds across scalar types" begin
+    for T in (Float32, Float64)
+        policy = DampingPolicy(
+            initial = 1e-20,
+            maximum = 1e-19,
+            increase_factor = 10,
+            reduction_factor = 0.3,
+            acceptance_threshold = 0.1,
+            increase_threshold = 0.2,
+            reduction_threshold = 0.8,
+        )
+        mu = T(policy.initial)
+        @test TensorKitchen._update_accepted_damping(policy, mu, T(0.9)) < mu
+        for ratio in (T(0.1), T(0.5), T(0.9))
+            value = mu
+            for _ = 1:200
+                value = TensorKitchen._update_accepted_damping(policy, value, ratio)
+                @test isfinite(value) && 0 < value <= policy.maximum
+            end
+        end
+        @test 0 < TensorKitchen._increase_damping(policy, T(Inf)) <= policy.maximum
+    end
+    base = (
+        initial = 1.0,
+        increase_factor = 10,
+        reduction_factor = 0.3,
+        acceptance_threshold = 0.1,
+        increase_threshold = 0.2,
+        reduction_threshold = Inf,
+    )
+    for change in (
+        (initial = Inf,),
+        (increase_factor = Inf,),
+        (increase_threshold = 2.0,),
+        (maximum = NaN,),
+        (initial = NaN,),
+    )
+        @test_throws ArgumentError DampingPolicy(; merge(base, change)...)
+    end
+    tiny = DampingPolicy(; merge(base, (initial = 1e-100, maximum = 1e-99))...)
+    @test_throws ArgumentError TensorKitchen._damping_bounds(tiny, Float32)
+end
+
 # Small full-tensor oracle used only for numerical validation.
 function _symcpd_full_term(λ, x, d)
     A = Array{typeof(λ)}(undef, ntuple(_ -> length(x), d))
@@ -8,6 +171,34 @@ function _symcpd_full_term(λ, x, d)
 end
 
 _symcpd_coordinates(M, p) = TensorKitchen._symcpd_embed_coordinates(M, p)
+
+@testset "SymCPD GN initialization and termination baseline" begin
+    x = normalize([1.0, 0.4, -0.2])
+    A = _symcpd_full_term(1.2, x, 3)
+    model = JoinModel(SymmetricRankOne(3, 3), 1, DenseSymmetricTarget(A))
+    p0 = (([0.6], copy(x)),)
+    snapshot = deepcopy(p0)
+    for method in (:gn_cg, :gn_dense)
+        limited = symcpd(A, 1; solver = method, p0, maxiter = 0, verbose = false)
+        @test cost(limited) ≈ cost(model, p0)
+        @test iterations(limited) == 0
+        @test !converged(limited)
+        @test solver_info(limited).termination_reason == :maxiter
+        @test solver_info(limited).requested_init == :explicit
+        exact = symcpd(
+            A,
+            1;
+            solver = method,
+            p0 = (([1.2], copy(x)),),
+            maxiter = 0,
+            verbose = false,
+        )
+        @test converged(exact)
+        @test solver_info(exact).termination_reason == :gradient_tolerance
+        @test cost(exact) ≈ 0 atol = 1e-14
+    end
+    @test TensorKitchen._join_cache_point_equal(p0, snapshot)
+end
 
 @testset "SymCPD compressed representation" begin
     indices = symmetric_multiindices(3, 4)
@@ -589,29 +780,30 @@ end
         solver = :gn_cg,
         maxiter = 3,
         damping = damping,
-        cg_tol = 1e-16,
-        adaptive_cg = false,
-        cg_maxiter = 1,
+        inner = InnerSolveOptions(
+            tolerance = RelativeResidualTolerance(1e-16),
+            maxiter = 1,
+        ),
         verbose = false,
     )
     info = solver_info(result)
     @test isfinite(cost(result))
     @test cost(result) < initial_cost
-    @test !isempty(info.cg_converged_history)
-    @test info.cg_failed_count == count(!, info.cg_converged_history)
-    @test info.total_cg_iterations == sum(info.cg_iterations_history)
-    @test info.cg_failed_count > 0
-    @test !info.adaptive_cg
-    @test all(==(1e-16), info.cg_tolerance_history)
-    @test length(info.cg_tolerance_history) == length(info.cg_iterations_history)
-    @test length(info.cg_final_residual_history) == length(info.cg_iterations_history)
-    @test length(info.cg_relative_residual_history) == length(info.cg_iterations_history)
-    @test length(info.cg_termination_history) == length(info.cg_iterations_history)
+    @test !isempty(info.inner.converged)
+    @test info.inner.failed_count == count(!, info.inner.converged)
+    @test info.inner.total_iterations == sum(info.inner.iterations)
+    @test info.inner.failed_count > 0
+    @test info.inner.tolerance_policy isa RelativeResidualTolerance
+    @test all(==(1e-16), info.inner.tolerances)
+    @test length(info.inner.tolerances) == length(info.inner.iterations)
+    @test length(info.inner.final_residuals) == length(info.inner.iterations)
+    @test length(info.inner.relative_residuals) == length(info.inner.iterations)
+    @test length(info.inner.termination_reasons) == length(info.inner.iterations)
     @test all(
         isapprox(
-            info.cg_final_residual_history[k] / info.cg_initial_residual_history[k],
-            info.cg_relative_residual_history[k],
-        ) for k in eachindex(info.cg_iterations_history)
+            info.inner.final_residuals[k] / info.inner.initial_residuals[k],
+            info.inner.relative_residuals[k],
+        ) for k in eachindex(info.inner.iterations)
     )
     trial_count = length(info.damping_history)
     @test trial_count == length(info.predicted_reduction_history)
@@ -652,8 +844,7 @@ end
         maxiter = 2,
         tol = 1e-3,
         damping = 1e8,
-        cg_tol = 1e-12,
-        adaptive_cg = false,
+        inner = InnerSolveOptions(tolerance = RelativeResidualTolerance(1e-12)),
         verbose = false,
     )
     @test solver_info(stalled).termination_reason == :small_step
@@ -709,12 +900,12 @@ end
         @test solver_info(result).matrix_free_normal == (method == :gn_cg)
         if method == :gn_cg
             info = solver_info(result)
-            @test info.adaptive_cg
+            @test info.inner.tolerance_policy isa AdaptiveResidualTolerance
             @test all(
-                tolerance -> info.cg_min_tol <= tolerance <= 1e-2,
-                info.cg_tolerance_history,
+                tolerance -> info.inner.tolerance_policy.minimum <= tolerance <= 1e-2,
+                info.inner.tolerances,
             )
-            @test length(info.cg_tolerance_history) == length(info.cg_converged_history)
+            @test length(info.inner.tolerances) == length(info.inner.converged)
         end
     end
 

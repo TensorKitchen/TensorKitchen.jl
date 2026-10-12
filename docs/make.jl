@@ -17,6 +17,7 @@ makedocs(
         "Advanced guide" => [
             "Overview" => "advanced/index.md",
             "CPD methods" => "advanced/cpd.md",
+            "Symmetric CPD methods" => "advanced/symcpd.md",
             "Tucker methods" => "advanced/tucker.md",
             "BTD methods" => "advanced/btd.md",
             "Optimization methods" => "advanced/optimization.md",

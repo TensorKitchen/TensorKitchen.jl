@@ -14,8 +14,8 @@ Its basic mathematical form is
 where each manifold ``\mathcal M_r`` specifies the allowed structure of one
 component.
 
-If your model is an ordinary CPD or BTD, the specialized [`cpd`](@ref) and
-[`btd`](@ref) functions are usually simpler.
+For an ordinary CPD or BTD model, use the specialized [`cpd`](@ref) or
+[`btd`](@ref) function.
 
 ## Inputs
 
