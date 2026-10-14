@@ -280,7 +280,8 @@ function _solve_gauss_newton(
 
             candidate = try
                 _independent_retract(M, p, step, retraction_method)
-            catch
+            catch error
+                error isa DomainError || rethrow()
                 nothing
             end
             candidate_cost = isnothing(candidate) ? T(Inf) : cost(model, candidate)

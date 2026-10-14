@@ -4,6 +4,7 @@ struct _NormalOnlyGNModel{T<:AbstractFloat,R} <: AbstractDecompositionModel{T}
     solution::Vector{T}
     reference::R
 end
+
 TensorKitchen.manifold(::_NormalOnlyGNModel) = Euclidean(2)
 TensorKitchen.supports_rgrad(::_NormalOnlyGNModel) = true
 TensorKitchen.model_norm2(model::_NormalOnlyGNModel) = model.reference
@@ -153,4 +154,64 @@ end
     @test dense.point ≈ cg.point
     @test dense.point ≈ p0 - rgrad(model, p0) / (4p0[1]^2 + last(info.damping_history))
     @test p0 == [0.1]
+end
+
+struct _BrokenRetractionManifold <: ManifoldsBase.AbstractDecoratorManifold{ManifoldsBase.ℝ} end
+ManifoldsBase.decorated_manifold(::_BrokenRetractionManifold) = Euclidean(1)
+ManifoldsBase.get_forwarding_type(::_BrokenRetractionManifold, f) =
+    ManifoldsBase.SimpleForwardingType()
+ManifoldsBase.get_forwarding_type(::_BrokenRetractionManifold, f, ::Type) =
+    ManifoldsBase.SimpleForwardingType()
+ManifoldsBase.default_retraction_method(::_BrokenRetractionManifold, ::Type) =
+    ManifoldsBase.ExponentialRetraction()
+ManifoldsBase.retract!(
+    ::_BrokenRetractionManifold,
+    q,
+    p,
+    X,
+    ::ManifoldsBase.ExponentialRetraction,
+) = throw(MethodError(:broken_retraction, ()))
+
+struct _BrokenRetractionGNModel <: AbstractDecompositionModel{Float64} end
+TensorKitchen.manifold(::_BrokenRetractionGNModel) = _BrokenRetractionManifold()
+TensorKitchen.supports_rgrad(::_BrokenRetractionGNModel) = true
+TensorKitchen.model_norm2(::_BrokenRetractionGNModel) = nothing
+TensorKitchen.cost(::_BrokenRetractionGNModel, p) = (p[1] - 1)^2 / 2
+TensorKitchen.rgrad(::_BrokenRetractionGNModel, p) = [p[1] - 1]
+TensorKitchen.normal_operator(::_BrokenRetractionGNModel, p, X) = X
+
+@testset "GN retraction errors distinguish domain limits from implementation bugs" begin
+    # Veronese's exponential retraction rejects a radial step through zero.
+    component = SymmetricRankOne(2, 2)
+    M = TensorKitchen.component_manifold(component)
+    component_point = ([0.2], [1.0, 0.0])
+    method = TensorKitchen._solver_retraction_method(M, component_point)
+    @test_throws DomainError TensorKitchen._independent_retract(
+        M,
+        component_point,
+        ([-1.0], zeros(2)),
+        method,
+    )
+    A = [-0.8 0.0; 0.0 0.0]
+    model = JoinModel(component, 1, DenseSymmetricTarget(A))
+    p0 = (component_point,)
+    result = solve(
+        GaussNewtonSolver(),
+        model;
+        p0,
+        maxiter = 1,
+        verbose = false,
+        return_stats = true,
+    )
+    @test result.solver_info.rejected_steps > 0
+    @test result.solver_info.accepted_steps == 1
+    @test result.cost < cost(model, p0)
+
+    @test_throws MethodError solve(
+        GaussNewtonSolver(),
+        _BrokenRetractionGNModel();
+        p0 = [0.0],
+        maxiter = 1,
+        verbose = false,
+    )
 end
