@@ -214,6 +214,13 @@ end
 
 _symcpd_init_label(init::Symbol) = init
 
+_resolve_solver_init(
+    model::JoinModel{T,B},
+    init::Symbol,
+) where {T<:AbstractFloat,B<:SymmetricCPDBackend} = _resolve_symcpd_init(model, init)
+model_norm2(model::JoinModel{T,B}) where {T<:AbstractFloat,B<:SymmetricCPDBackend} =
+    target_norm2(model.backend.target)
+
 function initial_point(
     model::JoinModel{T,B},
     init::Symbol;

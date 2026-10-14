@@ -108,7 +108,7 @@ function _gauss_newton_solver(linear_solver::Symbol; kwargs...)
     end
     return GaussNewtonSolver(;
         linear_solver,
-        inner = _gn_option(kwargs, :inner, _default_symcpd_inner_options()),
+        inner = _gn_option(kwargs, :inner, _default_gauss_newton_inner_options()),
         damping = damping_policy,
     )
 end

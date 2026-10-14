@@ -733,7 +733,7 @@ end
     damping = 1e-3
     gradient = TensorKitchen.rgrad(dense_model, p)
     rhs = TensorKitchen._scale_solver_tangent(gradient, -1.0)
-    cg_step, _, cg_converged, cg_info = TensorKitchen._symcpd_cg(
+    cg_step, _, cg_converged, cg_info = TensorKitchen._gauss_newton_cg(
         dense_model,
         p,
         rhs,

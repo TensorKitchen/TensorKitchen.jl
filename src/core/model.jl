@@ -19,6 +19,9 @@ export AbstractDecompositionModel,
     allocate_residual,
     normal_operator,
     normal_operator!
+
+export model_scalar_type, model_norm2, dense_normal_matrix
+
 """
     AbstractDecompositionModel{T}
 
@@ -33,6 +36,23 @@ Direct Tucker algorithms (`sthosvd`, `thosvd`, `hooi`) are not subtypes of
 `AbstractDecompositionModel`; they follow a separate non-optimization path.
 """
 abstract type AbstractDecompositionModel{T<:AbstractFloat} end
+
+"""Scalar type used for model computations, independent of observation storage."""
+model_scalar_type(::AbstractDecompositionModel{T}) where {T} = T
+
+"""Squared reference norm for objective normalization and relative-error reporting.
+
+The default uses the stored observation. Models without tensor storage may
+override this with a scalar or `nothing`. With `nothing`, solvers retain the
+unnormalized objective and report absolute residual norm in `rel_error`.
+"""
+model_norm2(model::AbstractDecompositionModel) = observation_norm2(tensor(model))
+
+_resolve_solver_init(model::AbstractDecompositionModel, init) = init
+_initialization_label(init::Symbol) = init
+_initialization_label(::PointInit) = :explicit
+_initialization_label(::FunctionInit) = :function
+_initialization_label(init) = nameof(typeof(init))
 
 """Residual coordinates with the ordinary Euclidean inner product.
 
@@ -73,6 +93,8 @@ model_cost_function(model::AbstractDecompositionModel) = (M, p) -> cost(model, p
 model_cost_egrad_functions(model::AbstractDecompositionModel) =
     (model_cost_function(model), model_egrad_function(model))
 model_cost_egrad_functions(model::AbstractDecompositionModel, ::Real) =
+    model_cost_egrad_functions(model)
+model_cost_egrad_functions(model::AbstractDecompositionModel, ::Nothing) =
     model_cost_egrad_functions(model)
 
 model_egrad_function(model::AbstractDecompositionModel) = (M, p) -> egrad(model, p)
@@ -230,6 +252,27 @@ normal_operator(model::AbstractDecompositionModel, p, X) =
 function normal_operator!(Y, model::AbstractDecompositionModel, p, X)
     ManifoldsBase.copyto!(manifold(model), Y, p, normal_operator(model, p, X))
     return Y
+end
+
+"""Materialize the normal action in an orthonormal tangent basis.
+
+This generic fallback is intended for small problems and validation. It only
+requires `normal_operator`, not an explicit residual or Jacobian.
+"""
+function dense_normal_matrix(model::AbstractDecompositionModel, p)
+    M = manifold(model)
+    T = model_scalar_type(model)
+    basis = ManifoldsBase.DefaultOrthonormalBasis()
+    d = manifold_dimension(M)
+    H = Matrix{T}(undef, d, d)
+    coefficients = zeros(T, d)
+    for j = 1:d
+        fill!(coefficients, zero(T))
+        coefficients[j] = one(T)
+        X = ManifoldsBase.get_vector(M, p, coefficients, basis)
+        H[:, j] .= ManifoldsBase.get_coordinates(M, p, normal_operator(model, p, X), basis)
+    end
+    return H
 end
 
 function adjoint_action(model::AbstractDecompositionModel, p, a::AbstractArray; kwargs...)

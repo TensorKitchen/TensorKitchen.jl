@@ -17,6 +17,10 @@ examples.
   stopping criteria, and diagnostics.
 - [Join models](join.md): supported `approx` forms and automatic routing to
   specialized decompositions.
+- [Operator contracts](operator_contracts.md): residual coordinates, metric
+  adjoints, and fused Gauss–Newton normal actions.
+- [LM inner solves](lm.md): tolerance policies, structured-storage adapters,
+  diagnostics, and reproducible comparisons.
 
 The public API reference on each decomposition page remains the source of truth
 for supported keyword arguments and their current defaults.
