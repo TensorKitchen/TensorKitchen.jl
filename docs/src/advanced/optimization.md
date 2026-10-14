@@ -57,9 +57,87 @@ Gauss--Newton step solves
 ```
 
 The damping ``\mu>0`` keeps the system well defined when the local problem is
-poorly conditioned. Levenberg--Marquardt (LM) uses the same residual and
-Jacobian information while adapting its step. These methods require a model
-that supplies residual and Jacobian operations.
+poorly conditioned. Levenberg--Marquardt (LM) uses residual and Jacobian
+operations while adapting its step. GN can consume a gradient and normal
+action directly, without storing residuals or Jacobians.
+
+## Damped Gauss--Newton details
+
+Run damped Riemannian Gauss--Newton on a decomposition model. The
+step solves
+
+```math
+(J(p)^*J(p)+\mu I)\eta=-\operatorname{grad}f(p).
+```
+
+`linear_solver=:cg` uses the analytic matrix-free normal action and tangent
+conjugate gradients. `linear_solver=:dense` constructs the small intrinsic
+normal matrix in an orthonormal tangent basis and solves it directly; it is a
+reference/benchmark option, not the scalable path.
+The dense matrix is assembled once at each outer point and reused across
+rejected trials; each trial applies its own diagonal damping shift to a copy.
+
+`GaussNewtonSolver()` defaults to `:cg`, adaptive inner residual tolerance with
+minimum `1e-10`, and initial damping `1e-6`. The damping policy allows at most
+eight trials per outer iteration. `solve` defaults to `maxiter=100` and
+`tol=1e-8`; `grad_tol` defaults to `tol`. Only `grad_tol` establishes
+convergence. A small accepted step ends the run with reason `:small_step`.
+GN uses the unnormalized objective and requires `gradient_mode=:riemannian`.
+It currently rejects objective normalization, iteration callbacks, and a
+custom vector transport. When passing a solver object to `symcpd`, set its
+inner options and damping on that object rather than repeating those keywords.
+
+For a trial step `eta`, the Levenberg--Marquardt acceptance ratio is
+
+```math
+\operatorname{pred}(\eta)
+=-\langle g,\eta\rangle
+-\tfrac12\langle\eta,J^*J\eta\rangle,
+\qquad
+\rho=\frac{f(p)-f(R_p(\eta))}{\operatorname{pred}(\eta)}.
+```
+
+A trial is accepted only when its predicted reduction is positive and `rho`
+exceeds `damping.acceptance_threshold`. Poor trials increase the damping and good trials
+decrease it. The predicted reduction intentionally uses the undamped
+Gauss--Newton model; damping controls the step rather than redefining the
+reported model agreement.
+
+With `inner=InnerSolveOptions(tolerance=AdaptiveResidualTolerance(...))`, the
+inner relative residual tolerance is the forcing term
+
+```math
+\xi_k=\operatorname{clamp}
+\left(c\|\operatorname{grad}f(p_k)\|^\theta,
+\xi_{\min},\xi_{\max}\right),
+```
+
+where `maximum` is ``\xi_{\max}``, `minimum` is ``\xi_{\min}``, and `scale`
+and `power` define the forcing schedule. Thus early linear systems may be
+solved approximately while the requested accuracy tightens near a stationary
+point. `RelativeResidualTolerance` selects a fixed relative threshold and
+`AbsoluteResidualTolerance` selects an absolute residual threshold.
+In finite precision, both forcing bounds are at least `eps(T)`.
+
+This relative-residual forcing condition follows R. S. Dembo, S. C. Eisenstat,
+and T. Steihaug, "Inexact Newton Methods," *SIAM Journal on Numerical
+Analysis* 19(2) (1982), 400--408, doi:10.1137/0719025; the power-law schedule
+above is TensorKitchen's bounded specialization for the damped GN system.
+
+An inexact CG direction may be used before the inner residual reaches its
+tolerance. `solver_info.inner` records the convergence flag, iteration count,
+requested tolerance, achieved residual, and termination reason for every CG
+trial. Dense solves record their residuals and status, with iteration counts
+and tolerances set to `nothing`. `solve_count` includes every attempted linear
+solve, including rejected damping trials. Outer histories record damping,
+predicted and actual reduction, acceptance ratio, and step acceptance.
+
+The product-of-Veronese Riemannian GN formulation follows Khouja, Khalil, and
+Mourrain (2022), doi:10.1016/j.laa.2021.12.008. Their published TensorDec
+implementation assembles a dense normal matrix. The `:cg` option instead uses
+the operator/Krylov pattern established for tensor GN by Sorber, Van Barel, and
+De Lathauwer (2013), doi:10.1137/120868323, and Singh et al. (2021),
+doi:10.1137/20M1344561.
 
 ## Solver summary
 
@@ -128,6 +206,7 @@ RGDFixedSolver
 RCGSolver
 LBFGSSolver
 LMSolver
+GaussNewtonSolver
 ```
 
 ## Nonnegative CPD

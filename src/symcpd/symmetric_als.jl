@@ -91,6 +91,7 @@ function NormalizedCLSInit(;
 end
 
 _symcpd_init_label(::NormalizedCLSInit) = :normalized_cls
+_initialization_label(::NormalizedCLSInit) = :normalized_cls
 _resolve_symcpd_init(
     ::JoinModel{T,B},
     init::NormalizedCLSInit,

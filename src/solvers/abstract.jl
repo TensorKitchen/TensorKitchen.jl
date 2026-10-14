@@ -410,13 +410,39 @@ function _model_gradient_closure(
 end
 
 """
-    _prepare_solver_problem(model; init, gradient_mode)
+    _prepare_model_point(model; init, p0, observation_norm2_cache)
 
-Build shared solver inputs for manifold-based optimizers:
+Build shared model inputs for manifold-based optimizers:
 - manifold and initial point
-- cost/egrad/selected gradient closures
+- computation type and initialization metadata
 - target norm squared used for relative-error reporting
 """
+function _prepare_model_point(
+    model::AbstractDecompositionModel;
+    init = :random,
+    p0 = nothing,
+    verbose::Bool = false,
+    observation_norm2_cache = nothing,
+)
+    M = manifold(model)
+    isnothing(M) &&
+        throw(ArgumentError("Solver requires a manifold. Model $(typeof(model)) has none."))
+
+    requested_init = isnothing(p0) ? _initialization_label(init) : :explicit
+    resolved = isnothing(p0) ? _resolve_solver_init(model, init) : nothing
+    resolved_init = isnothing(p0) ? _initialization_label(resolved) : :explicit
+    p0_local = isnothing(p0) ? initial_point(model, resolved; verbose) : p0
+    T = model_scalar_type(model)
+    reference =
+        isnothing(observation_norm2_cache) ? model_norm2(model) : observation_norm2_cache
+    normA2 = isnothing(reference) ? nothing : T(reference)
+    isnothing(normA2) ||
+        (isfinite(normA2) && normA2 >= 0) ||
+        throw(ArgumentError("The model reference norm must be finite and nonnegative."))
+    return (; model, M, p0 = p0_local, T, normA2, requested_init, resolved_init)
+end
+
+"""Extend prepared model inputs with cost and gradient closures."""
 function _prepare_solver_problem(
     model::AbstractDecompositionModel;
     init = :random,
@@ -425,17 +451,8 @@ function _prepare_solver_problem(
     verbose::Bool = false,
     observation_norm2_cache = nothing,
 )
-    M = manifold(model)
-    isnothing(M) &&
-        throw(ArgumentError("Solver requires a manifold. Model $(typeof(model)) has none."))
-
-    p0_local = isnothing(p0) ? initial_point(model, init; verbose) : p0
-
-    A = tensor(model)
-    T = eltype(A)
-    normA2 =
-        isnothing(observation_norm2_cache) ? observation_norm2(A) :
-        T(observation_norm2_cache)
+    prepared = _prepare_model_point(model; init, p0, verbose, observation_norm2_cache)
+    normA2 = prepared.normA2
     model_cost, model_egrad = model_cost_egrad_functions(model, normA2)
     model_rgrad = supports_rgrad(model) ? model_rgrad_function(model; model_egrad) : nothing
     model_grad = _model_gradient_closure(
@@ -445,13 +462,13 @@ function _prepare_solver_problem(
         model_rgrad,
     )
 
-    return (
-        model = model,
-        M = M,
-        p0 = p0_local,
-        model_cost = model_cost,
-        model_egrad = model_egrad,
-        model_grad = model_grad,
-        normA2 = normA2,
+    return merge(
+        prepared,
+        (
+            model_cost = model_cost,
+            model_egrad = model_egrad,
+            model_grad = model_grad,
+            normA2 = normA2,
+        ),
     )
 end

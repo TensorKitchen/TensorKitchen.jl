@@ -22,6 +22,8 @@ makedocs(
             "BTD methods" => "advanced/btd.md",
             "Optimization methods" => "advanced/optimization.md",
             "Join models" => "advanced/join.md",
+            "Operator contracts" => "advanced/operator_contracts.md",
+            "LM inner solves" => "advanced/lm.md",
         ],
         "References" => "references.md",
     ],
