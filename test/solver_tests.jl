@@ -1,3 +1,23 @@
+@testset "Public solver dispatch rejects unused keywords" begin
+    A = _test_randn(1601, 3, 2, 2)
+    model = JoinModel(A, 1; geometry = :canonical)
+    @test_throws ArgumentError approx(
+        model;
+        solver = :rgd,
+        maxiter = 0,
+        verbose = false,
+        misspelled_option = 1,
+    )
+    configured = approx(
+        model;
+        solver = :rcg,
+        coefficient = :hager_zhang,
+        maxiter = 0,
+        verbose = false,
+    )
+    @test configured.solver == :rcg
+end
+
 @testset "Tangent CG solver contract" begin
     for T in (Float32, Float64)
         M = Euclidean(2)

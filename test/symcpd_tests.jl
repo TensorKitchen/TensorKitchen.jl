@@ -318,6 +318,12 @@ end
 end
 
 @testset "SymCPD exact weight refit" begin
+    solution32, info32 =
+        TensorKitchen._symcpd_psd_solve(Float32[2 0; 0 3], Float32[4, 9]; rtol = 1.0f-5)
+    @test eltype(solution32) === Float32
+    @test solution32 ≈ Float32[2, 3]
+    @test info32.damping isa Float32
+
     x = normalize([1.0, 0.2, -0.1])
     y = normalize([-0.2, 0.5, 1.0])
     X = hcat(x, y)

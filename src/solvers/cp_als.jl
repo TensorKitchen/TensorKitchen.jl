@@ -562,5 +562,6 @@ function solve(
         iterations = out.iterations,
         converged = out.converged,
         solver = :cp_als,
+        solver_info = (;),
     ) : out.point
 end

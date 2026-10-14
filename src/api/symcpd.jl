@@ -297,8 +297,7 @@ function symcpd(
             damping,
             damping_increase,
             damping_decrease,
-            inner = solver == :lm && isnothing(inner) ?
-                    _default_gauss_newton_inner_options() : inner,
+            inner,
             max_damping_trials,
             acceptance_ratio,
             poor_step_ratio,

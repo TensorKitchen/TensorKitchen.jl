@@ -186,6 +186,35 @@ end
     @test lazy_rgd_result.solver == :rgd
     @test isfinite(lazy_rgd_result.rel_error)
 
+    zero_budget = btd(
+        data,
+        2,
+        ranks;
+        solver = :rgd_fixed,
+        init = PointInit(deepcopy(shared_point)),
+        maxiter = 0,
+        verbose = false,
+    )
+    @test zero_budget.iterations == 0
+    @test !hasproperty(zero_budget.solver_info, :btd_als_polish_applied)
+
+    polished = btd(
+        data,
+        2,
+        ranks;
+        solver = :rgd_fixed,
+        init = PointInit(deepcopy(shared_point)),
+        maxiter = 0,
+        btd_als_polish_maxiter = 2,
+        tol = 0.0,
+        verbose = false,
+    )
+    @test polished.solver_info.btd_als_polish_applied
+    @test polished.converged == (
+        polished.solver_info.btd_refinement_converged ||
+        polished.solver_info.btd_als_polish_converged
+    )
+
     for solver_name in (:rcg, :lbfgs, :rgd_fixed, :btd_tsd)
         solver_result = btd(
             Int16.(data),
