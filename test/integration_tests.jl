@@ -45,6 +45,32 @@
     @test cpd_lbfgs_object isa CPDResult
     @test cpd_lbfgs_object.solver == :lbfgs
     @test cpd_lbfgs_object.solver_info.memory_size == 3
+    @test_throws ArgumentError cpd(
+        A,
+        2;
+        solver = LBFGSSolver(memory_size = 3),
+        memory_size = 5,
+        maxiter = 0,
+        verbose = false,
+    )
+    @test_throws ArgumentError nncpd(
+        abs.(A),
+        2;
+        solver = RCGSolver(),
+        coefficient = :fletcher_reeves,
+        maxiter = 0,
+        verbose = false,
+    )
+    configured_nncpd = cpd(
+        abs.(A),
+        2;
+        nonnegative = true,
+        solver = :rcg,
+        coefficient = :fletcher_reeves,
+        maxiter = 0,
+        verbose = false,
+    )
+    @test configured_nncpd.solver_info.rcg_coefficient == :fletcher_reeves
 
     cpd_als_object =
         cpd(A, 2; solver = ALSSolver(), init = :tucker, maxiter = 1, verbose = false)
@@ -425,13 +451,21 @@ end
         solver = BTDTSDSolver(stepsize = 1.0),
         init = :hosvd_multistart,
         maxiter = 1,
-        schedule = :cyclic,
         btd_als_polish_maxiter = 0,
         tol = 1e-6,
         verbose = false,
     )
     @test res_btd_tsd_object isa BTDResult
     @test res_btd_tsd_object.solver == :btd_tsd
+    @test_throws ArgumentError btd(
+        A,
+        2,
+        (2, 2, 2);
+        solver = BTDTSDSolver(stepsize = 1.0),
+        schedule = :cyclic,
+        maxiter = 0,
+        verbose = false,
+    )
     @test_throws ArgumentError btd(
         A,
         2,

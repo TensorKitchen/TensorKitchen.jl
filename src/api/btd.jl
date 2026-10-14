@@ -320,6 +320,7 @@ function btd(
         prepare_tensor(A; compute_type, materialize, block_length = conversion_block_length)
     T = eltype(A_prepared)
     solver_obj = _solver_object(solver, stepsize; kwargs...)
+    solver_kwargs = _remaining_solver_kwargs(kwargs, solver_obj)
     solver_sym = _btd_solver_symbol(solver_obj)
     init_resolved = _resolve_btd_init(A_prepared, init, solver_obj)
     warm_init_resolved = _resolve_btd_warm_init(A_prepared, warm_init)
@@ -391,7 +392,7 @@ function btd(
             restart_block_maxiter = restart_block_maxiter,
             restart_seed = restart_seed,
             observation_norm2_cache = normA2,
-            kwargs...,
+            solver_kwargs...,
         )
     end
     if short_circuited[]

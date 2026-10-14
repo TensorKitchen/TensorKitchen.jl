@@ -8,14 +8,27 @@
         verbose = false,
         misspelled_option = 1,
     )
+    @test_throws ArgumentError TensorKitchen._solver_object(
+        RCGSolver(),
+        1.0;
+        coefficient = :hager_zhang,
+    )
+    @test_throws ArgumentError approx(
+        model;
+        solver = RCGSolver(),
+        coefficient = :fletcher_reeves,
+        maxiter = 0,
+        verbose = false,
+    )
     configured = approx(
         model;
         solver = :rcg,
-        coefficient = :hager_zhang,
+        coefficient = :fletcher_reeves,
         maxiter = 0,
         verbose = false,
     )
     @test configured.solver == :rcg
+    @test configured.solver_info.rcg_coefficient == :fletcher_reeves
 end
 
 @testset "Tangent CG solver contract" begin

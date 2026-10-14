@@ -183,6 +183,15 @@ end
     lm_default = symcpd(A, 1; p0, solver = :lm, maxiter = 0, verbose = false)
     @test solver_info(lm_default).inner.tolerance_policy.minimum ==
           InnerSolveOptions().tolerance.minimum
+    @test_throws ArgumentError symcpd(
+        A,
+        1;
+        p0,
+        solver = LMSolver(),
+        inner = InnerSolveOptions(),
+        maxiter = 0,
+        verbose = false,
+    )
     gn_inner = InnerSolveOptions(tolerance = RelativeResidualTolerance(1e-3), maxiter = 1)
     gn_result =
         symcpd(A, 1; p0, solver = :gn_cg, inner = gn_inner, maxiter = 1, verbose = false)

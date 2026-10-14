@@ -131,6 +131,7 @@ function nncpd(
         ),
     )
     solver_obj = _solver_object(solver, stepsize; kwargs...)
+    solver_kwargs = _remaining_solver_kwargs(kwargs, solver_obj)
     geometry_eff = _nncpd_effective_geometry(geometry, solver_obj)
     return _cpd_impl(
         A_prepared,
@@ -153,6 +154,6 @@ function nncpd(
         verbose = verbose,
         vector_transport_method = vector_transport_method,
         pullback_eps = pullback_eps,
-        kwargs...,
+        solver_kwargs...,
     )
 end

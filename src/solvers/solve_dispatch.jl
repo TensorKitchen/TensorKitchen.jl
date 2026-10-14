@@ -12,7 +12,18 @@ function _solver_object(solver::Symbol, stepsize::Real; kwargs...)
     return _solver_object(Val(solver), stepsize; kwargs...)
 end
 
-_solver_object(solver::AbstractSolver, ::Real; kwargs...) = solver
+function _solver_object(solver::AbstractSolver, ::Real; kwargs...)
+    conflicts = [
+        key for key in _solver_configuration_keys(solver) if
+        haskey(kwargs, key) && !(key == :inner && isnothing(kwargs[key]))
+    ]
+    isempty(conflicts) || throw(
+        ArgumentError(
+            "Configure $conflicts on $(typeof(solver)) instead of passing separate keywords.",
+        ),
+    )
+    return solver
+end
 
 _solver_object(::Val{:als}, ::Real; kwargs...) = ALSSolver()
 _solver_object(::Val{:cls}, ::Real; kwargs...) = SymmetricCLS(
@@ -216,6 +227,18 @@ _ro_solver_option_keys(::BTDTSDSolver) = (
     :armijo_sufficient_decrease,
     :armijo_alpha_min,
 )
+
+_solver_configuration_keys(::AbstractSolver) = ()
+_solver_configuration_keys(solver::AbstractROSolver) = _ro_solver_option_keys(solver)
+_solver_configuration_keys(::GaussNewtonSolver) = _GN_OPTION_KEYS
+_solver_configuration_keys(::RALSSolver) = (:samples, :mix)
+_solver_configuration_keys(::SymmetricCLS) =
+    (:cls_damping, :cls_pinv_rtol, :cls_weight_pinv_rtol, :cls_patience)
+
+function _remaining_solver_kwargs(kwargs, solver::AbstractSolver)
+    configuration = _solver_configuration_keys(solver)
+    return (; (key => value for (key, value) in pairs(kwargs) if key ∉ configuration)...)
+end
 
 function _ro_execution_kwargs(solver::AbstractROSolver, kwargs)
     configuration = _ro_solver_option_keys(solver)
