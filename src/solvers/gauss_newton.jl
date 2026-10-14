@@ -212,9 +212,9 @@ function _solve_gauss_newton(
     tolerance = T(tol)
     gradient_tolerance = T(grad_tol)
     isfinite(tolerance) &&
-        tolerance > 0 &&
-        isfinite(gradient_tolerance) &&
-        gradient_tolerance > 0 ||
+    tolerance > 0 &&
+    isfinite(gradient_tolerance) &&
+    gradient_tolerance > 0 ||
         throw(ArgumentError("Stopping tolerances must be positive and finite in $T."))
     history = _GNDiagnostics(T, linear_solver == :cg)
     iterations_done = 0
