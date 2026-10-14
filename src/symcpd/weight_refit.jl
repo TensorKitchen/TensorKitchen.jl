@@ -9,7 +9,7 @@ function _symcpd_psd_solve(K, rhs; damping::Real = 0, rtol::Real, atol::Real = 0
     atol >= 0 || throw(ArgumentError("atol must be nonnegative."))
     size(K, 1) == size(K, 2) || throw(DimensionMismatch("K must be square."))
     size(K, 1) == size(rhs, 1) || throw(DimensionMismatch("K and rhs disagree."))
-    T = promote_type(float(eltype(K)), float(eltype(rhs)), typeof(float(damping)))
+    T = promote_type(float(eltype(K)), float(eltype(rhs)))
     F = eigen(Symmetric(Matrix{T}(K)))
     values = max.(F.values, zero(T))
     sigma_max = isempty(values) ? zero(T) : maximum(values)

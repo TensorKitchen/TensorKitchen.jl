@@ -30,6 +30,8 @@ function _polish_btd_with_als(
         (
             btd_als_polish_iters = iterations(als_res),
             btd_als_polish_applied = true,
+            btd_refinement_converged = converged(result),
+            btd_als_polish_converged = converged(als_res),
             btd_manifold_solver = manifold_solver,
         ),
     )
@@ -39,7 +41,7 @@ function _polish_btd_with_als(
         rel_error = rel_error(als_res),
         grad_norm = grad_norm(als_res),
         iterations = iterations(result) + iterations(als_res),
-        converged = converged(als_res),
+        converged = converged(result) || converged(als_res),
         solver = solver(result),
         solver_info = si,
     )
@@ -211,6 +213,8 @@ Approximate `A` as a sum of Tucker blocks.
 Returns a [`BTDResult`](@ref). Use `blocks` to inspect the fitted Tucker terms,
 `reconstruct` to rebuild the approximation, and
 `rel_error(A, result)` to measure reconstruction error.
+If an improving ALS polish is accepted, `converged` reports whether either
+refinement stage converged. `solver_info` retains both stage-specific flags.
 
 # Common options
 
@@ -246,8 +250,9 @@ Returns a [`BTDResult`](@ref). Use `blocks` to inspect the fitted Tucker terms,
 - `block_method=:hooi` and `block_maxiter=30` configure direct BTD-ALS block
   updates.
 - `btd_als_polish_maxiter=nothing` uses the pipeline's automatic polishing
-  budget (`clamp(maxiter ÷ 2, 20, 500)` for non-ALS solvers); an integer sets it
-  explicitly and `0` disables polishing.
+  budget (`clamp(maxiter ÷ 2, 20, 500)` for positive `maxiter` with non-ALS
+  solvers). With `maxiter=0`, automatic polishing is disabled. An integer sets
+  the budget explicitly; `0` disables polishing.
 
 # Stagnation restarts
 
@@ -315,6 +320,7 @@ function btd(
         prepare_tensor(A; compute_type, materialize, block_length = conversion_block_length)
     T = eltype(A_prepared)
     solver_obj = _solver_object(solver, stepsize; kwargs...)
+    solver_kwargs = _remaining_solver_kwargs(kwargs, solver_obj)
     solver_sym = _btd_solver_symbol(solver_obj)
     init_resolved = _resolve_btd_init(A_prepared, init, solver_obj)
     warm_init_resolved = _resolve_btd_warm_init(A_prepared, warm_init)
@@ -386,7 +392,7 @@ function btd(
             restart_block_maxiter = restart_block_maxiter,
             restart_seed = restart_seed,
             observation_norm2_cache = normA2,
-            kwargs...,
+            solver_kwargs...,
         )
     end
     if short_circuited[]
@@ -396,7 +402,7 @@ function btd(
         isempty(propertynames(warm_info)) ? result :
         _merge_btd_solver_info(result, warm_info)
     polish_n = if btd_als_polish_maxiter === nothing
-        solver_sym == :als ? 0 : clamp(maxiter ÷ 2, 20, 500)
+        solver_sym == :als || maxiter == 0 ? 0 : clamp(maxiter ÷ 2, 20, 500)
     else
         btd_als_polish_maxiter
     end

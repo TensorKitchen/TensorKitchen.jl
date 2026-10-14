@@ -12,7 +12,18 @@ function _solver_object(solver::Symbol, stepsize::Real; kwargs...)
     return _solver_object(Val(solver), stepsize; kwargs...)
 end
 
-_solver_object(solver::AbstractSolver, ::Real; kwargs...) = solver
+function _solver_object(solver::AbstractSolver, ::Real; kwargs...)
+    conflicts = [
+        key for key in _solver_configuration_keys(solver) if
+        haskey(kwargs, key) && !(key == :inner && isnothing(kwargs[key]))
+    ]
+    isempty(conflicts) || throw(
+        ArgumentError(
+            "Configure $conflicts on $(typeof(solver)) instead of passing separate keywords.",
+        ),
+    )
+    return solver
+end
 
 _solver_object(::Val{:als}, ::Real; kwargs...) = ALSSolver()
 _solver_object(::Val{:cls}, ::Real; kwargs...) = SymmetricCLS(
@@ -175,6 +186,78 @@ function _solve_with_solver(
     )
 end
 
+const _RO_PIPELINE_OPTION_KEYS = (
+    :refinement_verbose,
+    :nonnegative,
+    :block_method,
+    :block_maxiter,
+    :max_stagnation_restarts,
+    :stagnation_rel_error,
+    :restart_candidates,
+    :restart_screening_steps,
+    :restart_block_maxiter,
+    :restart_seed,
+)
+
+_ro_solver_option_keys(::AbstractROSolver) = ()
+_ro_solver_option_keys(::RGDSolver) = (:armijo_alpha_min,)
+_ro_solver_option_keys(::RCGSolver) = (
+    :coefficient,
+    :restart,
+    :restart_threshold,
+    :sufficient_descent_kappa,
+    :denom_threshold,
+    :beale_restart,
+)
+_ro_solver_option_keys(::LBFGSSolver) =
+    (:memory_size, :cautious_update, :initial_scale, :linesearch, :preconditioner)
+_ro_solver_option_keys(::LMSolver) = (
+    :η,
+    :damping_term_min,
+    :β,
+    :expect_zero_residual,
+    :inner,
+    :diagnostics,
+    :damping_reduction_threshold,
+)
+_ro_solver_option_keys(::BTDTSDSolver) = (
+    :schedule,
+    :block_repeats,
+    :armijo_contraction,
+    :armijo_sufficient_decrease,
+    :armijo_alpha_min,
+)
+
+_solver_configuration_keys(::AbstractSolver) = ()
+_solver_configuration_keys(solver::AbstractROSolver) = _ro_solver_option_keys(solver)
+_solver_configuration_keys(::GaussNewtonSolver) = _GN_OPTION_KEYS
+_solver_configuration_keys(::RALSSolver) = (:samples, :mix)
+_solver_configuration_keys(::SymmetricCLS) =
+    (:cls_damping, :cls_pinv_rtol, :cls_weight_pinv_rtol, :cls_patience)
+
+function _remaining_solver_kwargs(kwargs, solver::AbstractSolver)
+    configuration = _solver_configuration_keys(solver)
+    return (; (key => value for (key, value) in pairs(kwargs) if key ∉ configuration)...)
+end
+
+function _ro_execution_kwargs(solver::AbstractROSolver, kwargs)
+    configuration = _ro_solver_option_keys(solver)
+    execution = (;
+        (
+            key => value for (key, value) in pairs(kwargs) if key ∉ configuration &&
+                key ∉ _RO_PIPELINE_OPTION_KEYS &&
+                !(key ∈ _GN_OPTION_KEYS && isnothing(value))
+        )...,
+    )
+    if solver isa
+       Union{RGDSolver,RGDFixedSolver,RCGSolver,LBFGSSolver,LMSolver,BTDTSDSolver}
+        isempty(execution) || throw(
+            ArgumentError("Unsupported $(typeof(solver)) keywords $(keys(execution))."),
+        )
+    end
+    return execution
+end
+
 function _solve_with_solver(
     solver_obj::AbstractROSolver,
     model;
@@ -192,6 +275,7 @@ function _solve_with_solver(
     observation_norm2_cache = nothing,
     kwargs...,
 )
+    execution = _ro_execution_kwargs(solver_obj, kwargs)
     return solve(
         solver_obj,
         model;
@@ -208,6 +292,7 @@ function _solve_with_solver(
         normalized_objective,
         iteration_callbacks,
         observation_norm2_cache,
+        execution...,
     )
 end
 

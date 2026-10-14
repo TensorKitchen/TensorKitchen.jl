@@ -976,6 +976,7 @@ function _cpd_impl(
     )
 
     solver_obj = _solver_object(solver, stepsize; kwargs...)
+    solver_kwargs = _remaining_solver_kwargs(kwargs, solver_obj)
     init_eff = _cpd_effective_init(init, solver_obj, warm_steps, warm_init)
     geometry_eff = _is_native_rankr_geometry(geometry) ? :native : geometry
     pullback_eps_eff = _pullback_eps_value(T, pullback_eps)
@@ -1026,7 +1027,7 @@ function _cpd_impl(
             component_trace,
             nonnegative,
             observation_norm2_cache = normA2_cache,
-            kwargs...,
+            solver_kwargs...,
         )
     end
 
@@ -1177,6 +1178,7 @@ function cpd(
         # Align effective defaults with nncpd() on the nonnegative route.
         stepsize_nn = isnothing(stepsize) ? 0.01 : stepsize
         solver_obj = _solver_object(solver, stepsize_nn; kwargs...)
+        solver_kwargs = _remaining_solver_kwargs(kwargs, solver_obj)
         init_nn = _cpd_nonnegative_init(init_prepared)
         warm_steps_nn = warm_steps
         geometry_nn = _cpd_nonnegative_geometry(solver_obj, geometry)
@@ -1201,7 +1203,7 @@ function cpd(
             component_trace = component_trace,
             verbose = verbose,
             vector_transport_method = vector_transport_method,
-            kwargs...,
+            solver_kwargs...,
         )
     end
     stepsize_eff = isnothing(stepsize) ? 1.0 : stepsize

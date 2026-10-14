@@ -272,6 +272,15 @@ end
         verbose = false,
     )
     dense_cp = cpd(dense, 2; solver = :als, p0 = initial, maxiter = 2, verbose = false)
+    als_stats = solve(
+        ALSSolver(),
+        JoinModel(dense, 2; geometry = :canonical);
+        init = :random,
+        maxiter = 0,
+        verbose = false,
+        return_stats = true,
+    )
+    @test als_stats.solver_info == (;)
     @test eltype(weights(lazy_cp)) === Float32
     @test weights(lazy_cp) ≈ weights(dense_cp) rtol = 2.0f-5 atol = 2.0f-5
     @test all(
